@@ -1,0 +1,25 @@
+{
+  "name": "Island Hydroseeding Ltd — Internal Ops",
+  "short_name": "IH Ops",
+  "description": "Internal operations — Island Hydroseeding Ltd",
+  "theme_color": "#b23438",
+  "background_color": "#f6f4f4",
+  "display": "standalone",
+  "orientation": "any",
+  "start_url": "/",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/logo-mark.png",
+      "sizes": "300x300",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo-mark.png",
+      "sizes": "300x300",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
