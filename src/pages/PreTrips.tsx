@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, ClipboardCheck, ArrowLeft, Search, Truck, LifeBuoy, Camera, ImageIcon } from 'lucide-react';
+import { toast } from 'sonner';
 import { formatInVancouver } from '../lib/vancouverTime';
+import { compressDataUrl } from '../lib/compressImage';
 
 type PreTripType = 'Truck' | 'Trailer';
 
@@ -20,8 +22,18 @@ type PreTripLog = {
 const INSPECTION_VALUES = ['Pass', 'Fail', 'N/A'] as const;
 
 const STORAGE_KEY = 'preTripLogs_v2';
+const MAX_PHOTOS = 24;
 
 type PhotoEntry = { id: string; dataUrl: string };
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(new Error('read'));
+    r.readAsDataURL(file);
+  });
+}
 
 function normalizeLogs(raw: unknown): PreTripLog[] {
   if (!Array.isArray(raw)) return [];
@@ -42,9 +54,15 @@ export default function PreTrips() {
   const [photoEntries, setPhotoEntries] = useState<PhotoEntry[]>([]);
   const [photoError, setPhotoError] = useState('');
 
+  const photoSectionRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) setLogs(normalizeLogs(JSON.parse(saved)));
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) setLogs(normalizeLogs(JSON.parse(saved)));
+    } catch {
+      setLogs([]);
+    }
   }, []);
 
   const openNewInspection = () => {
@@ -69,27 +87,30 @@ export default function PreTrips() {
       e.target.value = '';
       return;
     }
-    void Promise.all(
-      files.map(
-        (file) =>
-          new Promise<PhotoEntry>((resolve, reject) => {
-            const r = new FileReader();
-            r.onload = () =>
-              resolve({
-                id: Math.random().toString(36).slice(2, 11),
-                dataUrl: String(r.result),
-              });
-            r.onerror = () => reject(new Error('read failed'));
-            r.readAsDataURL(file);
-          })
-      )
-    )
-      .then((entries) => {
-        setPhotoEntries((prev) => [...prev, ...entries]);
+    void (async () => {
+      try {
+        const built: PhotoEntry[] = [];
+        for (const file of files) {
+          const raw = await readFileAsDataUrl(file);
+          const dataUrl = await compressDataUrl(raw).catch(() => raw);
+          built.push({ id: Math.random().toString(36).slice(2, 11), dataUrl });
+        }
+        setPhotoEntries((prev) => {
+          const room = Math.max(0, MAX_PHOTOS - prev.length);
+          const add = built.slice(0, room);
+          if (built.length > room) {
+            toast('Photo limit', {
+              description: `Up to ${MAX_PHOTOS} photos per inspection. Extra files were skipped.`,
+            });
+          }
+          return [...prev, ...add];
+        });
         setPhotoError('');
-      })
-      .catch(() => setPhotoError('Could not read one or more images.'));
-    e.target.value = '';
+      } catch {
+        setPhotoError('Could not read one or more images.');
+      }
+      e.target.value = '';
+    })();
   };
 
   const removePhoto = (id: string) => {
@@ -97,23 +118,25 @@ export default function PreTrips() {
     setPhotoError('');
   };
 
-  const handleSave = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const saveInspection = (form: HTMLFormElement) => {
     if (photoEntries.length === 0) {
       setPhotoError(
         formType === 'Truck'
           ? 'Add at least one photo of the truck before submitting.'
           : 'Add at least one photo of the trailer before submitting.'
       );
+      photoSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
 
-    const formData = new FormData(e.currentTarget);
+    const formData = new FormData(form);
 
     let hasFail = false;
-    for (const [, value] of formData.entries()) {
-      if (typeof value === 'string' && value.includes('Fail')) {
+    for (const [key, value] of formData.entries()) {
+      if (key === 'remarks') continue;
+      if (typeof value === 'string' && value === 'Fail') {
         hasFail = true;
+        break;
       }
     }
 
@@ -130,11 +153,34 @@ export default function PreTrips() {
     };
 
     const updatedLogs = [newLog, ...logs];
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedLogs));
+    } catch {
+      toast.error('Could not save inspection', {
+        description: 'Storage is full or unavailable. Remove a few photos and try again.',
+      });
+      return;
+    }
+
     setLogs(updatedLogs);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedLogs));
     setPhotoEntries([]);
     setPhotoError('');
     setIsFormOpen(false);
+    toast.success('Inspection saved');
+  };
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      requestAnimationFrame(() => {
+        const inv = form.querySelector(':invalid') as HTMLElement | null;
+        inv?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+      return;
+    }
+    saveInspection(form);
   };
 
   /** Pass / Fail / N/A — native vertical radios; first option carries `required` for the group. */
@@ -200,7 +246,7 @@ export default function PreTrips() {
             </div>
           </div>
 
-          <form onSubmit={handleSave} className="pretrip-form">
+          <form onSubmit={handleSubmit} className="pretrip-form" noValidate>
             <div className="pretrip-check-row pretrip-check-row--flush">
               <fieldset className="pretrip-fieldset pretrip-type-radios">
                 <legend className="pretrip-fieldset-legend">Unit type</legend>
@@ -281,7 +327,7 @@ export default function PreTrips() {
             </div>
 
             <h3 className="pretrip-section-title">Vehicle photos (required)</h3>
-            <div className="pretrip-photo-section">
+            <div className="pretrip-photo-section" ref={photoSectionRef}>
               <p className="text-secondary text-sm" style={{ margin: 0 }}>
                 Upload one or more clear photos of this {formType.toLowerCase()}. Submission is blocked until at least one
                 photo is added.
