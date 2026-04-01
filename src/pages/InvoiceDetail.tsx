@@ -1,12 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import type {
-  Invoice,
-  InvoiceLineItem,
-  InvoicePayment,
-  InvoiceBundle,
-  InvoiceStatus,
-} from '@/lib/invoicesTypes';
+import type { InvoiceStatus } from '@/lib/invoicesTypes';
 import { useInvoiceDetail, useInvoicesMutations } from '@/hooks/useInvoices';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,7 +15,6 @@ import {
   CheckCircle,
   Plus,
   Download,
-  DollarSign,
 } from 'lucide-react';
 
 const STATUS_COLORS: Record<InvoiceStatus, 'default' | 'secondary' | 'outline'> =
@@ -98,7 +91,7 @@ export default function InvoiceDetail() {
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const result = await mutations.createInvoice.mutateAsync(createFormData);
+      const result = await mutations.createInvoice.mutateAsync({ ...createFormData });
       navigate(`/invoices/${result.invoice.id}`);
     } catch (err) {
       console.error('Failed to create invoice:', err);
@@ -109,8 +102,8 @@ export default function InvoiceDetail() {
     if (!bundle) return;
     try {
       await mutations.updateInvoice.mutateAsync({
-        invoiceId: bundle.invoice.id,
-        data: { notes },
+        id: bundle.invoice.id,
+        notes,
       });
       setEditingNotes(false);
     } catch (err) {
@@ -122,8 +115,8 @@ export default function InvoiceDetail() {
     if (!bundle || !lineItemForm.product_service_name) return;
     try {
       await mutations.createLineItem.mutateAsync({
-        invoiceId: bundle.invoice.id,
-        data: lineItemForm,
+        invoice_id: bundle.invoice.id,
+        ...lineItemForm,
       });
       setLineItemForm({
         product_service_name: '',
@@ -139,10 +132,7 @@ export default function InvoiceDetail() {
   const handleDeleteLineItem = async (lineItemId: string) => {
     if (!bundle) return;
     try {
-      await mutations.deleteLineItem.mutateAsync({
-        invoiceId: bundle.invoice.id,
-        lineItemId,
-      });
+      await mutations.deleteLineItem.mutateAsync(lineItemId);
     } catch (err) {
       console.error('Failed to delete line item:', err);
     }
@@ -152,8 +142,8 @@ export default function InvoiceDetail() {
     if (!bundle || !paymentForm.amount || !paymentForm.payment_date) return;
     try {
       await mutations.createPayment.mutateAsync({
-        invoiceId: bundle.invoice.id,
-        data: paymentForm,
+        invoice_id: bundle.invoice.id,
+        ...paymentForm,
       });
       setPaymentForm({
         amount: 0,
@@ -170,10 +160,7 @@ export default function InvoiceDetail() {
   const handleDeletePayment = async (paymentId: string) => {
     if (!bundle) return;
     try {
-      await mutations.deletePayment.mutateAsync({
-        invoiceId: bundle.invoice.id,
-        paymentId,
-      });
+      await mutations.deletePayment.mutateAsync(paymentId);
     } catch (err) {
       console.error('Failed to delete payment:', err);
     }
@@ -182,7 +169,7 @@ export default function InvoiceDetail() {
   const handleSendInvoice = async () => {
     if (!bundle) return;
     try {
-      await mutations.sendInvoice.mutateAsync(bundle.invoice.id);
+      await mutations.sendInvoice.mutateAsync({ id: bundle.invoice.id });
     } catch (err) {
       console.error('Failed to send invoice:', err);
     }
@@ -191,7 +178,7 @@ export default function InvoiceDetail() {
   const handleMarkPaid = async () => {
     if (!bundle) return;
     try {
-      await mutations.markPaid.mutateAsync(bundle.invoice.id);
+      await mutations.markPaid.mutateAsync({ id: bundle.invoice.id });
     } catch (err) {
       console.error('Failed to mark invoice as paid:', err);
     }
@@ -445,11 +432,11 @@ export default function InvoiceDetail() {
         <div className="mb-8 grid grid-cols-2 gap-6 rounded-lg bg-white p-6 shadow-sm">
           <div>
             <p className="text-sm font-medium text-slate-600">Client</p>
-            <p className="mt-1 text-lg font-semibold">{account?.account_name ?? 'N/A'}</p>
+            <p className="mt-1 text-lg font-semibold">{account?.name ?? 'N/A'}</p>
           </div>
           <div>
             <p className="text-sm font-medium text-slate-600">Property</p>
-            <p className="mt-1 text-lg font-semibold">{property?.property_name ?? 'N/A'}</p>
+            <p className="mt-1 text-lg font-semibold">{property?.address ?? 'N/A'}</p>
           </div>
         </div>
 
@@ -509,13 +496,13 @@ export default function InvoiceDetail() {
             <div>
               <p className="text-sm text-slate-600">Issue Date</p>
               <p className="mt-1 font-medium">
-                {formatInVancouver(invoice.issue_date)}
+                {formatInVancouver(new Date(invoice.issue_date), 'MMM d, yyyy')}
               </p>
             </div>
             <div>
               <p className="text-sm text-slate-600">Due Date</p>
               <p className="mt-1 font-medium">
-                {formatInVancouver(invoice.due_date)}
+                {formatInVancouver(new Date(invoice.due_date), 'MMM d, yyyy')}
               </p>
             </div>
             <div>
@@ -723,7 +710,7 @@ export default function InvoiceDetail() {
                         {payment.payment_method}
                       </p>
                       <p className="text-sm text-slate-600">
-                        {formatInVancouver(payment.payment_date)}
+                        {formatInVancouver(new Date(payment.payment_date), 'MMM d, yyyy')}
                       </p>
                     </div>
                     {(payment.reference_number || payment.notes) && (
