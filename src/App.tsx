@@ -13,6 +13,8 @@ import Inventory from './pages/Inventory';
 import Tasks from './pages/Tasks';
 import CRM from './pages/CRM';
 import CrmAccountDetail from './pages/CrmAccountDetail';
+import Quotes from './pages/Quotes';
+import QuoteDetail from './pages/QuoteDetail';
 import Time from './pages/Time';
 import Team from './pages/Team';
 import Account from './pages/Account';
@@ -116,6 +118,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <CrmAccountDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/quotes"
+            element={
+              <ProtectedRoute>
+                <Quotes />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/quotes/:id"
+            element={
+              <ProtectedRoute>
+                <QuoteDetail />
               </ProtectedRoute>
             }
           />
