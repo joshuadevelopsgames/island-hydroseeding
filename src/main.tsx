@@ -42,15 +42,17 @@ function Root() {
   }
 
   return (
-    <>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <App />
-        </AuthProvider>
-      </QueryClientProvider>
+    <div className="app-shell">
+      <div className="app-viewport">
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <App />
+          </AuthProvider>
+        </QueryClientProvider>
+      </div>
       <Toaster defaultPosition="bottom-right" />
       <PwaPrompts />
-    </>
+    </div>
   );
 }
 

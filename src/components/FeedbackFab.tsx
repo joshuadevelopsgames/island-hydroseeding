@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Bug, Copy, Crosshair, Lightbulb, MessageSquarePlus, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { buildConsoleReportSection } from '../lib/consoleCapture';
@@ -134,7 +135,7 @@ export default function FeedbackFab() {
     }
   };
 
-  return (
+  return createPortal(
     <>
       <button
         type="button"
@@ -255,6 +256,7 @@ export default function FeedbackFab() {
           </div>
         </div>
       )}
-    </>
+    </>,
+    document.body
   );
 }

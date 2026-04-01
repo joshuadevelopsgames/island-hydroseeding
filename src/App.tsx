@@ -20,6 +20,7 @@ import Account from './pages/Account';
 function App() {
   return (
     <BrowserRouter>
+      <div className="app-router-fill">
       <Layout>
         <Routes>
           <Route
@@ -144,6 +145,7 @@ function App() {
           />
         </Routes>
       </Layout>
+      </div>
     </BrowserRouter>
   );
 }

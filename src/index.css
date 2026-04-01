@@ -555,6 +555,31 @@ html.theme-dark .card:hover {
   min-height: 100dvh;
 }
 
+.app-shell {
+  display: block;
+  min-height: 100%;
+}
+
+.app-viewport {
+  display: block;
+  min-height: 100%;
+}
+
+.app-router-fill {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.app-router-fill > .app-container {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
 .mobile-topbar {
   display: none;
 }
@@ -870,12 +895,54 @@ html.theme-dark .theme-toggle-btn:hover {
 }
 
 @media (max-width: 767px) {
+  /* Single scroll container (main) + locked body — avoids iOS/WebKit blank repaint / phantom overlays after scroll */
+  html {
+    height: 100%;
+    height: -webkit-fill-available;
+  }
+
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  #root {
+    height: 100%;
+  }
+
+  .app-shell {
+    height: 100%;
+    max-height: 100dvh;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .app-viewport {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .app-router-fill {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 100%;
+    overflow: hidden;
+  }
+
+  .app-router-fill > .app-container {
+    overflow: hidden;
+  }
+
   .mobile-topbar {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    position: sticky;
-    top: 0;
+    position: relative;
+    flex-shrink: 0;
     z-index: 110;
     width: 100%;
     min-height: 3.25rem;
@@ -883,15 +950,13 @@ html.theme-dark .theme-toggle-btn:hover {
     padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
     padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
     padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
-    background: rgba(255, 255, 255, 0.92);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    background: rgba(255, 255, 255, 0.98);
     border-bottom: 1px solid var(--border-color);
     box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
   }
 
   html.theme-dark .mobile-topbar {
-    background: rgba(20, 24, 27, 0.94);
+    background: rgba(20, 24, 27, 0.98);
     box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
   }
 
@@ -946,6 +1011,8 @@ html.theme-dark .theme-toggle-btn:hover {
 
   .app-container {
     flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   .layout-backdrop {
@@ -1014,11 +1081,16 @@ html.theme-dark .theme-toggle-btn:hover {
   }
 
   .main-content {
+    flex: 1 1 auto;
+    min-height: 0;
     height: auto;
-    min-height: calc(100dvh - 3.25rem);
+    max-height: none;
     padding: 1rem 1rem 2rem;
     padding-bottom: max(6rem, env(safe-area-inset-bottom, 0px));
-    overflow-x: clip;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
   }
 
   h1 {
