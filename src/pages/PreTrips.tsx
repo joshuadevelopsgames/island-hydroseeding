@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, ClipboardCheck, ArrowLeft, Search, Truck, LifeBuoy, Camera, ImageIcon } from 'lucide-react';
-import { format } from 'date-fns';
+import { formatInVancouver } from '../lib/vancouverTime';
 
 type PreTripType = 'Truck' | 'Trailer';
 
@@ -242,7 +242,7 @@ export default function PreTrips() {
             <div className="pretrip-fields-stack">
               <div>
                 <label>Date and time</label>
-                <input type="text" value={format(new Date(), 'PPpp')} readOnly style={{ backgroundColor: 'var(--surface-hover)' }} />
+                <input type="text" value={formatInVancouver(new Date(), 'PPpp')} readOnly style={{ backgroundColor: 'var(--surface-hover)' }} />
               </div>
               <div>
                 <label>Inspector / driver name</label>
@@ -490,7 +490,7 @@ export default function PreTrips() {
                   return (
                     <tr key={log.id} style={{ borderBottom: '1px solid var(--border-color)' }} className="row-hover">
                       <td style={{ padding: '1rem 0.5rem', fontSize: '0.875rem' }}>
-                        {format(new Date(log.date), 'MMM d, yyyy h:mm a')}
+                        {formatInVancouver(log.date, 'MMM d, yyyy h:mm a')}
                       </td>
                       <td style={{ padding: '1rem 0.5rem', fontSize: '0.875rem' }}>
                         <span className="flex items-center gap-1">

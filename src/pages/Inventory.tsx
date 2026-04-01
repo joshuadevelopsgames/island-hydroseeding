@@ -1,5 +1,12 @@
-import { useState, useEffect } from 'react';
-import { Plus, AlertTriangle, Save } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { motion } from 'motion/react';
+import { Plus, AlertTriangle, Save, FileText } from 'lucide-react';
+import { v4 as uuidv4 } from 'uuid';
+import { parseISO } from 'date-fns';
+import { formatInVancouver, vancouverDateInputToIso } from '../lib/vancouverTime';
+import type { PurchaseOrder, PurchaseOrderStatus } from '../lib/fleetTypes';
+import { loadPurchaseOrders, savePurchaseOrders } from '../lib/fleetStore';
+import { MorphingPlusX } from '../components/MorphingPlusX';
 
 type InventoryItem = {
   id: string;
@@ -13,10 +20,21 @@ type InventoryItem = {
 const STORAGE_KEY = 'inventoryState';
 
 export default function Inventory() {
+  const [invTab, setInvTab] = useState<'stock' | 'orders'>('stock');
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [dailyUsage, setDailyUsage] = useState<Record<string, number>>({});
   const [isUpdating, setIsUpdating] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [poFormOpen, setPoFormOpen] = useState(false);
+
+  const refreshOrders = useCallback(() => {
+    setPurchaseOrders(loadPurchaseOrders());
+  }, []);
+
+  useEffect(() => {
+    refreshOrders();
+  }, [refreshOrders]);
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -75,13 +93,153 @@ export default function Inventory() {
 
   const lowStockItems = inventory.filter((item) => item.quantity <= item.threshold);
 
+  const persistOrders = (next: PurchaseOrder[]) => {
+    savePurchaseOrders(next);
+    setPurchaseOrders(next);
+  };
+
+  const addPurchaseOrder = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const st = String(fd.get('status') || 'draft') as PurchaseOrderStatus;
+    const row: PurchaseOrder = {
+      id: uuidv4(),
+      vendor: String(fd.get('vendor') || '').trim(),
+      orderedAt: vancouverDateInputToIso(String(fd.get('orderedAt') || '')),
+      expectedAt: fd.get('expectedAt')
+        ? vancouverDateInputToIso(String(fd.get('expectedAt') || ''))
+        : null,
+      total: fd.get('total') ? Number(fd.get('total')) : null,
+      status: ['draft', 'ordered', 'received', 'cancelled'].includes(st) ? st : 'draft',
+      lineSummary: String(fd.get('lineSummary') || '').trim(),
+      notes: String(fd.get('notes') || '').trim(),
+    };
+    if (!row.vendor) return;
+    persistOrders([row, ...purchaseOrders]);
+    setPoFormOpen(false);
+    e.currentTarget.reset();
+  };
+
   return (
     <div>
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex justify-between items-center mb-8 flex-wrap gap-4">
         <div>
-          <h1 className="mb-2">Inventory Tracking</h1>
-          <p>Monitor stock levels and record daily usage of materials.</p>
+          <h1 className="mb-2">Inventory &amp; parts</h1>
+          <p>Stock levels, usage, and purchase orders (Fleetio-style parts purchasing).</p>
         </div>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            type="button"
+            className={`btn ${invTab === 'stock' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setInvTab('stock')}
+          >
+            Stock
+          </button>
+          <button
+            type="button"
+            className={`btn ${invTab === 'orders' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setInvTab('orders')}
+          >
+            <FileText size={16} /> Purchase orders
+          </button>
+        </div>
+      </div>
+
+      {invTab === 'orders' && (
+        <>
+          <div className="flex justify-end mb-4">
+            <button
+              type="button"
+              className="btn btn-primary"
+              aria-expanded={poFormOpen}
+              onClick={() => setPoFormOpen((v) => !v)}
+            >
+              <MorphingPlusX isOpen={poFormOpen} size={16} />
+              {poFormOpen ? 'Close' : 'New PO'}
+            </button>
+          </div>
+          {poFormOpen && (
+            <div className="card mb-8">
+              <h3 className="mb-4">Purchase order</h3>
+              <form onSubmit={addPurchaseOrder} className="flex flex-col gap-4">
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+                  <div>
+                    <label>Vendor *</label>
+                    <input name="vendor" required />
+                  </div>
+                  <div>
+                    <label>Order date *</label>
+                    <input name="orderedAt" type="date" required />
+                  </div>
+                  <div>
+                    <label>Expected</label>
+                    <input name="expectedAt" type="date" />
+                  </div>
+                  <div>
+                    <label>Total ($)</label>
+                    <input name="total" type="number" min={0} step="0.01" />
+                  </div>
+                  <div>
+                    <label>Status</label>
+                    <select name="status" defaultValue="ordered">
+                      <option value="draft">Draft</option>
+                      <option value="ordered">Ordered</option>
+                      <option value="received">Received</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label>Line items summary</label>
+                    <input name="lineSummary" placeholder="Parts, qty, SKUs…" />
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label>Notes</label>
+                    <textarea name="notes" rows={2} />
+                  </div>
+                </div>
+                <button type="submit" className="btn btn-primary">
+                  Save PO
+                </button>
+              </form>
+            </div>
+          )}
+          <div className="card mb-8">
+            <h3 className="mb-4">Purchase orders</h3>
+            {purchaseOrders.length === 0 ? (
+              <p className="text-muted">No POs yet.</p>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-secondary)' }}>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Vendor</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Ordered</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Total</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Status</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Lines</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...purchaseOrders]
+                    .sort((a, b) => parseISO(b.orderedAt).getTime() - parseISO(a.orderedAt).getTime())
+                    .map((po) => (
+                      <tr key={po.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '0.75rem 0.5rem' }}>{po.vendor}</td>
+                        <td style={{ padding: '0.75rem 0.5rem' }}>{formatInVancouver(po.orderedAt, 'MMM d, yyyy')}</td>
+                        <td style={{ padding: '0.75rem 0.5rem' }}>{po.total != null ? `$${po.total.toFixed(2)}` : '—'}</td>
+                        <td style={{ padding: '0.75rem 0.5rem' }}>{po.status}</td>
+                        <td style={{ padding: '0.75rem 0.5rem', fontSize: '0.875rem' }}>{po.lineSummary || '—'}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
+
+      {invTab === 'stock' && (
+        <>
+      <div className="flex justify-end mb-6">
         <button type="button" className="btn btn-primary" onClick={() => setIsUpdating(!isUpdating)}>
           {isUpdating ? 'Cancel update' : 'Log daily usage'}
         </button>
@@ -203,8 +361,20 @@ export default function Inventory() {
         <div className="card">
           <div className="flex justify-between items-center mb-6">
             <h3>Current stock</h3>
-            <button type="button" className="btn btn-secondary" onClick={() => setIsAdding(!isAdding)}>
-              <Plus size={16} /> {isAdding ? 'Close form' : 'Add item'}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              aria-expanded={isAdding}
+              onClick={() => setIsAdding(!isAdding)}
+            >
+              <motion.span
+                className="inline-flex shrink-0"
+                animate={{ rotate: isAdding ? 45 : 0 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+              >
+                <Plus size={16} aria-hidden />
+              </motion.span>
+              {isAdding ? 'Close form' : 'Add item'}
             </button>
           </div>
           {inventory.length === 0 ? (
@@ -242,6 +412,8 @@ export default function Inventory() {
             </table>
           )}
         </div>
+      )}
+        </>
       )}
     </div>
   );

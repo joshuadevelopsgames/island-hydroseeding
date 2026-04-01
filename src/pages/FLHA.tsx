@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, ShieldAlert, ArrowLeft } from 'lucide-react';
-import { format } from 'date-fns';
+import { formatInVancouver } from '../lib/vancouverTime';
 
 type FLHALog = {
   id: string;
@@ -65,9 +65,9 @@ export default function FLHA() {
   };
 
   const renderYNN = (name: string, label: string) => (
-    <div className="flex justify-between items-center py-2 border-b-subtle">
-      <label className="text-sm">{label}</label>
-      <select name={name} style={{ width: '120px', padding: '0.25rem' }}>
+    <div className="flha-yn-row">
+      <label className="text-sm flha-yn-row__label">{label}</label>
+      <select name={name} className="flha-yn-row__select" aria-label={label}>
         <option value="Yes">Yes</option>
         <option value="No">No</option>
         <option value="N/A">N/A</option>
@@ -91,7 +91,7 @@ export default function FLHA() {
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(200px, 1fr) minmax(200px, 1fr)', gap: '1.5rem' }}>
               <div>
                 <label>Date and Time</label>
-                <input type="text" value={format(new Date(), "PPpp")} readOnly style={{ backgroundColor: 'var(--surface-hover)' }} />
+                <input type="text" value={formatInVancouver(new Date(), 'PPpp')} readOnly style={{ backgroundColor: 'var(--surface-hover)' }} />
               </div>
               <div>
                 <label>JOB / FSA Number / Location</label>
@@ -127,8 +127,16 @@ export default function FLHA() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-4" style={{ backgroundColor: '#fffbfa', border: '1px solid #ef4444', borderRadius: '0.5rem', padding: '1rem' }}>
-                <h4 style={{ color: '#ef4444', marginBottom: '0.5rem' }}>Emergency Response Plan</h4>
+              <div
+                className="flex flex-col gap-4"
+                style={{
+                  background: 'color-mix(in srgb, var(--color-danger) 12%, var(--surface-raised))',
+                  border: '1px solid color-mix(in srgb, var(--color-danger) 42%, var(--border-color))',
+                  borderRadius: '0.5rem',
+                  padding: '1rem',
+                }}
+              >
+                <h4 style={{ color: 'var(--color-danger)', marginBottom: '0.5rem' }}>Emergency Response Plan</h4>
                 <div>
                   <label>Nearest Hospital</label>
                   <input name="hospital" type="text" required placeholder="Nearest hospital" />
@@ -240,7 +248,7 @@ export default function FLHA() {
                 <div>
                   <h3 className="mb-1">{log.projectNumber}</h3>
                   <p className="text-sm font-semibold text-primary" style={{ color: 'var(--lawn-green)' }}>
-                    {format(new Date(log.date), "MMM d, yyyy - h:mm a")}
+                    {formatInVancouver(log.date, 'MMM d, yyyy - h:mm a')}
                   </p>
                 </div>
                 <div className="badge badge-gray">{log.supervisorName}</div>

@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   ClipboardCheck,
-  ShieldAlert,
   FolderOpen,
   Wrench,
   Package,
@@ -13,32 +12,105 @@ import {
   UserCog,
   Menu,
   X,
+  Truck,
+  Fuel,
+  AlertTriangle,
+  ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
+import { formatInVancouver } from '../lib/vancouverTime';
 import { useAuth } from '../context/AuthContext';
 import { userCanAccessPath } from '../lib/permissions';
+import { countUnacknowledgedForUser } from '../lib/taskAssignments';
+import { loadAssets } from '../lib/fleetStore';
+import { runCvipDueNotifications } from '../lib/cvipNotify';
 import FeedbackFab from './FeedbackFab';
+import AnnouncementBanner from './AnnouncementBanner';
+import ThemeToggle from './ThemeToggle';
 
-const navItems: { name: string; path: string; icon: typeof LayoutDashboard }[] = [
+function sidebarUserInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+const primaryNavItems: { name: string; path: string; icon: typeof LayoutDashboard }[] = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-  { name: 'Pre-trips', path: '/pre-trips', icon: ClipboardCheck },
-  { name: 'FLHA Forms', path: '/flha', icon: ShieldAlert },
-  { name: 'Documents', path: '/documents', icon: FolderOpen },
-  { name: 'Equipment', path: '/equipment', icon: Wrench },
-  { name: 'Inventory', path: '/inventory', icon: Package },
-  { name: 'Tasks (To-Do)', path: '/tasks', icon: CheckSquare },
-  { name: 'Leads & CRM', path: '/crm', icon: Users },
   { name: 'Time Tracking', path: '/time', icon: Clock },
+  { name: 'Pre-trips', path: '/pre-trips', icon: ClipboardCheck },
+  { name: 'Documents', path: '/documents', icon: FolderOpen },
+  { name: 'Leads & CRM', path: '/crm', icon: Users },
+  { name: 'Tasks (To-Do)', path: '/tasks', icon: CheckSquare },
+];
+
+/** Visited less often — collapsible in the sidebar */
+const secondaryNavItems: { name: string; path: string; icon: typeof LayoutDashboard }[] = [
+  { name: 'Fleet assets', path: '/assets', icon: Truck },
+  { name: 'Fleet issues', path: '/issues', icon: AlertTriangle },
+  { name: 'Fuel & road', path: '/fuel', icon: Fuel },
+  { name: 'Maintenance', path: '/equipment', icon: Wrench },
+  { name: 'Inventory', path: '/inventory', icon: Package },
   { name: 'Team & access', path: '/team', icon: UserCog },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { currentUser, users, setCurrentUserId } = useAuth();
+  const { currentUser } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [taskInboxCount, setTaskInboxCount] = useState(0);
+  const prevInboxRef = useRef<number | null>(null);
 
-  const visibleNav = navItems.filter(
+  useEffect(() => {
+    const sync = () => setTaskInboxCount(countUnacknowledgedForUser(currentUser?.id ?? null));
+    sync();
+    const onTasks = () => sync();
+    window.addEventListener('tasks-updated', onTasks);
+    window.addEventListener('storage', onTasks);
+    return () => {
+      window.removeEventListener('tasks-updated', onTasks);
+      window.removeEventListener('storage', onTasks);
+    };
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission !== 'granted') return;
+    const prev = prevInboxRef.current;
+    prevInboxRef.current = taskInboxCount;
+    if (prev === null) return;
+    if (taskInboxCount > prev) {
+      new Notification('Island Hydroseeding', {
+        body:
+          taskInboxCount === 1
+            ? 'You have a new task assignment.'
+            : `You have ${taskInboxCount} tasks assigned to you.`,
+        tag: 'ih-tasks-inbox',
+      });
+    }
+  }, [taskInboxCount]);
+
+  const visiblePrimary = primaryNavItems.filter(
     (item) => currentUser && userCanAccessPath(item.path, currentUser)
   );
+  const visibleSecondary = secondaryNavItems.filter(
+    (item) => currentUser && userCanAccessPath(item.path, currentUser)
+  );
+
+  const [moreNavOpen, setMoreNavOpen] = useState(false);
+
+  const isNavPathActive = (path: string) =>
+    location.pathname === path || (path !== '/' && location.pathname.startsWith(path));
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const pathname = location.pathname;
+    const secondary = secondaryNavItems.filter((item) => userCanAccessPath(item.path, currentUser));
+    const onSecondary = secondary.some(
+      (item) => pathname === item.path || (item.path !== '/' && pathname.startsWith(item.path))
+    );
+    if (onSecondary) setMoreNavOpen(true);
+  }, [location.pathname, currentUser]);
 
   useEffect(() => {
     setDrawerOpen(false);
@@ -53,46 +125,34 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     };
   }, [drawerOpen]);
 
+  useEffect(() => {
+    runCvipDueNotifications(loadAssets());
+    const id = window.setInterval(() => runCvipDueNotifications(loadAssets()), 60 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const navContent = (
     <>
       <header className="sidebar__brand">
-        <Link to="/" className="sidebar__logo-link" onClick={() => setDrawerOpen(false)}>
-          <img
-            src="/island-hydroseeding-logo.png"
-            alt="Island Hydroseeding Ltd — Serving Vancouver Island"
-            className="sidebar__logo"
-            width={100}
-            height={51}
-            decoding="async"
-          />
-        </Link>
+        <div className="sidebar__brand-row">
+          <Link to="/" className="sidebar__logo-link" onClick={() => setDrawerOpen(false)}>
+            <img
+              src="/island-hydroseeding-logo.png"
+              alt="Island Hydroseeding Ltd — Serving Vancouver Island"
+              className="sidebar__logo"
+              width={100}
+              height={51}
+              decoding="async"
+            />
+          </Link>
+          <ThemeToggle />
+        </div>
         <p className="badge badge-green sidebar__subtitle">Internal ops</p>
       </header>
 
-      <div className="sidebar-user" style={{ padding: '0 0.75rem 0.75rem' }}>
-        <label className="text-xs font-semibold text-muted" style={{ display: 'block', marginBottom: '0.35rem' }}>
-          Signed in as
-        </label>
-        <select
-          className="sidebar-user-select"
-          value={currentUser?.id ?? ''}
-          onChange={(e) => setCurrentUserId(e.target.value)}
-          aria-label="Switch user"
-        >
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name}
-              {u.isAdmin ? ' (Admin)' : ''}
-            </option>
-          ))}
-        </select>
-      </div>
-
       <nav className="sidebar__nav" aria-label="Main">
-        {visibleNav.map((item) => {
-          const isActive =
-            location.pathname === item.path ||
-            (item.path !== '/' && location.pathname.startsWith(item.path));
+        {visiblePrimary.map((item) => {
+          const isActive = isNavPathActive(item.path);
           const Icon = item.icon;
 
           return (
@@ -104,13 +164,74 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             >
               <Icon size={20} strokeWidth={isActive ? 2.25 : 1.75} />
               {item.name}
+              {item.path === '/tasks' && taskInboxCount > 0 && (
+                <span className="nav-link__badge" aria-label={`${taskInboxCount} unseen task assignments`}>
+                  {taskInboxCount > 99 ? '99+' : taskInboxCount}
+                </span>
+              )}
             </Link>
           );
         })}
+
+        {visibleSecondary.length > 0 && (
+          <div className="sidebar__nav-more">
+            <button
+              type="button"
+              className={`sidebar__nav-disclosure${visibleSecondary.some((i) => isNavPathActive(i.path)) ? ' sidebar__nav-disclosure--child-active' : ''}`}
+              aria-expanded={moreNavOpen}
+              aria-controls="sidebar-more-links"
+              id="sidebar-more-toggle"
+              onClick={() => setMoreNavOpen((o) => !o)}
+            >
+              <span>More</span>
+              <ChevronDown size={18} strokeWidth={2} className={`sidebar__nav-disclosure-chevron${moreNavOpen ? ' sidebar__nav-disclosure-chevron--open' : ''}`} aria-hidden />
+            </button>
+            <div
+              id="sidebar-more-links"
+              role="region"
+              aria-labelledby="sidebar-more-toggle"
+              hidden={!moreNavOpen}
+              className="sidebar__nav-sub"
+            >
+              {visibleSecondary.map((item) => {
+                const isActive = isNavPathActive(item.path);
+                const Icon = item.icon;
+
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={`nav-link${isActive ? ' nav-link--active' : ''}`}
+                    onClick={() => setDrawerOpen(false)}
+                  >
+                    <Icon size={20} strokeWidth={isActive ? 2.25 : 1.75} />
+                    {item.name}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </nav>
 
+      {currentUser && (
+        <Link
+          to="/account"
+          className="sidebar-profile-bar"
+          onClick={() => setDrawerOpen(false)}
+          aria-label="Account and settings"
+        >
+          <span className="sidebar-profile-bar__avatar">{sidebarUserInitials(currentUser.name)}</span>
+          <span className="sidebar-profile-bar__meta">
+            <span className="sidebar-profile-bar__name">{currentUser.name}</span>
+            <span className="sidebar-profile-bar__email">{currentUser.email}</span>
+          </span>
+          <ChevronRight className="sidebar-profile-bar__chevron" size={18} aria-hidden />
+        </Link>
+      )}
+
       <footer className="sidebar__footer">
-        &copy; {new Date().getFullYear()} Island Hydroseeding Ltd
+        &copy; {formatInVancouver(new Date(), 'yyyy')} Island Hydroseeding Ltd
       </footer>
     </>
   );
@@ -138,7 +259,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             decoding="async"
           />
         </Link>
-        <span className="mobile-topbar__title">Internal ops</span>
+        <div className="mobile-topbar__end">
+          <ThemeToggle />
+          <span className="mobile-topbar__title">Internal ops</span>
+        </div>
       </header>
 
       {drawerOpen && (
@@ -165,7 +289,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </aside>
 
       <main className="main-content">
-        <div className="main-content__inner">{children}</div>
+        <div className="main-content__inner">
+          <AnnouncementBanner />
+          {children}
+        </div>
       </main>
     </div>
     <FeedbackFab />

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -9,10 +10,16 @@ export default defineConfig(({ mode }) => {
   const BUILD_ID = isProd ? `p-${Date.now()}` : 'dev';
 
   return {
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+      },
+    },
     define: {
       'import.meta.env.VITE_BUILD_ID': JSON.stringify(BUILD_ID),
     },
     plugins: [
+      tailwindcss(),
       react(),
       {
         name: 'write-build-id',

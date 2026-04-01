@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ClipboardCheck,
@@ -11,26 +11,86 @@ import {
   Boxes,
   ListTodo,
   FileText,
+  Truck,
+  AlertTriangle,
+  Fuel,
+  FileSpreadsheet,
+  Sparkles,
+  ChevronDown,
+  Download,
 } from 'lucide-react';
-import { formatDistanceToNow, isSameDay, parseISO } from 'date-fns';
+import { useAuth } from '../context/AuthContext';
+import { formatDistanceToNow, parseISO, isSameMonth } from 'date-fns';
+import {
+  isSameVancouverDay,
+  toVancouverDate,
+  vancouverDifferenceInCalendarDays,
+  vancouverNow,
+} from '../lib/vancouverTime';
+import { loadWorkOrders, loadAssets, loadFuelEntries, loadIssues } from '../lib/fleetStore';
+import AdminApprovalsCard from '../components/AdminApprovalsCard';
 
 type PreTripLog = { id: string; date: string; employeeName: string; equipmentId: string; type?: string };
 type FLHALog = { id: string; date: string; projectNumber?: string; supervisorName?: string };
 type TimeLog = { id: string; clockIn: string; clockOut: string | null; employeeName?: string };
-type MaintTask = { id: string; status: string };
 type InvItem = { id: string; quantity: number; threshold: number };
 
 type ActivityRow = { id: string; title: string; meta: string; icon: typeof ClipboardCheck };
 
+function displayFirstName(fullName: string | undefined): string {
+  if (!fullName?.trim()) return 'there';
+  return fullName.trim().split(/\s+/)[0] ?? 'there';
+}
+
 export default function Dashboard() {
+  const { currentUser } = useAuth();
   const [tick, setTick] = useState(0);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const id = window.setInterval(() => setTick((t) => t + 1), 60_000);
     return () => window.clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (exportMenuRef.current?.contains(e.target as Node)) return;
+      setExportMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setExportMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [exportMenuOpen]);
+
+  const runExport = async (kind: 'sheet' | 'pdf') => {
+    setExportMenuOpen(false);
+    if (kind === 'sheet') {
+      const { downloadWorkspaceSheet } = await import('../lib/exportWorkspace');
+      downloadWorkspaceSheet();
+    } else {
+      const { downloadWorkspacePdf } = await import('../lib/exportWorkspace');
+      downloadWorkspacePdf();
+    }
+  };
+
+  const greeting = useMemo(() => {
+    void tick;
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    return 'Good evening';
+  }, [tick]);
+
   const snapshot = useMemo(() => {
-    const today = new Date();
+    const today = vancouverNow();
 
     let preTrips: PreTripLog[] = [];
     const pt = localStorage.getItem('preTripLogs_v2');
@@ -52,15 +112,7 @@ export default function Dashboard() {
       }
     }
 
-    let maintenance: MaintTask[] = [];
-    const eq = localStorage.getItem('equipmentMaintenance');
-    if (eq) {
-      try {
-        maintenance = JSON.parse(eq);
-      } catch {
-        maintenance = [];
-      }
-    }
+    const workOrders = loadWorkOrders();
 
     let inventory: InvItem[] = [];
     const inv = localStorage.getItem('inventoryState');
@@ -72,11 +124,32 @@ export default function Dashboard() {
       }
     }
 
-    const pretripsToday = preTrips.filter((l) => isSameDay(parseISO(l.date), today)).length;
-    const flhaToday = flhas.filter((l) => isSameDay(parseISO(l.date), today)).length;
+    const pretripsToday = preTrips.filter((l) => isSameVancouverDay(parseISO(l.date), today)).length;
+    const flhaToday = flhas.filter((l) => isSameVancouverDay(parseISO(l.date), today)).length;
     const pendingFlhaLabel = flhaToday === 0 ? 'None logged today' : `${flhaToday} logged today`;
 
-    const equipmentDue = maintenance.filter((t) => t.status === 'pending').length;
+    const equipmentDue = workOrders.filter((t) => t.status !== 'completed').length;
+
+    const assets = loadAssets();
+    let cvipSoon = 0;
+    for (const a of assets) {
+      if (!a.cvip.enabled || !a.cvip.nextDueDate) continue;
+      try {
+        const d = parseISO(a.cvip.nextDueDate);
+        if (vancouverDifferenceInCalendarDays(d, today) <= 30) cvipSoon += 1;
+      } catch {
+        /* skip */
+      }
+    }
+
+    const fuelRows = loadFuelEntries();
+    const fuelMonthSpend = fuelRows.reduce((sum, e) => {
+      const t = toVancouverDate(parseISO(e.date));
+      if (!isSameMonth(t, today)) return sum;
+      return sum + (e.totalCost ?? 0);
+    }, 0);
+
+    const openFleetIssues = loadIssues().filter((i) => i.status !== 'resolved').length;
     const lowStock = inventory.filter((i) => i.quantity <= i.threshold).length;
 
     const activities: ActivityRow[] = [];
@@ -142,9 +215,15 @@ export default function Dashboard() {
       pendingFlhaLabel,
       equipmentDue,
       lowStock,
+      cvipSoon,
+      fuelMonthSpend,
+      openFleetIssues,
       activities: sorted.map(({ ts: _t, ...rest }) => rest),
     };
   }, [tick]);
+
+  const queuesClear =
+    snapshot.equipmentDue === 0 && snapshot.openFleetIssues === 0 && snapshot.lowStock === 0;
 
   const stats = [
     {
@@ -162,11 +241,32 @@ export default function Dashboard() {
       path: '/flha',
     },
     {
-      label: 'Equipment due',
+      label: 'Work orders open',
       value: equipmentDueLabel(snapshot.equipmentDue),
       icon: Wrench,
       color: snapshot.equipmentDue ? '#ef4444' : 'var(--lawn-green)',
       path: '/equipment',
+    },
+    {
+      label: 'CVIP (30 days)',
+      value: snapshot.cvipSoon === 0 ? 'None due soon' : `${snapshot.cvipSoon} to plan`,
+      icon: Truck,
+      color: snapshot.cvipSoon ? '#f59e0b' : 'var(--lawn-green)',
+      path: '/assets',
+    },
+    {
+      label: 'Fleet issues open',
+      value: snapshot.openFleetIssues === 0 ? 'None' : `${snapshot.openFleetIssues} open`,
+      icon: AlertTriangle,
+      color: snapshot.openFleetIssues ? '#ef4444' : 'var(--lawn-green)',
+      path: '/issues',
+    },
+    {
+      label: 'Fuel spend (month)',
+      value: `$${snapshot.fuelMonthSpend.toFixed(0)}`,
+      icon: Fuel,
+      color: '#0ea5e9',
+      path: '/fuel',
     },
     {
       label: 'Low inventory',
@@ -177,16 +277,75 @@ export default function Dashboard() {
     },
   ];
 
+  const welcomeName = displayFirstName(currentUser?.name);
+
   return (
     <div>
+      <AdminApprovalsCard />
       <div className="flex justify-between items-center mb-8 page-hero">
         <div>
-          <h1 className="mb-2">Dashboard overview</h1>
-          <p>Live snapshot from forms and trackers stored in this browser.</p>
+          <p className="page-kicker">{greeting}</p>
+          <h1 className="mb-2">Welcome, {welcomeName}</h1>
+          <p className="text-secondary" style={{ maxWidth: '36rem', margin: 0 }}>
+            Here&apos;s your live snapshot from forms and trackers on this device.
+          </p>
+          {queuesClear && (
+            <p className="dashboard-welcome-nudge" role="status">
+              <Sparkles size={16} strokeWidth={2.25} aria-hidden />
+              Work orders, fleet issues, and inventory are all in good shape.
+            </p>
+          )}
         </div>
-        <Link to="/time" className="btn btn-primary">
-          <Clock size={16} /> Time clock
-        </Link>
+        <div className="flex gap-2 flex-wrap items-start">
+          <div className="relative" ref={exportMenuRef}>
+            <button
+              type="button"
+              className="btn btn-secondary dashboard-export-trigger"
+              aria-expanded={exportMenuOpen}
+              aria-haspopup="listbox"
+              aria-controls="dashboard-export-format-menu"
+              onClick={() => setExportMenuOpen((o) => !o)}
+            >
+              <Download size={16} aria-hidden />
+              Export all data
+              <ChevronDown
+                size={16}
+                aria-hidden
+                className={`dashboard-export-chevron${exportMenuOpen ? ' dashboard-export-chevron--open' : ''}`}
+              />
+            </button>
+            {exportMenuOpen && (
+              <div
+                id="dashboard-export-format-menu"
+                className="dashboard-export-menu"
+                role="listbox"
+                aria-label="Export format"
+              >
+                <button
+                  type="button"
+                  className="dashboard-export-menu__item"
+                  role="option"
+                  onClick={() => void runExport('sheet')}
+                >
+                  <FileSpreadsheet size={16} aria-hidden />
+                  Spreadsheet (.xlsx)
+                </button>
+                <button
+                  type="button"
+                  className="dashboard-export-menu__item"
+                  role="option"
+                  onClick={() => void runExport('pdf')}
+                >
+                  <FileText size={16} aria-hidden />
+                  PDF
+                </button>
+              </div>
+            )}
+          </div>
+          <Link to="/time" className="btn btn-primary">
+            <Clock size={16} /> Time clock
+          </Link>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
@@ -194,8 +353,13 @@ export default function Dashboard() {
           <Link
             key={i}
             to={stat.path}
-            className="card flex flex-col justify-between"
-            style={{ minHeight: '140px', textDecoration: 'none', color: 'inherit' }}
+            className="card dashboard-stat-card flex flex-col justify-between"
+            style={{
+              minHeight: '140px',
+              textDecoration: 'none',
+              color: 'inherit',
+              animationDelay: `${i * 55}ms`,
+            }}
           >
             <div className="flex justify-between items-start mb-4">
               <div

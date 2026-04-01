@@ -112,6 +112,35 @@ export default function Team() {
         </p>
       </div>
 
+      {currentUser?.isAdmin && (
+        <div className="card mb-8">
+          <h3 className="mb-2" style={{ fontSize: '1.0625rem' }}>
+            Preview as user
+          </h3>
+          <p className="text-sm text-muted mb-4" style={{ marginTop: 0 }}>
+            Open the app with another team member&apos;s permissions (useful for checking access before you save changes).
+          </p>
+          <label htmlFor="team-preview-user" className="sr-only">
+            Preview as user
+          </label>
+          <select
+            id="team-preview-user"
+            className="sidebar-user-select"
+            style={{ maxWidth: '28rem', width: '100%' }}
+            value={currentUser.id}
+            onChange={(e) => setCurrentUserId(e.target.value)}
+            aria-label="Preview as user"
+          >
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+                {u.isAdmin ? ' (Admin)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div className="card mb-8">
         <h3 className="mb-4 flex items-center gap-2">
           <UserPlus size={20} /> Add user

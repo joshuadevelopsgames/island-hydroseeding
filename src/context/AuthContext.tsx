@@ -105,6 +105,8 @@ type AuthContextValue = {
   currentUser: AppUser | null;
   setCurrentUserId: (id: string) => void;
   saveUsers: (next: AppUser[]) => void;
+  /** Update name/email for the signed-in user (persisted with team roster). */
+  updateCurrentUserProfile: (updates: { name?: string; email?: string }) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -130,6 +132,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.dispatchEvent(new Event('auth-changed'));
   }, []);
 
+  const updateCurrentUserProfile = useCallback(
+    (updates: { name?: string; email?: string }) => {
+      if (!currentUserId) return;
+      setUsers((prev) => {
+        const next = prev.map((u) => {
+          if (u.id !== currentUserId) return u;
+          const name = updates.name != null ? String(updates.name).trim() : u.name;
+          const email = updates.email != null ? String(updates.email).trim() : u.email;
+          return {
+            ...u,
+            name: name || u.name,
+            email: email || u.email,
+          };
+        });
+        localStorage.setItem(USERS_KEY, JSON.stringify(next));
+        window.dispatchEvent(new Event('auth-changed'));
+        return next;
+      });
+    },
+    [currentUserId]
+  );
+
   const currentUser = useMemo(
     () => users.find((u) => u.id === currentUserId) ?? null,
     [users, currentUserId]
@@ -141,8 +165,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       currentUser,
       setCurrentUserId,
       saveUsers,
+      updateCurrentUserProfile,
     }),
-    [users, currentUser, setCurrentUserId, saveUsers]
+    [users, currentUser, setCurrentUserId, saveUsers, updateCurrentUserProfile]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

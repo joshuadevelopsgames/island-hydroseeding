@@ -6,11 +6,16 @@ import PreTrips from './pages/PreTrips';
 import FLHA from './pages/FLHA';
 import Documents from './pages/Documents';
 import Equipment from './pages/Equipment';
+import Assets from './pages/Assets';
+import Fuel from './pages/Fuel';
+import Issues from './pages/Issues';
 import Inventory from './pages/Inventory';
 import Tasks from './pages/Tasks';
 import CRM from './pages/CRM';
+import CrmAccountDetail from './pages/CrmAccountDetail';
 import Time from './pages/Time';
 import Team from './pages/Team';
+import Account from './pages/Account';
 
 function App() {
   return (
@@ -50,10 +55,34 @@ function App() {
             }
           />
           <Route
+            path="/assets"
+            element={
+              <ProtectedRoute>
+                <Assets />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/equipment"
             element={
               <ProtectedRoute>
                 <Equipment />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/fuel"
+            element={
+              <ProtectedRoute>
+                <Fuel />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/issues"
+            element={
+              <ProtectedRoute>
+                <Issues />
               </ProtectedRoute>
             }
           />
@@ -82,6 +111,14 @@ function App() {
             }
           />
           <Route
+            path="/crm/accounts/:accountId"
+            element={
+              <ProtectedRoute>
+                <CrmAccountDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/time"
             element={
               <ProtectedRoute>
@@ -94,6 +131,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Team />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/account"
+            element={
+              <ProtectedRoute>
+                <Account />
               </ProtectedRoute>
             }
           />

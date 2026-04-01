@@ -20,7 +20,7 @@ git push -u origin main
 ## Supabase (free tier)
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. **SQL → New query**, paste the contents of `supabase/migrations/001_app_workspace.sql`, and run it.
+2. **SQL → New query**, paste and run `supabase/migrations/001_app_workspace.sql`, then `supabase/migrations/002_crm_and_ops.sql` (CRM tables, announcements, approvals).
 3. Copy **Project URL** and **service_role** key (**Settings → API**). Use them only on the server.
 
 Do not put the service role key in `VITE_*` variables or commit it.
@@ -33,11 +33,22 @@ Do not put the service role key in `VITE_*` variables or commit it.
 
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
+   - Optional: `CRON_SECRET` — if set, `/api/cron/ops` requires `Authorization: Bearer <CRON_SECRET>` (Vercel Cron forwards this when configured).
 
-4. Deploy. The app calls `/api/workspace` on the same origin to load and save the shared workspace blob.
+4. Deploy. The app calls `/api/workspace` for the shared workspace blob, `/api/crm` for relational CRM (accounts, contacts, interactions, research notes), and `/api/ops` for announcements and approval workflows.
 
 Local **`npm run dev`** does not run Vercel functions; sync is skipped until you use **`vercel dev`** or deploy.
 
 ## Per-device data
 
 `currentUserId` and time-tracker last-employee selection stay in the browser only and are not synced.
+
+## CRM (accounts)
+
+- List: **Leads & CRM** → accounts; open an account for contacts, interaction timeline, and research notes.
+- Legacy **localStorage** leads (`crmLeads`) are imported once into Supabase when you first open the CRM page after deploy.
+- **CSV**: export from the accounts toolbar; import expects a header row (`name`, `company`, `account_type`, `status`, …).
+
+## Mobile (Capacitor)
+
+After `npm run build`, run `npm run cap:sync` (or `npm run build:mobile`). Open native projects with `npm run cap:ios` / `npm run cap:android`. Point production builds at your deployed origin in `capacitor.config.ts` if needed (`server.url`).

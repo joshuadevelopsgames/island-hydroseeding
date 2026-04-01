@@ -1,10 +1,13 @@
 /** Assignable app routes (shown in nav / permission UI). `/team` is admin-only and not listed — gated by `isAdmin`. */
 export const PAGE_OPTIONS: { path: string; label: string }[] = [
   { path: '/', label: 'Dashboard' },
+  { path: '/assets', label: 'Fleet assets' },
   { path: '/pre-trips', label: 'Pre-trips' },
   { path: '/flha', label: 'FLHA' },
   { path: '/documents', label: 'Documents' },
-  { path: '/equipment', label: 'Equipment' },
+  { path: '/equipment', label: 'Maintenance' },
+  { path: '/fuel', label: 'Fuel & road' },
+  { path: '/issues', label: 'Fleet issues' },
   { path: '/inventory', label: 'Inventory' },
   { path: '/tasks', label: 'Tasks' },
   { path: '/crm', label: 'Leads & CRM' },
@@ -25,6 +28,7 @@ export function userCanAccessPath(
 ): boolean {
   if (!user) return false;
   const path = normalizePath(pathname);
+  if (path === '/account') return true;
   if (path === '/team') return user.isAdmin;
   if (user.isAdmin) return true;
   const allowed = new Set(user.allowedPages.map((p) => normalizePath(p)));

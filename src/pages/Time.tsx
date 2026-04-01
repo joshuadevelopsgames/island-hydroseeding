@@ -29,6 +29,13 @@ import {
 } from 'date-fns';
 import AlertDialog from '../components/AlertDialog';
 import ConfirmDialog from '../components/ConfirmDialog';
+import {
+  formatInVancouver,
+  isSameVancouverDay,
+  toVancouverDate,
+  vancouverDatetimeLocalToIso,
+  vancouverNow,
+} from '../lib/vancouverTime';
 
 const LOGS_KEY = 'timeLogs';
 const EMPLOYEES_KEY = 'timeEmployees';
@@ -59,12 +66,11 @@ function normalizeLog(raw: unknown): TimeLog {
 }
 
 function toDatetimeLocalValue(iso: string) {
-  return format(parseISO(iso), "yyyy-MM-dd'T'HH:mm");
+  return formatInVancouver(iso, "yyyy-MM-dd'T'HH:mm");
 }
 
 function fromDatetimeLocalValue(s: string) {
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  return vancouverDatetimeLocalToIso(s);
 }
 
 export default function Time() {
@@ -75,7 +81,7 @@ export default function Time() {
   const [editingLog, setEditingLog] = useState<TimeLog | null>(null);
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [editingMemberName, setEditingMemberName] = useState('');
-  const [viewMonth, setViewMonth] = useState(() => startOfMonth(new Date()));
+  const [viewMonth, setViewMonth] = useState(() => startOfMonth(vancouverNow()));
   const [alertDialog, setAlertDialog] = useState<{ title: string; message: string } | null>(null);
   const [confirmDeleteMemberId, setConfirmDeleteMemberId] = useState<string | null>(null);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
@@ -303,20 +309,20 @@ export default function Time() {
   };
 
   const weekTotal = useMemo(() => {
-    const ref = new Date();
+    const ref = vancouverNow();
     const ws = startOfWeek(ref, { weekStartsOn: 1 });
     const we = endOfWeek(ref, { weekStartsOn: 1 });
     return logs
       .filter((log) => log.clockOut)
       .reduce((acc, log) => {
-        const cin = parseISO(log.clockIn);
+        const cin = toVancouverDate(parseISO(log.clockIn));
         if (cin < ws || cin > we) return acc;
         return acc + differenceInMinutes(parseISO(log.clockOut!), cin) / 60;
       }, 0);
   }, [logs]);
 
   const weekBars = useMemo(() => {
-    const ref = new Date();
+    const ref = vancouverNow();
     const start = startOfWeek(ref, { weekStartsOn: 1 });
     const end = endOfWeek(ref, { weekStartsOn: 1 });
     const days = eachDayOfInterval({ start, end });
@@ -324,7 +330,7 @@ export default function Time() {
       let hours = 0;
       for (const log of logs) {
         if (!log.clockOut) continue;
-        const cin = parseISO(log.clockIn);
+        const cin = toVancouverDate(parseISO(log.clockIn));
         if (!isSameDay(cin, day)) continue;
         hours += differenceInMinutes(parseISO(log.clockOut), cin) / 60;
       }
@@ -347,7 +353,7 @@ export default function Time() {
       let hours = 0;
       for (const log of logs) {
         if (!log.clockOut) continue;
-        const cin = parseISO(log.clockIn);
+        const cin = toVancouverDate(parseISO(log.clockIn));
         if (!isSameDay(cin, day)) continue;
         hours += differenceInMinutes(parseISO(log.clockOut), cin) / 60;
       }
@@ -370,7 +376,7 @@ export default function Time() {
   }, [monthBars]);
 
   const monthLogsSorted = useMemo(() => {
-    return sortedLogs.filter((log) => isSameMonth(parseISO(log.clockIn), viewMonth));
+    return sortedLogs.filter((log) => isSameMonth(toVancouverDate(parseISO(log.clockIn)), viewMonth));
   }, [sortedLogs, viewMonth]);
 
   const activeEmployeeLabel = activeLog
@@ -378,7 +384,7 @@ export default function Time() {
     : null;
 
   return (
-    <div>
+    <div className="time-page">
       <AlertDialog
         open={alertDialog !== null}
         title={alertDialog?.title ?? ''}
@@ -409,22 +415,27 @@ export default function Time() {
       />
 
       <p className="page-kicker">Workforce</p>
-      <div className="flex justify-between items-start mb-8 flex-wrap gap-4">
+      <div className="flex justify-between items-start mb-6 sm:mb-8 flex-wrap gap-4">
         <div>
           <h1 className="mb-2">Time tracking</h1>
-          <p>Punch in by person, manage the team list, and correct entries when needed.</p>
+          <p className="text-[0.9375rem] sm:text-base leading-snug">
+            Punch in by person, manage the team list, and correct entries when needed.
+          </p>
         </div>
       </div>
 
       <div className="time-layout">
         <div className="flex flex-col gap-4">
-          <div className="card flex flex-col items-stretch p-8">
-            <div className="text-center mb-6">
-              <Clock size={44} className="mb-3" style={{ color: 'var(--lawn-green)', margin: '0 auto' }} />
-              <h2 className="mb-1" style={{ fontSize: '2rem', fontWeight: 700 }}>
-                {format(new Date(), 'h:mm a')}
+          <div className="card flex flex-col items-stretch p-4 sm:p-6 lg:p-8">
+            <div className="text-center mb-4 sm:mb-6">
+              <Clock
+                className="mb-2 sm:mb-3 w-9 h-9 sm:w-11 sm:h-11 mx-auto"
+                style={{ color: 'var(--lawn-green)' }}
+              />
+              <h2 className="mb-1 text-[1.625rem] sm:text-[1.875rem] lg:text-[2rem] font-bold tabular-nums">
+                {formatInVancouver(new Date(), 'h:mm a')}
               </h2>
-              <p className="text-secondary">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
+              <p className="text-secondary">{formatInVancouver(new Date(), 'EEEE, MMMM d, yyyy')}</p>
             </div>
 
             {activeLog ? (
@@ -436,7 +447,7 @@ export default function Time() {
                   <span className="status-live-dot" aria-hidden />
                   <span className="w-full text-left">
                     <strong>{activeEmployeeLabel}</strong>
-                    <span className="text-secondary font-normal"> · in since {format(parseISO(activeLog.clockIn), 'h:mm a')}</span>
+                    <span className="text-secondary font-normal"> · in since {formatInVancouver(activeLog.clockIn, 'h:mm a')}</span>
                   </span>
                 </div>
                 <button className="btn btn-danger w-full btn-lg" type="button" onClick={handleClockOut}>
@@ -547,11 +558,11 @@ export default function Time() {
 
         <div className="flex flex-col gap-6">
           <div className="card">
-            <div className="flex justify-between items-center mb-2 flex-wrap gap-2">
-              <h3 className="flex items-center gap-2">
-                <CalendarIcon size={20} /> This week
+            <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:items-center mb-2">
+              <h3 className="flex items-center gap-2 m-0 text-base">
+                <CalendarIcon size={20} className="flex-shrink-0" /> This week
               </h3>
-              <span className="font-semibold text-primary" style={{ fontSize: '1.125rem' }}>
+              <span className="font-semibold text-primary text-[1.0625rem] sm:text-[1.125rem] tabular-nums">
                 {weekTotal.toFixed(2)} h this week
               </span>
             </div>
@@ -583,27 +594,25 @@ export default function Time() {
           </div>
 
           <div className="card">
-            <div className="flex justify-between items-center mb-2 flex-wrap gap-3">
-              <h3 className="flex items-center gap-2" style={{ margin: 0 }}>
-                <CalendarIcon size={20} /> Month view
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-2">
+              <h3 className="flex items-center gap-2 m-0 text-base">
+                <CalendarIcon size={20} className="flex-shrink-0" /> Month view
               </h3>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto min-w-0">
                 <button
                   type="button"
-                  className="btn btn-secondary"
-                  style={{ padding: '0.4rem 0.65rem' }}
+                  className="btn btn-secondary time-month-nav-btn flex-shrink-0"
                   onClick={() => setViewMonth((m) => startOfMonth(subMonths(m, 1)))}
                   aria-label="Previous month"
                 >
                   <ChevronLeft size={18} />
                 </button>
-                <span className="font-semibold" style={{ minWidth: '10rem', textAlign: 'center' }}>
+                <span className="font-semibold text-center flex-1 sm:flex-none sm:min-w-[10rem] tabular-nums truncate px-1">
                   {format(viewMonth, 'MMMM yyyy')}
                 </span>
                 <button
                   type="button"
-                  className="btn btn-secondary"
-                  style={{ padding: '0.4rem 0.65rem' }}
+                  className="btn btn-secondary time-month-nav-btn flex-shrink-0"
                   onClick={() => setViewMonth((m) => startOfMonth(addMonths(m, 1)))}
                   aria-label="Next month"
                 >
@@ -615,19 +624,9 @@ export default function Time() {
               <strong className="text-primary">{monthTotalHours.toFixed(2)} h</strong> completed in this calendar month ·{' '}
               {monthLogsSorted.length} {monthLogsSorted.length === 1 ? 'entry' : 'entries'} (incl. open shifts)
             </p>
-            <div
-              className="month-bars-scroll"
-              style={{
-                display: 'flex',
-                gap: '6px',
-                overflowX: 'auto',
-                paddingBottom: '0.75rem',
-                marginBottom: '1rem',
-                borderBottom: '1px solid var(--border-color)',
-              }}
-            >
+            <div className="month-bars-scroll time-month-bars-scroll">
               {monthBars.map((cell) => {
-                const isToday = isSameDay(cell.date, new Date());
+                const isToday = isSameVancouverDay(cell.date, vancouverNow());
                 const hPct = Math.min(
                   100,
                   Math.max(cell.hours > 0 ? 10 : 6, (cell.hours / monthChartMax) * 100)
@@ -637,7 +636,7 @@ export default function Time() {
                     key={cell.date.toISOString()}
                     className="flex flex-col items-center"
                     style={{ flex: '0 0 auto', width: '36px' }}
-                    title={`${format(cell.date, 'MMM d')}: ${cell.hours}h worked (completed)`}
+                    title={`${formatInVancouver(cell.date, 'MMM d')}: ${cell.hours}h worked (completed)`}
                   >
                     <span className="text-xs text-secondary font-semibold mb-1" style={{ fontSize: '0.65rem' }}>
                       {cell.hours > 0 ? `${cell.hours}` : '—'}
@@ -699,10 +698,10 @@ export default function Time() {
                   {monthLogsSorted.map((log) => (
                     <tr key={log.id} className="row-hover">
                       <td className="font-semibold">{resolveName(log.employeeId, log.employeeName)}</td>
-                      <td>{format(parseISO(log.clockIn), 'MMM d, yyyy')}</td>
-                      <td>{format(parseISO(log.clockIn), 'h:mm a')}</td>
+                      <td>{formatInVancouver(log.clockIn, 'MMM d, yyyy')}</td>
+                      <td>{formatInVancouver(log.clockIn, 'h:mm a')}</td>
                       <td>
-                        {log.clockOut ? format(parseISO(log.clockOut), 'h:mm a') : (
+                        {log.clockOut ? formatInVancouver(log.clockOut, 'h:mm a') : (
                           <span className="text-primary italic">In progress</span>
                         )}
                       </td>
@@ -762,10 +761,10 @@ export default function Time() {
                   {sortedLogs.map((log) => (
                     <tr key={log.id} className="row-hover">
                       <td className="font-semibold">{resolveName(log.employeeId, log.employeeName)}</td>
-                      <td>{format(parseISO(log.clockIn), 'MMM d, yyyy')}</td>
-                      <td>{format(parseISO(log.clockIn), 'h:mm a')}</td>
+                      <td>{formatInVancouver(log.clockIn, 'MMM d, yyyy')}</td>
+                      <td>{formatInVancouver(log.clockIn, 'h:mm a')}</td>
                       <td>
-                        {log.clockOut ? format(parseISO(log.clockOut), 'h:mm a') : (
+                        {log.clockOut ? formatInVancouver(log.clockOut, 'h:mm a') : (
                           <span className="text-primary italic">In progress</span>
                         )}
                       </td>
@@ -808,7 +807,13 @@ export default function Time() {
 
       {editingLog && (
         <div className="modal-overlay" role="presentation" onClick={() => setEditingLog(null)}>
-          <div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="edit-entry-title" onClick={(ev) => ev.stopPropagation()}>
+          <div
+          className="modal-panel time-edit-modal max-w-[min(440px,calc(100vw-1rem))] sm:max-w-[440px]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-entry-title"
+          onClick={(ev) => ev.stopPropagation()}
+        >
             <button
               type="button"
               className="btn-icon"
@@ -865,11 +870,11 @@ export default function Time() {
                   step={60}
                 />
               </div>
-              <div className="modal-panel__foot">
-                <button type="button" className="btn btn-secondary" onClick={() => setEditingLog(null)}>
+              <div className="modal-panel__foot time-edit-modal__foot">
+                <button type="button" className="btn btn-secondary w-full sm:w-auto" onClick={() => setEditingLog(null)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
+                <button type="submit" className="btn btn-primary w-full sm:w-auto">
                   Save changes
                 </button>
               </div>

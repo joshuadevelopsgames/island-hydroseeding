@@ -1,283 +1,338 @@
-import { useState, useEffect } from 'react';
-import { Plus, Users, Search, Phone, Edit2, Trash2 } from 'lucide-react';
-import ConfirmDialog from '../components/ConfirmDialog';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { Building2, Download, Loader2, Search } from 'lucide-react';
+import { MorphingPlusX } from '@/components/MorphingPlusX';
+import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { crmKeys, useCrmAccounts, useCrmMutations } from '@/hooks/useCrm';
+import { formatErrorForUi, importLegacyLeads as postLegacyLeads } from '@/lib/crmApi';
+import { formatInVancouver } from '@/lib/vancouverTime';
+import type { CrmAccountStatus, CrmAccountType, LegacyLead } from '@/lib/crmTypes';
 
-type LeadStatus = 'New Lead' | 'Contacted' | 'Estimate Sent' | 'Won / Closed' | 'Lost';
-type LeadType = 'Residential' | 'Commercial' | 'Municipal';
+const LEGACY_LEADS_KEY = 'crmLeads';
 
-type Lead = {
-  id: string;
-  name: string;
-  company: string;
-  type: LeadType;
-  status: LeadStatus;
-  contact: string;
-  marketingSource: string;
-  lastContacted: string;
-  notes: string;
-};
+function accountsToCsv(accounts: { name: string; company: string | null; account_type: string; status: string; phone: string | null; email: string | null; address: string | null; notes: string | null }[]) {
+  const headers = ['name', 'company', 'account_type', 'status', 'phone', 'email', 'address', 'notes'];
+  const escape = (v: string | null | undefined) => {
+    const s = String(v ?? '');
+    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const lines = [headers.join(',')];
+  for (const a of accounts) {
+    lines.push(headers.map((h) => escape(a[h as keyof typeof a] as string | null)).join(','));
+  }
+  return lines.join('\n');
+}
 
-const STORAGE_KEY = 'crmLeads';
+function statusBadge(status: string) {
+  const s = status as CrmAccountStatus;
+  const map: Partial<Record<CrmAccountStatus, 'default' | 'secondary' | 'outline'>> = {
+    'New Lead': 'outline',
+    Contacted: 'secondary',
+    'Estimate Sent': 'secondary',
+    'Won / Closed': 'default',
+    Lost: 'outline',
+  };
+  return <Badge variant={map[s] ?? 'secondary'}>{status}</Badge>;
+}
 
 export default function CRM() {
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [isAdding, setIsAdding] = useState(false);
-  const [deleteLeadId, setDeleteLeadId] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const { data: accounts = [], isLoading, isError, error, refetch } = useCrmAccounts();
+  const m = useCrmMutations();
+  const [search, setSearch] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const legacyDone = useRef(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
+    if (legacyDone.current) return;
+    legacyDone.current = true;
+    let cancelled = false;
+    void (async () => {
+      const raw = localStorage.getItem(LEGACY_LEADS_KEY);
+      if (!raw) return;
       try {
-        setLeads(JSON.parse(saved));
+        const leads = JSON.parse(raw) as LegacyLead[];
+        if (!Array.isArray(leads) || leads.length === 0) return;
+        await postLegacyLeads(leads);
+        if (cancelled) return;
+        localStorage.removeItem(LEGACY_LEADS_KEY);
+        void qc.invalidateQueries({ queryKey: crmKeys.accounts() });
       } catch {
-        setLeads([]);
+        /* ignore */
       }
-    } else {
-      setLeads([]);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
-    }
-  }, []);
-
-  const handleSave = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const newLead: Lead = {
-      id: Math.random().toString(36).substr(2, 9),
-      name: formData.get('name') as string,
-      company: formData.get('company') as string,
-      type: formData.get('type') as LeadType,
-      status: formData.get('status') as LeadStatus,
-      contact: formData.get('contact') as string,
-      marketingSource: formData.get('marketingSource') as string,
-      lastContacted: new Date().toISOString(),
-      notes: formData.get('notes') as string,
+    })();
+    return () => {
+      cancelled = true;
     };
+  }, [qc]);
 
-    const updated = [newLead, ...leads];
-    setLeads(updated);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    setIsAdding(false);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return accounts;
+    return accounts.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        (a.company ?? '').toLowerCase().includes(q) ||
+        (a.email ?? '').toLowerCase().includes(q) ||
+        (a.phone ?? '').toLowerCase().includes(q)
+    );
+  }, [accounts, search]);
+
+  const exportCsv = () => {
+    const blob = new Blob([accountsToCsv(filtered)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `crm-accounts-${formatInVancouver(new Date(), 'yyyy-MM-dd')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
-
-  const leadPendingDelete = deleteLeadId ? leads.find((l) => l.id === deleteLeadId) : null;
-
-  const confirmDeleteLead = () => {
-    if (!deleteLeadId) return;
-    const updated = leads.filter((l) => l.id !== deleteLeadId);
-    setLeads(updated);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    setDeleteLeadId(null);
-  };
-
-  const getStatusColor = (status: LeadStatus) => {
-    switch (status) {
-      case 'New Lead':
-        return { bg: '#e0e7ff', text: '#4338ca' };
-      case 'Contacted':
-        return { bg: '#fef3c7', text: '#b45309' };
-      case 'Estimate Sent':
-        return { bg: '#e0f2fe', text: '#0369a1' };
-      case 'Won / Closed':
-        return { bg: 'var(--light-green)', text: 'var(--lawn-green)' };
-      case 'Lost':
-        return { bg: '#fee2e2', text: '#ef4444' };
-      default:
-        return { bg: '#f1f5f9', text: '#64748b' };
-    }
-  };
-
-  const filteredLeads = leads.filter(
-    (l) =>
-      l.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      l.company.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   return (
     <div>
-      <ConfirmDialog
-        open={deleteLeadId !== null}
-        title="Delete this lead?"
-        message={
-          leadPendingDelete
-            ? `Remove “${leadPendingDelete.name}”${leadPendingDelete.company ? ` (${leadPendingDelete.company})` : ''} from the CRM. This cannot be undone.`
-            : 'Remove this lead from the CRM. This cannot be undone.'
-        }
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
-        variant="danger"
-        onConfirm={confirmDeleteLead}
-        onCancel={() => setDeleteLeadId(null)}
-      />
-
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="mb-2">Leads & CRM</h1>
-          <p>Track prospective clients, marketing sources, and sales.</p>
+      <p className="page-kicker">Sales</p>
+      <div className="flex justify-between items-center mb-8 flex-wrap gap-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="mb-2 flex items-center gap-2">
+            <Building2 size={28} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
+            Accounts &amp; CRM
+          </h1>
+          <p className="text-secondary mb-0">Accounts with contacts, interaction timeline, and research notes.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setIsAdding(!isAdding)}>
-          {isAdding ? 'Cancel' : (
-            <>
-              <Plus size={16} /> New Lead
-            </>
-          )}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={filtered.length === 0}
+            onClick={exportCsv}
+          >
+            <Download size={16} aria-hidden /> Export
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary page-toolbar__cta"
+            aria-expanded={createOpen}
+            onClick={() => setCreateOpen((v) => !v)}
+          >
+            <MorphingPlusX isOpen={createOpen} size={16} />
+            {createOpen ? 'Close' : 'New account'}
+          </button>
+        </div>
       </div>
 
-      {isAdding && (
-        <div className="card mb-8">
-          <h3 className="mb-4">Add New Lead</h3>
-          <form onSubmit={handleSave} className="flex flex-col gap-6">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-              <div>
-                <label>Contact Name *</label>
-                <input name="name" required placeholder="Name" />
-              </div>
-              <div>
-                <label>Company (if Commercial)</label>
-                <input name="company" placeholder="Company name (optional)" />
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.5rem' }}>
-              <div>
-                <label>Lead Type *</label>
-                <select name="type" required>
-                  <option value="Residential">Residential</option>
-                  <option value="Commercial">Commercial</option>
-                  <option value="Municipal">Municipal</option>
-                </select>
-              </div>
-              <div>
-                <label>Status *</label>
-                <select name="status" required>
-                  <option value="New Lead">New Lead</option>
-                  <option value="Contacted">Contacted</option>
-                  <option value="Estimate Sent">Estimate Sent</option>
-                  <option value="Won / Closed">Won / Closed</option>
-                  <option value="Lost">Lost</option>
-                </select>
-              </div>
-              <div>
-                <label>Marketing Source</label>
-                <select name="marketingSource">
-                  <option value="Google Search">Google Search</option>
-                  <option value="Facebook Ad">Facebook Ad</option>
-                  <option value="Referral">Word of Mouth / Referral</option>
-                  <option value="Truck Signage">Truck Signage</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label>Phone or Email *</label>
-              <input name="contact" required placeholder="Phone or email" />
-            </div>
-
-            <div>
-              <label>Notes / Follow Up Action</label>
-              <textarea name="notes" rows={3} placeholder="Notes (optional)" />
-            </div>
-
-            <div className="flex justify-end pt-4 border-t-subtle">
-              <button type="submit" className="btn btn-primary">
-                Save Lead
-              </button>
-            </div>
-          </form>
+      {isError && (
+        <div className="card mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <p className="min-w-0 max-w-full break-words text-sm">
+            <span className="font-semibold text-[var(--color-danger)]">{formatErrorForUi(error)}</span>{' '}
+            <span className="text-secondary">
+              Deploy with Supabase + run migration 002, or use{' '}
+              <code className="whitespace-normal break-all rounded bg-[var(--surface-raised)] px-1.5 py-0.5 text-xs">
+                vercel dev
+              </code>{' '}
+              for local API.
+            </span>
+          </p>
+          <button type="button" className="btn btn-secondary shrink-0" onClick={() => void refetch()}>
+            Retry
+          </button>
         </div>
       )}
 
-      <div className="card">
-        <div className="flex justify-between items-center mb-6">
-          <div style={{ position: 'relative', width: '300px' }}>
+      <div className="card min-w-0 overflow-hidden p-0">
+        <div className="flex flex-col gap-4 border-b border-[var(--border-color)] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <h3 className="mb-1 flex items-center gap-2 text-[1.125rem] font-semibold">
+              <Building2 size={20} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
+              Accounts
+            </h3>
+            <p className="mb-0 text-sm text-secondary">
+              {isLoading ? 'Loading counts…' : `${filtered.length} shown · ${accounts.length} total`}
+            </p>
+          </div>
+          <div className="relative w-full min-w-0 sm:max-w-xs">
             <Search
               size={18}
-              color="var(--text-muted)"
-              style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)' }}
+              aria-hidden
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
             />
             <input
-              type="text"
-              placeholder="Search leads..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              style={{ paddingLeft: '2.5rem' }}
+              type="search"
+              className="w-full pl-10"
+              placeholder="Search name, company, email…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search accounts"
             />
-          </div>
-          <div className="flex gap-4 items-center">
-            <span className="text-sm font-semibold text-secondary">Total: {leads.length} leads</span>
-            <span className="text-sm font-semibold text-secondary">
-              Won: {leads.filter((l) => l.status === 'Won / Closed').length}
-            </span>
           </div>
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-secondary)' }}>
-                <th style={{ padding: '1rem 0.5rem', fontSize: '0.875rem' }}>Name / Company</th>
-                <th style={{ padding: '1rem 0.5rem', fontSize: '0.875rem' }}>Contact</th>
-                <th style={{ padding: '1rem 0.5rem', fontSize: '0.875rem' }}>Type & Source</th>
-                <th style={{ padding: '1rem 0.5rem', fontSize: '0.875rem' }}>Status</th>
-                <th style={{ padding: '1rem 0.5rem', fontSize: '0.875rem' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredLeads.map((lead) => {
-                const colors = getStatusColor(lead.status);
-                return (
-                  <tr key={lead.id} style={{ borderBottom: '1px solid var(--border-color)' }} className="row-hover">
-                    <td style={{ padding: '1rem 0.5rem' }}>
-                      <p className="font-semibold">{lead.name}</p>
-                      {lead.company && <p className="text-xs text-muted mt-tight">{lead.company}</p>}
-                    </td>
-                    <td style={{ padding: '1rem 0.5rem', color: 'var(--text-secondary)' }}>
-                      <p className="flex items-center gap-1 text-sm">
-                        <Phone size={14} /> {lead.contact}
-                      </p>
-                    </td>
-                    <td style={{ padding: '1rem 0.5rem' }}>
-                      <p className="text-sm">{lead.type}</p>
-                      <p className="text-xs text-muted mt-tight">{lead.marketingSource}</p>
-                    </td>
-                    <td style={{ padding: '1rem 0.5rem' }}>
-                      <span className="badge" style={{ backgroundColor: colors.bg, color: colors.text }}>
-                        {lead.status}
-                      </span>
-                    </td>
-                    <td style={{ padding: '1rem 0.5rem' }}>
-                      <div className="flex items-center" style={{ gap: '0.35rem' }}>
-                        <button className="btn btn-secondary" style={{ padding: '0.4rem 0.6rem' }} type="button" title="Edit Lead">
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          className="btn btn-danger"
-                          style={{ padding: '0.4rem 0.6rem' }}
-                          type="button"
-                          title="Delete lead"
-                          onClick={() => setDeleteLeadId(lead.id)}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredLeads.length === 0 && (
-                <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
-                    <Users size={32} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
-                    <p>No leads yet. Add one with New Lead.</p>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="max-h-[min(60vh,520px)] overflow-y-auto">
+          <div className="divide-y divide-[var(--border-color)]">
+            {isLoading && accounts.length === 0 && (
+              <div className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-secondary">
+                <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
+                <span>Loading accounts…</span>
+              </div>
+            )}
+            {filtered.map((a) => (
+              <Link
+                key={a.id}
+                to={`/crm/accounts/${a.id}`}
+                className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 transition-colors hover:bg-[var(--surface-hover)]"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{a.name}</p>
+                  {(a.company || a.email || a.phone) && (
+                    <p className="mt-0.5 truncate text-sm text-secondary">
+                      {[a.company, a.phone, a.email].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">{a.account_type}</Badge>
+                  {statusBadge(a.status)}
+                </div>
+              </Link>
+            ))}
+            {!isLoading && filtered.length === 0 && (
+              <div className="px-6 py-16 text-center text-sm text-secondary">
+                {accounts.length === 0 ? 'No accounts yet. Create one with New account.' : 'No accounts match your search.'}
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      <CreateAccountDialog open={createOpen} onOpenChange={setCreateOpen} onCreate={(payload) => m.createAccount.mutateAsync(payload)} />
     </div>
+  );
+}
+
+function CreateAccountDialog({
+  open,
+  onOpenChange,
+  onCreate,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onCreate: (p: Record<string, unknown>) => Promise<unknown>;
+}) {
+  const [type, setType] = useState<CrmAccountType>('Residential');
+  const [status, setStatus] = useState<CrmAccountStatus>('New Lead');
+  const [pending, setPending] = useState(false);
+
+  const submit: React.FormEventHandler<HTMLFormElement> = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    setPending(true);
+    try {
+      await onCreate({
+        name: String(fd.get('name') ?? '').trim(),
+        company: String(fd.get('company') ?? '').trim() || null,
+        account_type: type,
+        status,
+        marketing_source: String(fd.get('marketing_source') ?? '') || null,
+        phone: String(fd.get('phone') ?? '').trim() || null,
+        email: String(fd.get('email') ?? '').trim() || null,
+        address: String(fd.get('address') ?? '').trim() || null,
+        notes: String(fd.get('notes') ?? '') || null,
+      });
+      onOpenChange(false);
+      e.currentTarget.reset();
+      setType('Residential');
+      setStatus('New Lead');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>New account</DialogTitle>
+          <DialogDescription>Add a company or property account. You can attach contacts on the next screen.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="acc-name">Account name *</Label>
+              <Input id="acc-name" name="name" required placeholder="Display name" />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="acc-company">Company / property</Label>
+              <Input id="acc-company" name="company" placeholder="Optional" />
+            </div>
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <select
+                className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
+                value={type}
+                onChange={(e) => setType(e.target.value as CrmAccountType)}
+              >
+                <option value="Residential">Residential</option>
+                <option value="Commercial">Commercial</option>
+                <option value="Municipal">Municipal</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <select
+                className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
+                value={status}
+                onChange={(e) => setStatus(e.target.value as CrmAccountStatus)}
+              >
+                <option>New Lead</option>
+                <option>Contacted</option>
+                <option>Estimate Sent</option>
+                <option>Won / Closed</option>
+                <option>Lost</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="acc-phone">Phone</Label>
+              <Input id="acc-phone" name="phone" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="acc-email">Email</Label>
+              <Input id="acc-email" name="email" type="email" />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="acc-addr">Address</Label>
+              <Input id="acc-addr" name="address" />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="acc-src">Marketing source</Label>
+              <Input id="acc-src" name="marketing_source" placeholder="Referral, web, etc." />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="acc-notes">Notes</Label>
+              <Textarea id="acc-notes" name="notes" rows={3} />
+            </div>
+          </div>
+          <DialogFooter>
+            <button type="button" className="btn btn-secondary" onClick={() => onOpenChange(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={pending}>
+              {pending ? 'Saving…' : 'Create'}
+            </button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
