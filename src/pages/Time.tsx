@@ -415,10 +415,12 @@ export default function Time() {
       />
 
       <p className="page-kicker">Workforce</p>
-      <div className="flex justify-between items-start mb-6 sm:mb-8 flex-wrap gap-4">
-        <div>
-          <h1 className="mb-2">Time tracking</h1>
-          <p className="text-[0.9375rem] sm:text-base leading-snug">
+      <div className="flex justify-between items-start mb-4 sm:mb-8 flex-wrap gap-3 sm:gap-4">
+        <div className="min-w-0 max-w-full">
+          <h1 className="mb-1 sm:mb-2 text-[1.5rem] sm:text-[1.75rem] lg:text-[2.25rem] leading-tight">
+            Time tracking
+          </h1>
+          <p className="time-intro text-[0.9375rem] sm:text-base leading-snug">
             Punch in by person, manage the team list, and correct entries when needed.
           </p>
         </div>
@@ -426,8 +428,8 @@ export default function Time() {
 
       <div className="time-layout">
         <div className="flex flex-col gap-4">
-          <div className="card flex flex-col items-stretch p-4 sm:p-6 lg:p-8">
-            <div className="text-center mb-4 sm:mb-6">
+          <div className="card flex flex-col items-stretch p-3.5 sm:p-6 lg:p-8">
+            <div className="text-center mb-3 sm:mb-6">
               <Clock
                 className="mb-2 sm:mb-3 w-9 h-9 sm:w-11 sm:h-11 mx-auto"
                 style={{ color: 'var(--lawn-green)' }}
@@ -450,8 +452,9 @@ export default function Time() {
                     <span className="text-secondary font-normal"> · in since {formatInVancouver(activeLog.clockIn, 'h:mm a')}</span>
                   </span>
                 </div>
-                <button className="btn btn-danger w-full btn-lg" type="button" onClick={handleClockOut}>
-                  <Square size={20} fill="currentColor" /> Clock out
+                <button className="btn btn-danger w-full btn-lg time-punch-primary" type="button" onClick={handleClockOut}>
+                  <Square size={20} fill="currentColor" className="flex-shrink-0" aria-hidden />
+                  <span>Clock out</span>
                 </button>
               </div>
             ) : (
@@ -481,26 +484,34 @@ export default function Time() {
                   )}
                 </select>
                 <button
-                  className="btn btn-primary w-full btn-lg"
+                  className="btn btn-primary w-full btn-lg time-punch-primary"
                   type="button"
                   onClick={handleClockIn}
                   disabled={employees.length === 0}
                 >
-                  <Play size={20} fill="currentColor" /> Clock in
+                  <Play size={20} fill="currentColor" className="flex-shrink-0" aria-hidden />
+                  <span>Clock in</span>
                 </button>
               </>
             )}
           </div>
 
-          <div className="card">
-            <h3 className="mb-4 flex items-center gap-2">
-              <Users size={20} /> Team
+          <div className="card min-w-0">
+            <h3 className="mb-3 sm:mb-4 flex items-center gap-2 min-w-0">
+              <Users size={20} className="flex-shrink-0" /> Team
             </h3>
-            <p className="text-sm text-secondary mb-4">People who can be selected for punches. Names sync onto each time entry.</p>
-            <form onSubmit={handleAddEmployee} className="flex flex-col gap-2 mb-4">
-              <div className="flex gap-2">
-                <input name="newEmployeeName" placeholder="Full name" aria-label="New employee name" />
-                <button type="submit" className="btn btn-secondary" style={{ flexShrink: 0 }} title="Add">
+            <p className="time-team-help text-sm text-secondary mb-3 sm:mb-4">
+              People who can be selected for punches. Names sync onto each time entry.
+            </p>
+            <form onSubmit={handleAddEmployee} className="flex flex-col gap-2 mb-4 min-w-0">
+              <div className="flex gap-2 min-w-0 items-stretch">
+                <input
+                  name="newEmployeeName"
+                  placeholder="Full name"
+                  aria-label="New employee name"
+                  className="min-w-0 flex-1"
+                />
+                <button type="submit" className="btn btn-secondary flex-shrink-0" title="Add">
                   <Plus size={18} />
                 </button>
               </div>
