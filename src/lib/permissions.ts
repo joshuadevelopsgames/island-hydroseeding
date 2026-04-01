@@ -15,6 +15,7 @@ export const PAGE_OPTIONS: { path: string; label: string }[] = [
   { path: '/requests', label: 'Requests' },
   { path: '/quotes', label: 'Quotes' },
   { path: '/jobs', label: 'Jobs' },
+  { path: '/invoices', label: 'Invoices' },
   { path: '/schedule', label: 'Schedule' },
 ];
 

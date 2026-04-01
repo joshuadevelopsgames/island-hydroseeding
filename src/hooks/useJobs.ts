@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchJobs, fetchJobBundle, jobsPost } from '@/lib/jobsApi';
-import type { Job, JobBundle } from '@/lib/jobsTypes';
+import type { Job } from '@/lib/jobsTypes';
 
 export const jobsKeys = {
   all: ['jobs'] as const,

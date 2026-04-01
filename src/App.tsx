@@ -19,6 +19,9 @@ import Requests from './pages/Requests';
 import RequestDetail from './pages/RequestDetail';
 import Jobs from './pages/Jobs';
 import JobDetail from './pages/JobDetail';
+import Invoices from './pages/Invoices';
+import InvoiceDetail from './pages/InvoiceDetail';
+import Schedule from './pages/Schedule';
 import Time from './pages/Time';
 import Team from './pages/Team';
 import Account from './pages/Account';
@@ -170,6 +173,30 @@ function App() {
             element={
               <ProtectedRoute>
                 <JobDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/invoices"
+            element={
+              <ProtectedRoute>
+                <Invoices />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/invoices/:id"
+            element={
+              <ProtectedRoute>
+                <InvoiceDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/schedule"
+            element={
+              <ProtectedRoute>
+                <Schedule />
               </ProtectedRoute>
             }
           />

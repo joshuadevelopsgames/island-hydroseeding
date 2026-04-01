@@ -21,6 +21,7 @@ import {
   Calendar,
   Inbox,
   Briefcase,
+  Receipt,
 } from 'lucide-react';
 import { formatInVancouver } from '../lib/vancouverTime';
 import { useAuth } from '../context/AuthContext';
@@ -45,6 +46,7 @@ const primaryNavItems: { name: string; path: string; icon: typeof LayoutDashboar
   { name: 'Requests', path: '/requests', icon: Inbox },
   { name: 'Quotes', path: '/quotes', icon: FileText },
   { name: 'Jobs', path: '/jobs', icon: Briefcase },
+  { name: 'Invoices', path: '/invoices', icon: Receipt },
   { name: 'Schedule', path: '/schedule', icon: Calendar },
   { name: 'Time Tracking', path: '/time', icon: Clock },
   { name: 'Pre-trips', path: '/pre-trips', icon: ClipboardCheck },

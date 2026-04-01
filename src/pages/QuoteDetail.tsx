@@ -74,7 +74,6 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
     unit_price: 0,
   });
 
-  const _selectedTemplate = templates?.find((t) => t.id === selectedTemplateId);
   const selectedAccount = accounts?.find((a) => a.id === selectedAccountId);
   const selectedProperty = properties?.find((p) => p.id === selectedPropertyId);
 

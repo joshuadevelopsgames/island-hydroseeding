@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import type { WorkRequest, RequestStatus, RequestSource } from '@/lib/requestsTypes';
+import type { RequestStatus, RequestSource } from '@/lib/requestsTypes';
 import { useRequestDetail, useRequestsMutations } from '@/hooks/useRequests';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,7 +26,7 @@ export default function RequestDetail() {
   const navigate = useNavigate();
   const isNew = id === 'new';
 
-  const { data, isLoading: isLoadingDetail } = useRequestDetail(isNew ? null : id);
+  const { data, isLoading: isLoadingDetail } = useRequestDetail(isNew ? undefined : id);
   const { create, update, delete: delete_, convertToQuote } = useRequestsMutations();
 
   const [formData, setFormData] = useState<FormData>(() => {
@@ -47,8 +47,8 @@ export default function RequestDetail() {
     return {
       title: req?.title || '',
       description: req?.description || '',
-      status: req?.status || 'New',
-      source: req?.source || 'website',
+      status: (req?.status as RequestStatus) || 'New',
+      source: (req?.source as RequestSource) || 'website',
       contact_name: req?.contact_name || '',
       contact_phone: req?.contact_phone || '',
       contact_email: req?.contact_email || '',

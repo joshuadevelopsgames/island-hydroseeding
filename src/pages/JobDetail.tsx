@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import type { Job, JobLineItem, JobVisit, JobExpense, JobTimeEntry, JobBundle, JobStatus } from '@/lib/jobsTypes';
+import type { Job, JobLineItem, JobVisit, JobExpense, JobTimeEntry, JobStatus } from '@/lib/jobsTypes';
 import { useJobDetail, useJobsMutations } from '@/hooks/useJobs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,6 @@ import {
   Calendar,
   DollarSign,
   Clock,
-  Briefcase,
   CheckCircle,
 } from 'lucide-react';
 
@@ -37,14 +36,12 @@ function JobDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'overview' | 'line-items' | 'visits' | 'expenses' | 'time' | 'profitability'>('overview');
-  const [editingFields, setEditingFields] = useState<Record<string, string | boolean | null>>({});
+  const [editingFields, setEditingFields] = useState<Record<string, string | null>>({});
 
   const { data: bundle, isLoading, error } = useJobDetail(id);
   const {
-    createJob,
     updateJob,
     createLineItem,
-    updateLineItem,
     deleteLineItem,
     createVisit,
     completeVisit,
@@ -112,7 +109,7 @@ function JobDetail() {
             <div>
               <div className="flex items-center gap-3 mb-2">
                 <h1 className="text-3xl font-bold">Job #{job.job_number}</h1>
-                <Badge variant={STATUS_COLORS[job.status]}>{job.status}</Badge>
+                <Badge variant={STATUS_COLORS[job.status as JobStatus] ?? 'outline'}>{job.status}</Badge>
                 {job.job_type && <Badge variant="secondary">{job.job_type}</Badge>}
               </div>
               <p className="text-lg text-slate-600">{job.title}</p>
@@ -177,7 +174,7 @@ function JobDetail() {
                 <div>
                   <label className="block text-sm font-medium text-slate-900 mb-2">Status</label>
                   <select
-                    value={editingFields.status ?? job.status}
+                    value={(editingFields.status as string) ?? job.status}
                     onChange={(e) => setEditingFields({ ...editingFields, status: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                   >
@@ -192,7 +189,7 @@ function JobDetail() {
                 <div>
                   <label className="block text-sm font-medium text-slate-900 mb-2">Job Type</label>
                   <select
-                    value={editingFields.job_type ?? job.job_type}
+                    value={(editingFields.job_type as string) ?? job.job_type}
                     onChange={(e) => setEditingFields({ ...editingFields, job_type: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                   >
@@ -217,7 +214,7 @@ function JobDetail() {
                     <label className="block text-sm font-medium text-slate-900 mb-2">End Date</label>
                     <input
                       type="date"
-                      value={editingFields.end_date ?? job.end_date?.split('T')[0] ?? ''}
+                      value={(editingFields.end_date as string) ?? job.end_date?.split('T')[0] ?? ''}
                       onChange={(e) => setEditingFields({ ...editingFields, end_date: e.target.value })}
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg"
                     />
@@ -227,7 +224,7 @@ function JobDetail() {
                 <div>
                   <label className="block text-sm font-medium text-slate-900 mb-2">Notes</label>
                   <textarea
-                    value={editingFields.notes ?? job.notes ?? ''}
+                    value={(editingFields.notes as string) ?? job.notes ?? ''}
                     onChange={(e) => setEditingFields({ ...editingFields, notes: e.target.value })}
                     placeholder="—"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg h-32"
@@ -246,7 +243,6 @@ function JobDetail() {
               <LineItemsSection
                 lineItems={line_items}
                 jobId={job.id}
-                jobTotal={job.total_price}
                 createLineItem={createLineItem}
                 deleteLineItem={deleteLineItem}
               />
@@ -303,7 +299,7 @@ function CreateJobForm({ onSuccess }: { onSuccess: (jobId: string) => void }) {
   const { createJob } = useJobsMutations();
   const [formData, setFormData] = useState({
     title: '',
-    job_type: 'One-off' as const,
+    job_type: 'One-off' as string,
     status: 'Active' as JobStatus,
     start_date: new Date().toISOString().split('T')[0],
     notes: '',
@@ -419,20 +415,18 @@ function CreateJobForm({ onSuccess }: { onSuccess: (jobId: string) => void }) {
 function LineItemsSection({
   lineItems,
   jobId,
-  jobTotal,
   createLineItem,
   deleteLineItem,
 }: {
   lineItems: JobLineItem[];
   jobId: string;
-  jobTotal: number;
   createLineItem: any;
   deleteLineItem: any;
 }) {
   const [formData, setFormData] = useState({
     product_service_name: '',
     description: '',
-    qty: '1',
+    quantity: '1',
     unit_price: '0',
   });
 
@@ -442,13 +436,13 @@ function LineItemsSection({
       jobId,
       product_service_name: formData.product_service_name,
       description: formData.description,
-      qty: parseInt(formData.qty),
+      quantity: parseInt(formData.quantity),
       unit_price: parseFloat(formData.unit_price),
     });
-    setFormData({ product_service_name: '', description: '', qty: '1', unit_price: '0' });
+    setFormData({ product_service_name: '', description: '', quantity: '1', unit_price: '0' });
   };
 
-  const lineItemCost = lineItems.reduce((sum, item) => sum + item.qty * item.unit_price, 0);
+  const lineItemCost = lineItems.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
 
   return (
     <div className="space-y-6">
@@ -469,13 +463,13 @@ function LineItemsSection({
               <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
                 <td className="py-3 px-4">{item.product_service_name}</td>
                 <td className="py-3 px-4">{item.description}</td>
-                <td className="py-3 px-4 text-right">{item.qty}</td>
+                <td className="py-3 px-4 text-right">{item.quantity}</td>
                 <td className="py-3 px-4 text-right">
                   {new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(item.unit_price)}
                 </td>
                 <td className="py-3 px-4 text-right font-medium">
                   {new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(
-                    item.qty * item.unit_price
+                    item.quantity * item.unit_price
                   )}
                 </td>
                 <td className="py-3 px-4 text-right">
@@ -528,8 +522,8 @@ function LineItemsSection({
           <input
             type="number"
             placeholder="Qty"
-            value={formData.qty}
-            onChange={(e) => setFormData({ ...formData, qty: e.target.value })}
+            value={formData.quantity}
+            onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
             min="1"
             className="px-3 py-2 border border-slate-300 rounded-lg"
             required
@@ -801,7 +795,7 @@ function TimeEntriesSection({
     setFormData({ started_at: '', ended_at: '', notes: '' });
   };
 
-  const totalMinutes = timeEntries.reduce((sum, entry) => sum + entry.duration_minutes, 0);
+  const totalMinutes = timeEntries.reduce((sum, entry) => sum + (entry.duration_minutes ?? 0), 0);
   const totalHours = (totalMinutes / 60).toFixed(2);
 
   return (
@@ -817,10 +811,10 @@ function TimeEntriesSection({
                 <div>
                   <p className="font-medium text-slate-900">
                     {formatInVancouver(new Date(entry.started_at), 'MMM dd h:mm a')} -{' '}
-                    {formatInVancouver(new Date(entry.ended_at), 'h:mm a')}
+                    {entry.ended_at ? formatInVancouver(new Date(entry.ended_at), 'h:mm a') : 'In progress'}
                   </p>
                   <p className="text-sm text-slate-600">
-                    {(entry.duration_minutes / 60).toFixed(2)} hours {entry.user_id ? `• ${entry.user_id}` : ''}
+                    {((entry.duration_minutes ?? 0) / 60).toFixed(2)} hours {entry.user_id ? `• ${entry.user_id}` : ''}
                   </p>
                   {entry.notes && <p className="text-sm text-slate-600">{entry.notes}</p>}
                 </div>
@@ -901,8 +895,8 @@ function ProfitabilitySection({
   timeEntries: JobTimeEntry[];
 }) {
   const revenue = job.total_price;
-  const lineItemCost = lineItems.reduce((sum, item) => sum + item.qty * item.unit_price, 0);
-  const labourCost = (timeEntries.reduce((sum, entry) => sum + entry.duration_minutes, 0) / 60) * 45;
+  const lineItemCost = lineItems.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
+  const labourCost = (timeEntries.reduce((sum, entry) => sum + (entry.duration_minutes ?? 0), 0) / 60) * 45;
   const expenseCost = expenses.reduce((sum, exp) => sum + exp.amount, 0);
   const totalCost = lineItemCost + labourCost + expenseCost;
   const profit = revenue - totalCost;
@@ -950,7 +944,7 @@ function ProfitabilitySection({
             {new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(labourCost)}
           </p>
           <p className="text-xs text-slate-500 mt-1">
-            {(timeEntries.reduce((sum, entry) => sum + entry.duration_minutes, 0) / 60).toFixed(2)} hours @ $45/hr
+            {(timeEntries.reduce((sum, entry) => sum + (entry.duration_minutes ?? 0), 0) / 60).toFixed(2)} hours @ $45/hr
           </p>
         </div>
 
