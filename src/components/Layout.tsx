@@ -19,6 +19,8 @@ import {
   ChevronDown,
   FileText,
   Calendar,
+  Inbox,
+  Briefcase,
 } from 'lucide-react';
 import { formatInVancouver } from '../lib/vancouverTime';
 import { useAuth } from '../context/AuthContext';
@@ -40,7 +42,9 @@ function sidebarUserInitials(name: string): string {
 const primaryNavItems: { name: string; path: string; icon: typeof LayoutDashboard }[] = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
   { name: 'Leads & CRM', path: '/crm', icon: Users },
+  { name: 'Requests', path: '/requests', icon: Inbox },
   { name: 'Quotes', path: '/quotes', icon: FileText },
+  { name: 'Jobs', path: '/jobs', icon: Briefcase },
   { name: 'Schedule', path: '/schedule', icon: Calendar },
   { name: 'Time Tracking', path: '/time', icon: Clock },
   { name: 'Pre-trips', path: '/pre-trips', icon: ClipboardCheck },

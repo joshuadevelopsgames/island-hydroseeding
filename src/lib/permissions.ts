@@ -12,7 +12,9 @@ export const PAGE_OPTIONS: { path: string; label: string }[] = [
   { path: '/tasks', label: 'Tasks' },
   { path: '/crm', label: 'Leads & CRM' },
   { path: '/time', label: 'Time tracking' },
+  { path: '/requests', label: 'Requests' },
   { path: '/quotes', label: 'Quotes' },
+  { path: '/jobs', label: 'Jobs' },
   { path: '/schedule', label: 'Schedule' },
 ];
 

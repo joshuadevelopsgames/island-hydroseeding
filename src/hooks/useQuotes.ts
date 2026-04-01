@@ -7,7 +7,7 @@ import {
   fetchTemplates,
   fetchAccountProperties,
 } from '@/lib/quotesApi';
-import type { Quote, QuoteBundle, ProductService, QuoteTemplate, CrmProperty } from '@/lib/quotesTypes';
+import type { Quote } from '@/lib/quotesTypes';
 
 export const quotesKeys = {
   all: ['quotes'] as const,

@@ -1,30 +1,38 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Loader2, Search } from 'lucide-react';
+import { Inbox, Loader2, Search, Phone, Mail, Globe, UserPlus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useQuotes } from '@/hooks/useQuotes';
+import { useRequests } from '@/hooks/useRequests';
 import { formatInVancouver } from '@/lib/vancouverTime';
-import type { Quote, QuoteStatus } from '@/lib/quotesTypes';
+import type { WorkRequest, RequestStatus } from '@/lib/requestsTypes';
 
-const STATUS_COLORS: Record<QuoteStatus, 'default' | 'secondary' | 'outline'> = {
-  Draft: 'outline',
-  Sent: 'secondary',
-  'Awaiting Response': 'secondary',
-  'Changes Requested': 'outline',
-  Approved: 'default',
-  Converted: 'default',
+const STATUS_COLORS: Record<RequestStatus, 'default' | 'secondary' | 'outline'> = {
+  'New': 'default',
+  'Assessment Scheduled': 'secondary',
+  'Assessment Complete': 'secondary',
+  'Converted': 'outline',
+  'Archived': 'outline',
 };
 
 function getStatusBadgeVariant(status: string): 'default' | 'secondary' | 'outline' {
-  return STATUS_COLORS[status as QuoteStatus] ?? 'outline';
+  return STATUS_COLORS[status as RequestStatus] ?? 'outline';
 }
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-CA', {
-    style: 'currency',
-    currency: 'CAD',
-  }).format(amount);
+function getSourceIcon(source: string) {
+  switch (source) {
+    case 'phone':
+      return <Phone size={16} aria-hidden className="shrink-0" />;
+    case 'email':
+      return <Mail size={16} aria-hidden className="shrink-0" />;
+    case 'website':
+      return <Globe size={16} aria-hidden className="shrink-0" />;
+    case 'referral':
+      return <UserPlus size={16} aria-hidden className="shrink-0" />;
+    case 'other':
+    default:
+      return <Inbox size={16} aria-hidden className="shrink-0" />;
+  }
 }
 
 function DashboardCard({
@@ -55,18 +63,17 @@ function DashboardCard({
   );
 }
 
-function StatusBreakdownCard({ quotes, isLoading }: { quotes: Quote[]; isLoading: boolean }) {
+function StatusBreakdownCard({ requests, isLoading }: { requests: WorkRequest[]; isLoading: boolean }) {
   const stats = useMemo(() => {
     if (isLoading) return null;
     const counts = {
-      Draft: quotes.filter((q) => q.status === 'Draft').length,
-      Sent: quotes.filter((q) => q.status === 'Sent').length,
-      'Awaiting Response': quotes.filter((q) => q.status === 'Awaiting Response').length,
-      Approved: quotes.filter((q) => q.status === 'Approved').length,
-      Converted: quotes.filter((q) => q.status === 'Converted').length,
+      'New': requests.filter((r) => r.status === 'New').length,
+      'Assessment Scheduled': requests.filter((r) => r.status === 'Assessment Scheduled').length,
+      'Assessment Complete': requests.filter((r) => r.status === 'Assessment Complete').length,
+      'Converted': requests.filter((r) => r.status === 'Converted').length,
     };
     return counts;
-  }, [quotes, isLoading]);
+  }, [requests, isLoading]);
 
   return (
     <div className="rounded-lg bg-[var(--surface-color)] p-5 border border-[var(--border-color)] shadow-sm dark:bg-slate-900">
@@ -76,10 +83,10 @@ function StatusBreakdownCard({ quotes, isLoading }: { quotes: Quote[]; isLoading
       ) : (
         <div className="space-y-2.5">
           {[
-            { status: 'Draft', count: stats.Draft, color: 'bg-slate-400' },
-            { status: 'Awaiting Response', count: stats['Awaiting Response'], color: 'bg-amber-400' },
-            { status: 'Approved', count: stats.Approved, color: 'bg-green-500' },
-            { status: 'Converted', count: stats.Converted, color: 'bg-emerald-700' },
+            { status: 'New', count: stats['New'], color: 'bg-blue-500' },
+            { status: 'Assessment Scheduled', count: stats['Assessment Scheduled'], color: 'bg-amber-400' },
+            { status: 'Assessment Complete', count: stats['Assessment Complete'], color: 'bg-purple-500' },
+            { status: 'Converted', count: stats['Converted'], color: 'bg-emerald-700' },
           ].map((item) => (
             <div key={item.status} className="flex items-center gap-3 text-sm">
               <div className={`w-2.5 h-2.5 rounded-full ${item.color}`} />
@@ -93,67 +100,64 @@ function StatusBreakdownCard({ quotes, isLoading }: { quotes: Quote[]; isLoading
   );
 }
 
-export default function Quotes() {
+export default function Requests() {
   const navigate = useNavigate();
-  const { data: quotes = [], isLoading, error } = useQuotes();
+  const { data: requests = [], isLoading, error } = useRequests();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
 
   const filtered = useMemo(() => {
-    let result = quotes;
+    let result = requests;
 
     if (statusFilter !== 'All') {
-      result = result.filter((q) => q.status === statusFilter);
+      result = result.filter((r) => r.status === statusFilter);
     }
 
     const q = search.trim().toLowerCase();
     if (!q) return result;
 
     return result.filter(
-      (quote) =>
-        String(quote.quote_number).toLowerCase().includes(q) ||
-        (quote.title?.toLowerCase().includes(q) ?? false)
+      (request) =>
+        (request.title?.toLowerCase().includes(q) ?? false) ||
+        (request.contact_name?.toLowerCase().includes(q) ?? false)
     );
-  }, [quotes, search, statusFilter]);
+  }, [requests, search, statusFilter]);
 
   const stats = useMemo(() => {
-    const sent = quotes.filter((q) => q.status !== 'Draft');
-    const converted = quotes.filter((q) => q.status === 'Converted');
-    const sentTotal = sent.reduce((sum, q) => sum + q.total, 0);
-    const convertedTotal = converted.reduce((sum, q) => sum + q.total, 0);
+    const newRequests = requests.filter((r) => r.status === 'New');
+    const awaitingAssessment = requests.filter((r) => r.status === 'Assessment Scheduled');
+    const converted = requests.filter((r) => r.status === 'Converted');
 
     return {
-      sentCount: sent.length,
-      sentTotal,
+      newCount: newRequests.length,
+      awaitingAssessmentCount: awaitingAssessment.length,
       convertedCount: converted.length,
-      convertedTotal,
-      conversionRate: sent.length > 0 ? ((converted.length / sent.length) * 100).toFixed(1) : '0.0',
     };
-  }, [quotes]);
+  }, [requests]);
 
   return (
     <div>
-      <p className="page-kicker">Revenue</p>
+      <p className="page-kicker">Lead Intake</p>
       <div className="flex justify-between items-center mb-8 flex-wrap gap-4">
         <div className="min-w-0 flex-1">
           <h1 className="mb-2 flex items-center gap-2">
-            <FileText size={28} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
-            Quotes
+            <Inbox size={28} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
+            Requests
           </h1>
-          <p className="text-secondary mb-0">Create, send, and track quotes for your projects.</p>
+          <p className="text-secondary mb-0">Track incoming work requests and convert them to quotes.</p>
         </div>
         <Button
-          onClick={() => navigate('/quotes/new')}
+          onClick={() => navigate('/requests/new')}
           className="btn btn-primary page-toolbar__cta"
         >
-          New Quote
+          New Request
         </Button>
       </div>
 
       {error && (
         <div className="card mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <p className="min-w-0 max-w-full break-words text-sm">
-            <span className="font-semibold text-[var(--color-danger)]">Error loading quotes</span>
+            <span className="font-semibold text-[var(--color-danger)]">Error loading requests</span>
             <span className="text-secondary ml-1">Please try again later.</span>
           </p>
           <Button variant="secondary" size="sm" onClick={() => window.location.reload()}>
@@ -162,24 +166,21 @@ export default function Quotes() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 mb-8 md:grid-cols-2 lg:grid-cols-5">
-        <StatusBreakdownCard quotes={quotes} isLoading={isLoading} />
+      <div className="grid grid-cols-1 gap-4 mb-8 md:grid-cols-2 lg:grid-cols-4">
+        <StatusBreakdownCard requests={requests} isLoading={isLoading} />
         <DashboardCard
-          title="Conversion Rate"
-          value={`${stats.conversionRate}%`}
-          subtitle={`${stats.convertedCount} of ${stats.sentCount} sent`}
+          title="New This Week"
+          value={stats.newCount}
           isLoading={isLoading}
         />
         <DashboardCard
-          title="Sent"
-          value={stats.sentCount}
-          subtitle={formatCurrency(stats.sentTotal)}
+          title="Awaiting Assessment"
+          value={stats.awaitingAssessmentCount}
           isLoading={isLoading}
         />
         <DashboardCard
           title="Converted"
           value={stats.convertedCount}
-          subtitle={formatCurrency(stats.convertedTotal)}
           isLoading={isLoading}
         />
       </div>
@@ -188,11 +189,11 @@ export default function Quotes() {
         <div className="flex flex-col gap-4 border-b border-[var(--border-color)] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <h3 className="mb-1 flex items-center gap-2 text-[1.125rem] font-semibold">
-              <FileText size={20} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
-              All Quotes
+              <Inbox size={20} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
+              All Requests
             </h3>
             <p className="mb-0 text-sm text-secondary">
-              {isLoading ? 'Loading…' : `${filtered.length} shown · ${quotes.length} total`}
+              {isLoading ? 'Loading…' : `${filtered.length} shown · ${requests.length} total`}
             </p>
           </div>
           <div className="flex flex-col gap-3 w-full sm:w-auto sm:flex-row sm:items-center">
@@ -205,10 +206,10 @@ export default function Quotes() {
               <input
                 type="search"
                 className="w-full pl-10 h-10"
-                placeholder="Quote #, title…"
+                placeholder="Title, contact…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                aria-label="Search quotes"
+                aria-label="Search requests"
               />
             </div>
             <select
@@ -218,59 +219,55 @@ export default function Quotes() {
               aria-label="Filter by status"
             >
               <option>All</option>
-              <option>Draft</option>
-              <option>Sent</option>
-              <option>Awaiting Response</option>
-              <option>Changes Requested</option>
-              <option>Approved</option>
+              <option>New</option>
+              <option>Assessment Scheduled</option>
+              <option>Assessment Complete</option>
               <option>Converted</option>
+              <option>Archived</option>
             </select>
           </div>
         </div>
 
         <div className="max-h-[min(60vh,520px)] overflow-y-auto">
           <div className="divide-y divide-[var(--border-color)]">
-            {isLoading && quotes.length === 0 && (
+            {isLoading && requests.length === 0 && (
               <div className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-secondary">
                 <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
-                <span>Loading quotes…</span>
+                <span>Loading requests…</span>
               </div>
             )}
-            {filtered.map((quote) => (
+            {filtered.map((request) => (
               <div
-                key={quote.id}
-                onClick={() => navigate(`/quotes/${quote.id}`)}
+                key={request.id}
+                onClick={() => navigate(`/requests/${request.id}`)}
                 className="flex flex-col gap-3 px-6 py-4 transition-colors hover:bg-[var(--surface-hover)] cursor-pointer sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2 mb-1">
                     <p className="font-semibold text-[var(--text-primary)]">
-                      Quote #{String(quote.quote_number).padStart(4, '0')}
+                      {request.title || 'Untitled Request'}
                     </p>
-                    {quote.title && (
-                      <p className="text-sm text-[var(--text-muted)] truncate">— {quote.title}</p>
-                    )}
                   </div>
-                  {quote.property_id && (
-                    <p className="text-sm text-[var(--text-muted)] truncate">Property: TBD</p>
+                  {request.contact_name && (
+                    <p className="text-sm text-[var(--text-muted)] truncate">{request.contact_name}</p>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-3 justify-between sm:gap-4">
+                  <div className="flex items-center gap-2 text-[var(--text-muted)]">
+                    {getSourceIcon(request.source)}
+                  </div>
                   <p className="text-sm text-secondary">
-                    {formatInVancouver(new Date(quote.created_at), 'MMM d, yyyy')}
+                    {formatInVancouver(new Date(request.requested_at), 'MMM d, yyyy')}
                   </p>
-                  <Badge variant={getStatusBadgeVariant(quote.status)}>{quote.status}</Badge>
-                  <p className="font-semibold text-[var(--text-primary)] w-24 text-right">
-                    {formatCurrency(quote.total)}
-                  </p>
+                  <Badge variant={getStatusBadgeVariant(request.status)}>{request.status}</Badge>
                 </div>
               </div>
             ))}
             {!isLoading && filtered.length === 0 && (
               <div className="px-6 py-16 text-center text-sm text-secondary">
-                {quotes.length === 0
-                  ? 'No quotes yet. Create one with New Quote.'
-                  : 'No quotes match your search or filter.'}
+                {requests.length === 0
+                  ? 'No requests yet. Create one with New Request.'
+                  : 'No requests match your search or filter.'}
               </div>
             )}
           </div>

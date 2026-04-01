@@ -34,7 +34,6 @@ export function generateQuotePdf(
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 20;
-  const innerMargin = 15;
   let y = margin;
 
   // HEADER AREA

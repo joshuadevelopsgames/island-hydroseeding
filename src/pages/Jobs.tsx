@@ -1,23 +1,22 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Loader2, Search } from 'lucide-react';
+import { Briefcase, Loader2, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useQuotes } from '@/hooks/useQuotes';
+import { useJobs } from '@/hooks/useJobs';
 import { formatInVancouver } from '@/lib/vancouverTime';
-import type { Quote, QuoteStatus } from '@/lib/quotesTypes';
+import type { Job, JobStatus } from '@/lib/jobsTypes';
 
-const STATUS_COLORS: Record<QuoteStatus, 'default' | 'secondary' | 'outline'> = {
-  Draft: 'outline',
-  Sent: 'secondary',
-  'Awaiting Response': 'secondary',
-  'Changes Requested': 'outline',
-  Approved: 'default',
-  Converted: 'default',
+const STATUS_COLORS: Record<JobStatus, 'default' | 'secondary' | 'outline'> = {
+  Active: 'default',
+  Late: 'outline',
+  'Requires Invoicing': 'secondary',
+  Completed: 'secondary',
+  Archived: 'outline',
 };
 
 function getStatusBadgeVariant(status: string): 'default' | 'secondary' | 'outline' {
-  return STATUS_COLORS[status as QuoteStatus] ?? 'outline';
+  return STATUS_COLORS[status as JobStatus] ?? 'outline';
 }
 
 function formatCurrency(amount: number): string {
@@ -55,18 +54,17 @@ function DashboardCard({
   );
 }
 
-function StatusBreakdownCard({ quotes, isLoading }: { quotes: Quote[]; isLoading: boolean }) {
+function StatusBreakdownCard({ jobs, isLoading }: { jobs: Job[]; isLoading: boolean }) {
   const stats = useMemo(() => {
     if (isLoading) return null;
     const counts = {
-      Draft: quotes.filter((q) => q.status === 'Draft').length,
-      Sent: quotes.filter((q) => q.status === 'Sent').length,
-      'Awaiting Response': quotes.filter((q) => q.status === 'Awaiting Response').length,
-      Approved: quotes.filter((q) => q.status === 'Approved').length,
-      Converted: quotes.filter((q) => q.status === 'Converted').length,
+      Active: jobs.filter((j) => j.status === 'Active').length,
+      Late: jobs.filter((j) => j.status === 'Late').length,
+      'Requires Invoicing': jobs.filter((j) => j.status === 'Requires Invoicing').length,
+      Completed: jobs.filter((j) => j.status === 'Completed').length,
     };
     return counts;
-  }, [quotes, isLoading]);
+  }, [jobs, isLoading]);
 
   return (
     <div className="rounded-lg bg-[var(--surface-color)] p-5 border border-[var(--border-color)] shadow-sm dark:bg-slate-900">
@@ -76,10 +74,10 @@ function StatusBreakdownCard({ quotes, isLoading }: { quotes: Quote[]; isLoading
       ) : (
         <div className="space-y-2.5">
           {[
-            { status: 'Draft', count: stats.Draft, color: 'bg-slate-400' },
-            { status: 'Awaiting Response', count: stats['Awaiting Response'], color: 'bg-amber-400' },
-            { status: 'Approved', count: stats.Approved, color: 'bg-green-500' },
-            { status: 'Converted', count: stats.Converted, color: 'bg-emerald-700' },
+            { status: 'Active', count: stats.Active, color: 'bg-green-500' },
+            { status: 'Late', count: stats.Late, color: 'bg-red-500' },
+            { status: 'Requires Invoicing', count: stats['Requires Invoicing'], color: 'bg-amber-400' },
+            { status: 'Completed', count: stats.Completed, color: 'bg-emerald-700' },
           ].map((item) => (
             <div key={item.status} className="flex items-center gap-3 text-sm">
               <div className={`w-2.5 h-2.5 rounded-full ${item.color}`} />
@@ -93,67 +91,71 @@ function StatusBreakdownCard({ quotes, isLoading }: { quotes: Quote[]; isLoading
   );
 }
 
-export default function Quotes() {
+export default function Jobs() {
   const navigate = useNavigate();
-  const { data: quotes = [], isLoading, error } = useQuotes();
+  const { data: jobs = [], isLoading, error } = useJobs();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
 
   const filtered = useMemo(() => {
-    let result = quotes;
+    let result = jobs;
 
     if (statusFilter !== 'All') {
-      result = result.filter((q) => q.status === statusFilter);
+      result = result.filter((j) => j.status === statusFilter);
     }
 
     const q = search.trim().toLowerCase();
     if (!q) return result;
 
     return result.filter(
-      (quote) =>
-        String(quote.quote_number).toLowerCase().includes(q) ||
-        (quote.title?.toLowerCase().includes(q) ?? false)
+      (job) =>
+        String(job.job_number).toLowerCase().includes(q) ||
+        (job.title?.toLowerCase().includes(q) ?? false)
     );
-  }, [quotes, search, statusFilter]);
+  }, [jobs, search, statusFilter]);
 
   const stats = useMemo(() => {
-    const sent = quotes.filter((q) => q.status !== 'Draft');
-    const converted = quotes.filter((q) => q.status === 'Converted');
-    const sentTotal = sent.reduce((sum, q) => sum + q.total, 0);
-    const convertedTotal = converted.reduce((sum, q) => sum + q.total, 0);
+    const active = jobs.filter((j) => j.status === 'Active');
+    const nonArchived = jobs.filter((j) => j.status !== 'Archived');
+    const completedThisMonth = jobs.filter((j) => {
+      if (j.status !== 'Completed') return false;
+      const jobDate = new Date(j.updated_at);
+      const now = new Date();
+      return jobDate.getMonth() === now.getMonth() && jobDate.getFullYear() === now.getFullYear();
+    });
+
+    const totalRevenue = nonArchived.reduce((sum, j) => sum + (j.total_price || 0), 0);
 
     return {
-      sentCount: sent.length,
-      sentTotal,
-      convertedCount: converted.length,
-      convertedTotal,
-      conversionRate: sent.length > 0 ? ((converted.length / sent.length) * 100).toFixed(1) : '0.0',
+      activeCount: active.length,
+      totalRevenue,
+      completedThisMonthCount: completedThisMonth.length,
     };
-  }, [quotes]);
+  }, [jobs]);
 
   return (
     <div>
-      <p className="page-kicker">Revenue</p>
+      <p className="page-kicker">Operations</p>
       <div className="flex justify-between items-center mb-8 flex-wrap gap-4">
         <div className="min-w-0 flex-1">
           <h1 className="mb-2 flex items-center gap-2">
-            <FileText size={28} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
-            Quotes
+            <Briefcase size={28} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
+            Jobs
           </h1>
-          <p className="text-secondary mb-0">Create, send, and track quotes for your projects.</p>
+          <p className="text-secondary mb-0">Manage active jobs, track visits, and monitor profitability.</p>
         </div>
         <Button
-          onClick={() => navigate('/quotes/new')}
+          onClick={() => navigate('/jobs/new')}
           className="btn btn-primary page-toolbar__cta"
         >
-          New Quote
+          New Job
         </Button>
       </div>
 
       {error && (
         <div className="card mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <p className="min-w-0 max-w-full break-words text-sm">
-            <span className="font-semibold text-[var(--color-danger)]">Error loading quotes</span>
+            <span className="font-semibold text-[var(--color-danger)]">Error loading jobs</span>
             <span className="text-secondary ml-1">Please try again later.</span>
           </p>
           <Button variant="secondary" size="sm" onClick={() => window.location.reload()}>
@@ -162,24 +164,21 @@ export default function Quotes() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 mb-8 md:grid-cols-2 lg:grid-cols-5">
-        <StatusBreakdownCard quotes={quotes} isLoading={isLoading} />
+      <div className="grid grid-cols-1 gap-4 mb-8 md:grid-cols-2 lg:grid-cols-4">
+        <StatusBreakdownCard jobs={jobs} isLoading={isLoading} />
         <DashboardCard
-          title="Conversion Rate"
-          value={`${stats.conversionRate}%`}
-          subtitle={`${stats.convertedCount} of ${stats.sentCount} sent`}
+          title="Active Jobs"
+          value={stats.activeCount}
           isLoading={isLoading}
         />
         <DashboardCard
-          title="Sent"
-          value={stats.sentCount}
-          subtitle={formatCurrency(stats.sentTotal)}
+          title="Total Revenue"
+          value={formatCurrency(stats.totalRevenue)}
           isLoading={isLoading}
         />
         <DashboardCard
-          title="Converted"
-          value={stats.convertedCount}
-          subtitle={formatCurrency(stats.convertedTotal)}
+          title="Completed This Month"
+          value={stats.completedThisMonthCount}
           isLoading={isLoading}
         />
       </div>
@@ -188,11 +187,11 @@ export default function Quotes() {
         <div className="flex flex-col gap-4 border-b border-[var(--border-color)] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <h3 className="mb-1 flex items-center gap-2 text-[1.125rem] font-semibold">
-              <FileText size={20} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
-              All Quotes
+              <Briefcase size={20} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
+              All Jobs
             </h3>
             <p className="mb-0 text-sm text-secondary">
-              {isLoading ? 'Loading…' : `${filtered.length} shown · ${quotes.length} total`}
+              {isLoading ? 'Loading…' : `${filtered.length} shown · ${jobs.length} total`}
             </p>
           </div>
           <div className="flex flex-col gap-3 w-full sm:w-auto sm:flex-row sm:items-center">
@@ -205,10 +204,10 @@ export default function Quotes() {
               <input
                 type="search"
                 className="w-full pl-10 h-10"
-                placeholder="Quote #, title…"
+                placeholder="Job #, title…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                aria-label="Search quotes"
+                aria-label="Search jobs"
               />
             </div>
             <select
@@ -218,59 +217,58 @@ export default function Quotes() {
               aria-label="Filter by status"
             >
               <option>All</option>
-              <option>Draft</option>
-              <option>Sent</option>
-              <option>Awaiting Response</option>
-              <option>Changes Requested</option>
-              <option>Approved</option>
-              <option>Converted</option>
+              <option>Active</option>
+              <option>Late</option>
+              <option>Requires Invoicing</option>
+              <option>Completed</option>
+              <option>Archived</option>
             </select>
           </div>
         </div>
 
         <div className="max-h-[min(60vh,520px)] overflow-y-auto">
           <div className="divide-y divide-[var(--border-color)]">
-            {isLoading && quotes.length === 0 && (
+            {isLoading && jobs.length === 0 && (
               <div className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-secondary">
                 <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
-                <span>Loading quotes…</span>
+                <span>Loading jobs…</span>
               </div>
             )}
-            {filtered.map((quote) => (
+            {filtered.map((job) => (
               <div
-                key={quote.id}
-                onClick={() => navigate(`/quotes/${quote.id}`)}
+                key={job.id}
+                onClick={() => navigate(`/jobs/${job.id}`)}
                 className="flex flex-col gap-3 px-6 py-4 transition-colors hover:bg-[var(--surface-hover)] cursor-pointer sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2 mb-1">
                     <p className="font-semibold text-[var(--text-primary)]">
-                      Quote #{String(quote.quote_number).padStart(4, '0')}
+                      Job #{String(job.job_number).padStart(4, '0')}
                     </p>
-                    {quote.title && (
-                      <p className="text-sm text-[var(--text-muted)] truncate">— {quote.title}</p>
+                    {job.title && (
+                      <p className="text-sm text-[var(--text-muted)] truncate">— {job.title}</p>
                     )}
                   </div>
-                  {quote.property_id && (
-                    <p className="text-sm text-[var(--text-muted)] truncate">Property: TBD</p>
+                  {job.job_type && (
+                    <p className="text-sm text-[var(--text-muted)] truncate">{job.job_type}</p>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-3 justify-between sm:gap-4">
                   <p className="text-sm text-secondary">
-                    {formatInVancouver(new Date(quote.created_at), 'MMM d, yyyy')}
+                    {formatInVancouver(new Date(job.created_at), 'MMM d, yyyy')}
                   </p>
-                  <Badge variant={getStatusBadgeVariant(quote.status)}>{quote.status}</Badge>
+                  <Badge variant={getStatusBadgeVariant(job.status)}>{job.status}</Badge>
                   <p className="font-semibold text-[var(--text-primary)] w-24 text-right">
-                    {formatCurrency(quote.total)}
+                    {formatCurrency(job.total_price || 0)}
                   </p>
                 </div>
               </div>
             ))}
             {!isLoading && filtered.length === 0 && (
               <div className="px-6 py-16 text-center text-sm text-secondary">
-                {quotes.length === 0
-                  ? 'No quotes yet. Create one with New Quote.'
-                  : 'No quotes match your search or filter.'}
+                {jobs.length === 0
+                  ? 'No jobs yet. Create one with New Job.'
+                  : 'No jobs match your search or filter.'}
               </div>
             )}
           </div>

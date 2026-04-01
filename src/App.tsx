@@ -15,6 +15,10 @@ import CRM from './pages/CRM';
 import CrmAccountDetail from './pages/CrmAccountDetail';
 import Quotes from './pages/Quotes';
 import QuoteDetail from './pages/QuoteDetail';
+import Requests from './pages/Requests';
+import RequestDetail from './pages/RequestDetail';
+import Jobs from './pages/Jobs';
+import JobDetail from './pages/JobDetail';
 import Time from './pages/Time';
 import Team from './pages/Team';
 import Account from './pages/Account';
@@ -134,6 +138,38 @@ function App() {
             element={
               <ProtectedRoute>
                 <QuoteDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/requests"
+            element={
+              <ProtectedRoute>
+                <Requests />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/requests/:id"
+            element={
+              <ProtectedRoute>
+                <RequestDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/jobs"
+            element={
+              <ProtectedRoute>
+                <Jobs />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/jobs/:id"
+            element={
+              <ProtectedRoute>
+                <JobDetail />
               </ProtectedRoute>
             }
           />

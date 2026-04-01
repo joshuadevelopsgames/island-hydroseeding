@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Loader2, Trash2, MoreVertical, Send, Pencil, Copy, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Loader2, Trash2, MoreVertical, Send, Pencil, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -21,7 +21,7 @@ import { useQuoteDetail, useProducts, useTemplates, useQuotesMutations, useAccou
 import { useCrmAccounts } from '@/hooks/useCrm';
 import { toast } from 'sonner';
 import { formatErrorForUi } from '@/lib/quotesApi';
-import type { Quote, QuoteLineItem, QuoteBundle, ProductService, QuoteTemplate, CrmProperty } from '@/lib/quotesTypes';
+import type { Quote, QuoteLineItem, QuoteBundle, ProductService } from '@/lib/quotesTypes';
 
 const CAD = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' });
 const TAX_RATE = 0.05;
@@ -74,7 +74,7 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
     unit_price: 0,
   });
 
-  const selectedTemplate = templates?.find((t) => t.id === selectedTemplateId);
+  const _selectedTemplate = templates?.find((t) => t.id === selectedTemplateId);
   const selectedAccount = accounts?.find((a) => a.id === selectedAccountId);
   const selectedProperty = properties?.find((p) => p.id === selectedPropertyId);
 
@@ -666,7 +666,7 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
           {quote.quote_number && <p className="text-sm text-[var(--text-muted)]">Quote #{quote.quote_number}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={handleSendQuote}>
+          <Button type="button" variant="ghost" size="sm" onClick={handleSendQuote}>
             <Send className="h-4 w-4" />
             Send
           </Button>

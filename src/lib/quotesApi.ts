@@ -1,7 +1,6 @@
 import type {
   Quote,
   QuoteBundle,
-  QuoteLineItem,
   ProductService,
   QuoteTemplate,
   CrmProperty,
