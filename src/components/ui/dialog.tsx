@@ -29,15 +29,17 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed left-1/2 top-1/2 z-[220] grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-5 border border-[var(--border-color)] bg-[var(--surface-color)] px-5 pt-5 shadow-lg rounded-[var(--radius-lg)] max-h-[min(90vh,720px)] overflow-y-auto sm:px-7 sm:pt-7',
-        'pb-[max(1.75rem,env(safe-area-inset-bottom,0px))] sm:pb-7',
+        'fixed left-1/2 top-1/2 z-[220] flex w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col border border-[var(--border-color)] bg-[var(--surface-color)] p-0 shadow-lg rounded-[var(--radius-lg)] outline-none',
+        'max-h-[min(90vh,720px)] overflow-hidden',
         className
       )}
       {...props}
     >
-      {children}
+      <div className="crm-dialog-scroll flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 pt-5 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] sm:px-7 sm:pt-7 sm:pb-[max(1.75rem,env(safe-area-inset-bottom,0px))]">
+        {children}
+      </div>
       {!hideClose && (
-        <DialogPrimitive.Close className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-sm opacity-70 ring-offset-[var(--bg-color)] transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-[var(--lawn-green)] focus:ring-offset-2 disabled:pointer-events-none sm:right-5 sm:top-5">
+        <DialogPrimitive.Close className="absolute right-3 top-3 z-20 flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-transparent bg-[var(--surface-color)] opacity-90 shadow-sm ring-offset-[var(--bg-color)] transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-[var(--lawn-green)] focus:ring-offset-2 disabled:pointer-events-none sm:right-4 sm:top-4">
           <X className="h-4 w-4" />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>
@@ -50,7 +52,7 @@ DialogContent.displayName = DialogPrimitive.Content.displayName;
 const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      'flex flex-col space-y-2 pr-11 text-left sm:pr-12',
+      'flex min-w-0 flex-col gap-2 pr-14 text-left sm:pr-16',
       className
     )}
     {...props}

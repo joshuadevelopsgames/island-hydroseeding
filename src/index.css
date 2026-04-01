@@ -97,10 +97,13 @@ html.theme-dark {
   --color-warning: #fbbf24;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* Must stay in @layer base — unlayered * would override Tailwind @layer utilities (px-*, gap-*, p-*, etc.) */
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 }
 
 body {
@@ -181,61 +184,63 @@ p {
   line-height: 1.55;
 }
 
-/* Forms */
-input:not([type='checkbox']):not([type='radio']),
-textarea,
-select {
-  font-family: inherit;
-  width: 100%;
-  padding: 0.6875rem 1rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  font-size: 0.9375rem;
-  color: var(--text-primary);
-  background-color: var(--surface-color);
-  transition:
-    border-color var(--transition-fast),
-    box-shadow var(--transition-fast);
-}
+@layer base {
+  /* Forms — in base layer so Tailwind utility padding/margin on inputs (e.g. shadcn) wins */
+  input:not([type='checkbox']):not([type='radio']),
+  textarea,
+  select {
+    font-family: inherit;
+    width: 100%;
+    padding: 0.6875rem 1rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-size: 0.9375rem;
+    color: var(--text-primary);
+    background-color: var(--surface-color);
+    transition:
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast);
+  }
 
-input[type='checkbox'],
-input[type='radio'] {
-  font-family: inherit;
-  width: 1.125rem;
-  height: 1.125rem;
-  margin: 0;
-  flex-shrink: 0;
-  accent-color: var(--primary-green);
-  cursor: pointer;
-}
+  input[type='checkbox'],
+  input[type='radio'] {
+    font-family: inherit;
+    width: 1.125rem;
+    height: 1.125rem;
+    margin: 0;
+    flex-shrink: 0;
+    accent-color: var(--primary-green);
+    cursor: pointer;
+  }
 
-input:hover,
-textarea:hover,
-select:hover {
-  border-color: rgba(0, 0, 0, 0.14);
-}
+  input:hover,
+  textarea:hover,
+  select:hover {
+    border-color: rgba(0, 0, 0, 0.14);
+  }
 
-html.theme-dark input:hover,
-html.theme-dark textarea:hover,
-html.theme-dark select:hover {
-  border-color: rgba(255, 255, 255, 0.2);
-}
+  html.theme-dark input:hover,
+  html.theme-dark textarea:hover,
+  html.theme-dark select:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+  }
 
-input:focus,
-textarea:focus,
-select:focus {
-  outline: none;
-  border-color: var(--lawn-green);
-  box-shadow: 0 0 0 4px var(--accent-soft);
-}
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+    border-color: var(--lawn-green);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
 
-label {
-  display: block;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  margin-bottom: 0.375rem;
-  color: var(--text-primary);
-  letter-spacing: -0.01em;
+  label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    margin-bottom: 0.375rem;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+  }
 }
 
 /* Documents — custom file picker (hidden input + dropzone) */
