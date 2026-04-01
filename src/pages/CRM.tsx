@@ -266,17 +266,17 @@ function CreateAccountDialog({
           <DialogTitle>New account</DialogTitle>
           <DialogDescription>Add a company or property account. You can attach contacts on the next screen.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={submit} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2 sm:col-span-2">
+        <form onSubmit={submit} className="min-w-0 space-y-6">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-x-5 sm:gap-y-4">
+            <div className="flex min-w-0 flex-col gap-2.5 sm:col-span-2">
               <Label htmlFor="acc-name">Account name *</Label>
               <Input id="acc-name" name="name" required placeholder="Display name" />
             </div>
-            <div className="space-y-2 sm:col-span-2">
+            <div className="flex min-w-0 flex-col gap-2.5 sm:col-span-2">
               <Label htmlFor="acc-company">Company / property</Label>
               <Input id="acc-company" name="company" placeholder="Optional" />
             </div>
-            <div className="space-y-2">
+            <div className="flex min-w-0 flex-col gap-2.5">
               <Label>Type</Label>
               <select
                 className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
@@ -288,7 +288,7 @@ function CreateAccountDialog({
                 <option value="Municipal">Municipal</option>
               </select>
             </div>
-            <div className="space-y-2">
+            <div className="flex min-w-0 flex-col gap-2.5">
               <Label>Status</Label>
               <select
                 className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
@@ -302,23 +302,23 @@ function CreateAccountDialog({
                 <option>Lost</option>
               </select>
             </div>
-            <div className="space-y-2">
+            <div className="flex min-w-0 flex-col gap-2.5">
               <Label htmlFor="acc-phone">Phone</Label>
               <Input id="acc-phone" name="phone" />
             </div>
-            <div className="space-y-2">
+            <div className="flex min-w-0 flex-col gap-2.5">
               <Label htmlFor="acc-email">Email</Label>
               <Input id="acc-email" name="email" type="email" />
             </div>
-            <div className="space-y-2 sm:col-span-2">
+            <div className="flex min-w-0 flex-col gap-2.5 sm:col-span-2">
               <Label htmlFor="acc-addr">Address</Label>
               <Input id="acc-addr" name="address" />
             </div>
-            <div className="space-y-2 sm:col-span-2">
+            <div className="flex min-w-0 flex-col gap-2.5 sm:col-span-2">
               <Label htmlFor="acc-src">Marketing source</Label>
               <Input id="acc-src" name="marketing_source" placeholder="Referral, web, etc." />
             </div>
-            <div className="space-y-2 sm:col-span-2">
+            <div className="flex min-w-0 flex-col gap-2.5 sm:col-span-2">
               <Label htmlFor="acc-notes">Notes</Label>
               <Textarea id="acc-notes" name="notes" rows={3} />
             </div>
