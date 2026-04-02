@@ -1117,6 +1117,11 @@ html.theme-dark .theme-toggle-btn:hover {
     overscroll-behavior-y: contain;
   }
 
+  /* Hide copyright footer on mobile — save drawer space */
+  .sidebar__footer {
+    display: none;
+  }
+
   h1 {
     font-size: 1.75rem;
   }

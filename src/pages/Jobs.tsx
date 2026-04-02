@@ -38,7 +38,7 @@ function DashboardCard({
   isLoading?: boolean;
 }) {
   return (
-    <div className="rounded-lg bg-[var(--surface-color)] p-5 border border-[var(--border-color)] shadow-sm dark:bg-slate-900">
+    <div className="rounded-lg bg-[var(--surface-color)] p-5 border border-[var(--border-color)]">
       <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-2">{title}</p>
       <div className="min-h-8">
         {isLoading ? (
@@ -67,7 +67,7 @@ function StatusBreakdownCard({ jobs, isLoading }: { jobs: Job[]; isLoading: bool
   }, [jobs, isLoading]);
 
   return (
-    <div className="rounded-lg bg-[var(--surface-color)] p-5 border border-[var(--border-color)] shadow-sm dark:bg-slate-900">
+    <div className="rounded-lg bg-[var(--surface-color)] p-5 border border-[var(--border-color)]">
       <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-4">Overview by Status</p>
       {isLoading || !stats ? (
         <Loader2 className="h-5 w-5 animate-spin text-[var(--primary-green)]" aria-hidden />

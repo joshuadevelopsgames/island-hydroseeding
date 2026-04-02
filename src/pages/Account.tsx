@@ -55,7 +55,6 @@ function resolveList(paths: string[], defaults: string[]) {
 
 function NavItem({
   path,
-  section,
   isHidden,
   isDragOver,
   onToggleHidden,
@@ -65,7 +64,6 @@ function NavItem({
   onDragEnd,
 }: {
   path: string;
-  section: Section;
   isHidden: boolean;
   isDragOver: boolean;
   onToggleHidden: () => void;
@@ -276,7 +274,6 @@ export default function Account() {
           <NavItem
             key={path}
             path={path}
-            section={section}
             isHidden={hiddenPaths.includes(path)}
             isDragOver={dragOver?.path === path && dragOver?.section === section}
             onToggleHidden={() => toggleHidden(path)}

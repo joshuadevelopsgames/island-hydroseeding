@@ -257,7 +257,7 @@ export default function Assets() {
         <div className="card mb-8">
           <h3 className="mb-4">{editing ? 'Edit asset' : 'New asset'}</h3>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '1rem' }}>
               <div>
                 <label>Name *</label>
                 <input name="name" required defaultValue={editing?.name} placeholder="e.g. Hydro truck 1" />
@@ -293,7 +293,7 @@ export default function Assets() {
               <h4 className="mb-2 flex items-center gap-2">
                 <Gauge size={16} /> Preventive maintenance (odometer / hours)
               </h4>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(160px, 100%), 1fr))', gap: '1rem' }}>
                 <div>
                   <label>PM interval (km)</label>
                   <input name="pmIntervalKm" type="number" min={0} defaultValue={editing?.pmIntervalKm ?? ''} />
@@ -325,7 +325,7 @@ export default function Assets() {
                 <input type="checkbox" name="cvipEnabled" defaultChecked={editing?.cvip.enabled} />
                 Track CVIP for this asset
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '1rem' }}>
                 <div>
                   <label>Decal / certificate #</label>
                   <input name="cvipCert" defaultValue={editing?.cvip.certificateOrDecal} />
@@ -343,7 +343,7 @@ export default function Assets() {
 
             <div className="border-t border-[var(--border-color)] pt-4">
               <h4 className="mb-2">Warranty &amp; tires</h4>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '1rem' }}>
                 <div>
                   <label>Warranty expires</label>
                   <input name="warrantyExpiresAt" type="date" defaultValue={vancouverDateInputFromIso(editing?.warrantyExpiresAt)} />
