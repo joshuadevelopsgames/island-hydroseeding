@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { User, Palette, Info, LayoutList, Eye, EyeOff, ChevronUp, ChevronDown, RotateCcw } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { User, Palette, Info, LayoutList, Eye, EyeOff, RotateCcw, GripVertical } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getThemePreference, setThemePreference, type ThemePreference } from '../lib/theme';
 import {
@@ -14,84 +14,211 @@ import {
   Truck, AlertTriangle, Fuel, Wrench, Package, UserCog,
 } from 'lucide-react';
 
+// ── nav item catalogue ────────────────────────────────────────────────────────
+
+const DEFAULT_PRIMARY_PATHS = ['/', '/crm', '/requests', '/quotes', '/jobs', '/invoices', '/payments', '/schedule', '/time', '/pre-trips', '/documents', '/tasks'];
+const DEFAULT_SECONDARY_PATHS = ['/assets', '/issues', '/fuel', '/equipment', '/inventory', '/team'];
+
 const ALL_NAV_ITEMS = [
-  { name: 'Dashboard',      path: '/',          icon: LayoutDashboard },
-  { name: 'Leads & CRM',    path: '/crm',        icon: Users },
-  { name: 'Requests',       path: '/requests',   icon: Inbox },
-  { name: 'Quotes',         path: '/quotes',     icon: FileText },
-  { name: 'Jobs',           path: '/jobs',       icon: Briefcase },
-  { name: 'Invoices',       path: '/invoices',   icon: Receipt },
-  { name: 'Payments',       path: '/payments',   icon: CreditCard },
-  { name: 'Schedule',       path: '/schedule',   icon: Calendar },
-  { name: 'Time Tracking',  path: '/time',       icon: Clock },
-  { name: 'Pre-trips',      path: '/pre-trips',  icon: ClipboardCheck },
-  { name: 'Documents',      path: '/documents',  icon: FolderOpen },
-  { name: 'Tasks (To-Do)',  path: '/tasks',      icon: CheckSquare },
-  { name: 'Fleet assets',   path: '/assets',     icon: Truck },
-  { name: 'Fleet issues',   path: '/issues',     icon: AlertTriangle },
-  { name: 'Fuel & road',    path: '/fuel',       icon: Fuel },
-  { name: 'Maintenance',    path: '/equipment',  icon: Wrench },
-  { name: 'Inventory',      path: '/inventory',  icon: Package },
-  { name: 'Team & access',  path: '/team',       icon: UserCog },
+  { name: 'Dashboard',     path: '/',           icon: LayoutDashboard },
+  { name: 'Leads & CRM',   path: '/crm',        icon: Users },
+  { name: 'Requests',      path: '/requests',   icon: Inbox },
+  { name: 'Quotes',        path: '/quotes',     icon: FileText },
+  { name: 'Jobs',          path: '/jobs',       icon: Briefcase },
+  { name: 'Invoices',      path: '/invoices',   icon: Receipt },
+  { name: 'Payments',      path: '/payments',   icon: CreditCard },
+  { name: 'Schedule',      path: '/schedule',   icon: Calendar },
+  { name: 'Time Tracking', path: '/time',       icon: Clock },
+  { name: 'Pre-trips',     path: '/pre-trips',  icon: ClipboardCheck },
+  { name: 'Documents',     path: '/documents',  icon: FolderOpen },
+  { name: 'Tasks (To-Do)', path: '/tasks',      icon: CheckSquare },
+  { name: 'Fleet assets',  path: '/assets',     icon: Truck },
+  { name: 'Fleet issues',  path: '/issues',     icon: AlertTriangle },
+  { name: 'Fuel & road',   path: '/fuel',       icon: Fuel },
+  { name: 'Maintenance',   path: '/equipment',  icon: Wrench },
+  { name: 'Inventory',     path: '/inventory',  icon: Package },
+  { name: 'Team & access', path: '/team',       icon: UserCog },
 ];
+
+type Section = 'primary' | 'secondary';
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function resolveList(paths: string[], defaults: string[]) {
+  const base = paths.length > 0 ? paths : defaults;
+  // Ensure any new items not yet in the list are appended
+  const extra = defaults.filter((p) => !base.includes(p));
+  return [...base, ...extra];
+}
+
+// ── sidebar editor ─────────────────────────────────────────────────────────────
+
+function NavItem({
+  path,
+  section,
+  isHidden,
+  isDragOver,
+  onToggleHidden,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+}: {
+  path: string;
+  section: Section;
+  isHidden: boolean;
+  isDragOver: boolean;
+  onToggleHidden: () => void;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
+}) {
+  const item = ALL_NAV_ITEMS.find((i) => i.path === path)!;
+  if (!item) return null;
+  const Icon = item.icon;
+
+  return (
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 select-none transition-colors"
+      style={{
+        background: isDragOver ? 'var(--accent-muted)' : isHidden ? 'transparent' : 'var(--surface-raised)',
+        border: `1px solid ${isDragOver ? 'var(--primary-green)' : 'var(--border-color)'}`,
+        opacity: isHidden ? 0.45 : 1,
+        cursor: 'grab',
+        boxShadow: isDragOver ? '0 0 0 1px var(--primary-green)' : undefined,
+      }}
+    >
+      <GripVertical size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} aria-hidden />
+      <Icon size={15} strokeWidth={1.75} style={{ color: 'var(--text-muted)', flexShrink: 0 }} aria-hidden />
+      <span
+        className="flex-1 text-sm font-medium"
+        style={{ color: 'var(--text-primary)', textDecoration: isHidden ? 'line-through' : 'none' }}
+      >
+        {item.name}
+      </span>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onToggleHidden(); }}
+        aria-label={isHidden ? `Show ${item.name}` : `Hide ${item.name}`}
+        className="rounded p-1 transition-colors"
+        style={{ color: isHidden ? 'var(--text-muted)' : 'var(--primary-green)' }}
+      >
+        {isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+      </button>
+    </div>
+  );
+}
+
+// ── main page ─────────────────────────────────────────────────────────────────
 
 export default function Account() {
   const { currentUser, updateCurrentUserProfile } = useAuth();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [name, setName]           = useState('');
+  const [email, setEmail]         = useState('');
   const [savedFlash, setSavedFlash] = useState(false);
-  const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference());
+  const [theme, setTheme]         = useState<ThemePreference>(() => getThemePreference());
 
-  // Sidebar prefs
-  const [sidebarOrder, setSidebarOrder] = useState<string[]>(() => {
+  // Sidebar lists
+  const initPrefs = () => {
     const p = loadSidebarPrefs();
-    return p.order.length > 0 ? p.order : ALL_NAV_ITEMS.map(i => i.path);
-  });
-  const [sidebarHidden, setSidebarHidden] = useState<string[]>(() => loadSidebarPrefs().hidden);
+    return {
+      primary:   resolveList(p.primary,   DEFAULT_PRIMARY_PATHS),
+      secondary: resolveList(p.secondary, DEFAULT_SECONDARY_PATHS),
+      hidden:    p.hidden,
+    };
+  };
+  const [primaryList,   setPrimaryList]   = useState(() => initPrefs().primary);
+  const [secondaryList, setSecondaryList] = useState(() => initPrefs().secondary);
+  const [hiddenPaths,   setHiddenPaths]   = useState(() => initPrefs().hidden);
 
-  // Keep local state in sync if another tab changes prefs
+  // Sync from other tabs
   useEffect(() => {
     const onPrefs = () => {
-      const p = loadSidebarPrefs();
-      setSidebarOrder(p.order.length > 0 ? p.order : ALL_NAV_ITEMS.map(i => i.path));
-      setSidebarHidden(p.hidden);
+      const { primary, secondary, hidden } = initPrefs();
+      setPrimaryList(primary);
+      setSecondaryList(secondary);
+      setHiddenPaths(hidden);
     };
     window.addEventListener(SIDEBAR_PREFS_EVENT, onPrefs);
     return () => window.removeEventListener(SIDEBAR_PREFS_EVENT, onPrefs);
-  }, []);
+  }, []); // eslint-disable-line
 
-  // Ordered list of items for the editor (new items not in order go at end)
-  const orderedItems = [
-    ...sidebarOrder.map(p => ALL_NAV_ITEMS.find(i => i.path === p)).filter(Boolean),
-    ...ALL_NAV_ITEMS.filter(i => !sidebarOrder.includes(i.path)),
-  ] as typeof ALL_NAV_ITEMS;
+  // Drag state
+  const dragSrc = useRef<{ path: string; section: Section } | null>(null);
+  const [dragOver, setDragOver] = useState<{ path: string | '__end__'; section: Section } | null>(null);
 
-  const moveItem = (path: string, dir: -1 | 1) => {
-    const currentOrder = orderedItems.map(i => i.path);
-    const idx = currentOrder.indexOf(path);
-    if (idx === -1) return;
-    const newIdx = idx + dir;
-    if (newIdx < 0 || newIdx >= currentOrder.length) return;
-    const next = [...currentOrder];
-    [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
-    setSidebarOrder(next);
-    saveSidebarPrefs({ order: next, hidden: sidebarHidden });
+  const save = (primary: string[], secondary: string[], hidden: string[]) => {
+    saveSidebarPrefs({ primary, secondary, hidden });
   };
 
-  const toggleHidden = (path: string) => {
-    const next = sidebarHidden.includes(path)
-      ? sidebarHidden.filter(p => p !== path)
-      : [...sidebarHidden, path];
-    setSidebarHidden(next);
-    saveSidebarPrefs({ order: sidebarOrder, hidden: next });
+  const handleDragStart = (path: string, section: Section) => (e: React.DragEvent) => {
+    dragSrc.current = { path, section };
+    e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleResetSidebar = () => {
+  const handleDragOver = (path: string, section: Section) => (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOver({ path, section });
+  };
+
+  const handleDrop = (targetPath: string | '__end__', targetSection: Section) => (e: React.DragEvent) => {
+    e.preventDefault();
+    const src = dragSrc.current;
+    if (!src || src.path === targetPath) { setDragOver(null); return; }
+
+    let newPrimary   = [...primaryList];
+    let newSecondary = [...secondaryList];
+
+    // Remove from source section
+    if (src.section === 'primary')   newPrimary   = newPrimary.filter((p) => p !== src.path);
+    else                             newSecondary = newSecondary.filter((p) => p !== src.path);
+
+    // Insert into dest section at target position
+    const destList = targetSection === 'primary' ? newPrimary : newSecondary;
+    const insertIdx = targetPath === '__end__'
+      ? destList.length
+      : destList.indexOf(targetPath);
+    destList.splice(insertIdx === -1 ? destList.length : insertIdx, 0, src.path);
+
+    if (targetSection === 'primary') newPrimary = destList;
+    else                             newSecondary = destList;
+
+    setPrimaryList(newPrimary);
+    setSecondaryList(newSecondary);
+    save(newPrimary, newSecondary, hiddenPaths);
+    dragSrc.current = null;
+    setDragOver(null);
+  };
+
+  const handleDragEnd = () => {
+    dragSrc.current = null;
+    setDragOver(null);
+  };
+
+  const toggleHidden = (path: string, newPrimary = primaryList, newSecondary = secondaryList) => {
+    const next = hiddenPaths.includes(path)
+      ? hiddenPaths.filter((p) => p !== path)
+      : [...hiddenPaths, path];
+    setHiddenPaths(next);
+    save(newPrimary, newSecondary, next);
+  };
+
+  const handleReset = () => {
     resetSidebarPrefs();
-    setSidebarOrder(ALL_NAV_ITEMS.map(i => i.path));
-    setSidebarHidden([]);
+    const { primary, secondary, hidden } = initPrefs();
+    setPrimaryList(primary);
+    setSecondaryList(secondary);
+    setHiddenPaths(hidden);
   };
 
+  // Profile
   useEffect(() => {
     if (!currentUser) return;
     setName(currentUser.name);
@@ -119,6 +246,50 @@ export default function Account() {
 
   if (!currentUser) return null;
 
+  // Zone renderer
+  const renderZone = (
+    label: string,
+    description: string,
+    list: string[],
+    section: Section
+  ) => (
+    <div>
+      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+        {label}
+      </p>
+      <p className="mb-2 text-xs" style={{ color: 'var(--text-muted)' }}>{description}</p>
+      <div
+        className="flex flex-col gap-1 rounded-lg p-1.5 min-h-12"
+        style={{ background: 'var(--surface-color)', border: '1px solid var(--border-color)' }}
+        onDragOver={(e) => { e.preventDefault(); setDragOver({ path: '__end__', section }); }}
+        onDrop={handleDrop('__end__', section)}
+      >
+        {list.length === 0 && (
+          <div
+            className="flex items-center justify-center rounded py-3 text-xs"
+            style={{ color: 'var(--text-muted)', border: '1.5px dashed var(--border-color)' }}
+          >
+            Drop pages here
+          </div>
+        )}
+        {list.map((path) => (
+          <NavItem
+            key={path}
+            path={path}
+            section={section}
+            isHidden={hiddenPaths.includes(path)}
+            isDragOver={dragOver?.path === path && dragOver?.section === section}
+            onToggleHidden={() => toggleHidden(path)}
+            onDragStart={handleDragStart(path, section)}
+            onDragOver={handleDragOver(path, section)}
+            onDrop={handleDrop(path, section)}
+            onDragEnd={handleDragEnd}
+          />
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div>
       <p className="page-kicker">You</p>
@@ -128,6 +299,7 @@ export default function Account() {
         (admins can also edit people on <strong>Team &amp; access</strong>).
       </p>
 
+      {/* Profile */}
       <div className="card mb-6">
         <h2 className="mb-4 flex items-center gap-2" style={{ fontSize: '1.125rem' }}>
           <User size={20} aria-hidden /> Profile
@@ -139,40 +311,29 @@ export default function Account() {
           </div>
           <div>
             <label htmlFor="acct-email">Email</label>
-            <input
-              id="acct-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-            />
+            <input id="acct-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
           </div>
           <div className="flex gap-2 flex-wrap items-center">
-            <button type="submit" className="btn btn-primary">
-              Save profile
-            </button>
+            <button type="submit" className="btn btn-primary">Save profile</button>
             {savedFlash && (
-              <span className="text-sm" style={{ color: 'var(--color-success)' }}>
-                Saved
-              </span>
+              <span className="text-sm" style={{ color: 'var(--color-success)' }}>Saved</span>
             )}
           </div>
         </form>
       </div>
 
+      {/* Appearance */}
       <div className="card mb-6">
         <h2 className="mb-4 flex items-center gap-2" style={{ fontSize: '1.125rem' }}>
           <Palette size={20} aria-hidden /> Appearance
         </h2>
         <p className="text-sm text-secondary mb-4">Choose light, dark, or match your system setting.</p>
         <div className="account-appearance-toggle" role="group" aria-label="Color theme">
-          {(
-            [
-              { value: 'light' as const, label: 'Light' },
-              { value: 'dark' as const, label: 'Dark' },
-              { value: 'system' as const, label: 'System' },
-            ] as const
-          ).map(({ value, label }) => (
+          {([
+            { value: 'light' as const, label: 'Light' },
+            { value: 'dark' as const, label: 'Dark' },
+            { value: 'system' as const, label: 'System' },
+          ] as const).map(({ value, label }) => (
             <button
               key={value}
               type="button"
@@ -188,13 +349,13 @@ export default function Account() {
 
       {/* Sidebar customisation */}
       <div className="card mb-6">
-        <div className="flex items-center justify-between mb-1" style={{ fontSize: '1.125rem' }}>
+        <div className="mb-4 flex items-center justify-between">
           <h2 className="flex items-center gap-2" style={{ fontSize: '1.125rem' }}>
             <LayoutList size={20} aria-hidden /> Sidebar
           </h2>
           <button
             type="button"
-            onClick={handleResetSidebar}
+            onClick={handleReset}
             className="btn btn-secondary flex items-center gap-1.5"
             style={{ fontSize: '0.75rem', padding: '0.25rem 0.65rem' }}
           >
@@ -202,73 +363,28 @@ export default function Account() {
             Reset to default
           </button>
         </div>
-        <p className="text-sm text-secondary mb-4">
-          Drag items up or down to reorder. Hide pages you don't use — you can always show them again.
+        <p className="text-sm text-secondary mb-5">
+          Drag pages between sections to reorder or move them into the collapsible <strong>More</strong> menu.
+          Toggle the eye icon to show or hide a page entirely.
         </p>
 
-        <div className="flex flex-col gap-1" style={{ maxWidth: '28rem' }}>
-          {orderedItems.map((item, idx) => {
-            const Icon = item.icon;
-            const hidden = sidebarHidden.includes(item.path);
-            return (
-              <div
-                key={item.path}
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors"
-                style={{
-                  background: hidden ? 'transparent' : 'var(--surface-raised)',
-                  border: '1px solid var(--border-color)',
-                  opacity: hidden ? 0.45 : 1,
-                }}
-              >
-                {/* Icon + name */}
-                <Icon size={16} strokeWidth={1.75} style={{ color: 'var(--text-muted)', flexShrink: 0 }} aria-hidden />
-                <span
-                  className="flex-1 text-sm font-medium"
-                  style={{ color: 'var(--text-primary)', textDecoration: hidden ? 'line-through' : 'none' }}
-                >
-                  {item.name}
-                </span>
-
-                {/* Up / Down */}
-                <div className="flex gap-0.5">
-                  <button
-                    type="button"
-                    onClick={() => moveItem(item.path, -1)}
-                    disabled={idx === 0}
-                    aria-label={`Move ${item.name} up`}
-                    className="rounded p-1 transition-colors hover:bg-[var(--surface-color)] disabled:opacity-20"
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    <ChevronUp size={15} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moveItem(item.path, 1)}
-                    disabled={idx === orderedItems.length - 1}
-                    aria-label={`Move ${item.name} down`}
-                    className="rounded p-1 transition-colors hover:bg-[var(--surface-color)] disabled:opacity-20"
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    <ChevronDown size={15} />
-                  </button>
-                </div>
-
-                {/* Show / Hide toggle */}
-                <button
-                  type="button"
-                  onClick={() => toggleHidden(item.path)}
-                  aria-label={hidden ? `Show ${item.name}` : `Hide ${item.name}`}
-                  className="rounded p-1 transition-colors hover:bg-[var(--surface-color)]"
-                  style={{ color: hidden ? 'var(--text-muted)' : 'var(--primary-green)' }}
-                >
-                  {hidden ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            );
-          })}
+        <div className="flex flex-col gap-5" style={{ maxWidth: '30rem' }}>
+          {renderZone(
+            'Main navigation',
+            'Always visible in the sidebar.',
+            primaryList,
+            'primary'
+          )}
+          {renderZone(
+            'More (collapsible)',
+            'Tucked under the expandable "More" section.',
+            secondaryList,
+            'secondary'
+          )}
         </div>
       </div>
 
+      {/* Info */}
       <div className="card flex gap-3" style={{ background: 'var(--surface-raised)', borderStyle: 'dashed' }}>
         <Info size={20} className="flex-shrink-0" style={{ color: 'var(--text-muted)', marginTop: '0.1rem' }} aria-hidden />
         <p className="text-sm text-secondary" style={{ margin: 0 }}>

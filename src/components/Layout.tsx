@@ -103,7 +103,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     }
   }, [taskInboxCount]);
 
-  // Sidebar prefs (order + hidden) — reactive to changes from Account page
+  // Sidebar prefs — reactive to changes from Account page
   const [sidebarPrefs, setSidebarPrefs] = useState(() => loadSidebarPrefs());
   useEffect(() => {
     const onPrefs = () => setSidebarPrefs(loadSidebarPrefs());
@@ -111,46 +111,34 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener(SIDEBAR_PREFS_EVENT, onPrefs);
   }, []);
 
-  // All nav items merged
   const allNavItems = [...primaryNavItems, ...secondaryNavItems];
+  const hiddenSet = new Set(sidebarPrefs.hidden);
 
-  // Build the rendered nav list based on prefs
-  const isCustomOrder = sidebarPrefs.order.length > 0;
-
-  const buildNavList = () => {
-    const accessible = allNavItems.filter(
-      (item) => currentUser && userCanAccessPath(item.path, currentUser)
+  // Build a nav section: apply user order if set, fall back to defaults, filter by access + hidden
+  const buildSection = (
+    defaults: typeof primaryNavItems,
+    customPaths: string[]
+  ) => {
+    const base =
+      customPaths.length > 0
+        ? [
+            ...customPaths
+              .map((p) => allNavItems.find((i) => i.path === p))
+              .filter(Boolean),
+            // append new items not yet in prefs
+            ...allNavItems.filter((i) => !customPaths.includes(i.path) && defaults.some((d) => d.path === i.path)),
+          ] as typeof primaryNavItems
+        : defaults;
+    return base.filter(
+      (item) =>
+        currentUser &&
+        userCanAccessPath(item.path, currentUser) &&
+        !hiddenSet.has(item.path)
     );
-    const hidden = new Set(sidebarPrefs.hidden);
-    if (isCustomOrder) {
-      // Ordered by user prefs; items not in order go at end
-      const inOrder = sidebarPrefs.order
-        .map((p) => accessible.find((i) => i.path === p))
-        .filter(Boolean) as typeof allNavItems;
-      const rest = accessible.filter((i) => !sidebarPrefs.order.includes(i.path));
-      return [...inOrder, ...rest].filter((i) => !hidden.has(i.path));
-    }
-    return accessible.filter((i) => !hidden.has(i.path));
   };
 
-  const customNavList = isCustomOrder ? buildNavList() : null;
-
-  const visiblePrimary = isCustomOrder
-    ? []
-    : primaryNavItems.filter(
-        (item) =>
-          currentUser &&
-          userCanAccessPath(item.path, currentUser) &&
-          !sidebarPrefs.hidden.includes(item.path)
-      );
-  const visibleSecondary = isCustomOrder
-    ? []
-    : secondaryNavItems.filter(
-        (item) =>
-          currentUser &&
-          userCanAccessPath(item.path, currentUser) &&
-          !sidebarPrefs.hidden.includes(item.path)
-      );
+  const visiblePrimary   = buildSection(primaryNavItems,   sidebarPrefs.primary);
+  const visibleSecondary = buildSection(secondaryNavItems, sidebarPrefs.secondary);
 
   const [moreNavOpen, setMoreNavOpen] = useState(false);
 
@@ -205,91 +193,64 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </header>
 
       <nav className="sidebar__nav" aria-label="Main">
-        {customNavList ? (
-          // Custom user-defined order — flat list, no More grouping
-          customNavList.map((item) => {
-            const isActive = isNavPathActive(item.path);
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`nav-link${isActive ? ' nav-link--active' : ''}`}
-                onClick={() => setDrawerOpen(false)}
-              >
-                <Icon size={20} strokeWidth={isActive ? 2.25 : 1.75} />
-                {item.name}
-                {item.path === '/tasks' && taskInboxCount > 0 && (
-                  <span className="nav-link__badge" aria-label={`${taskInboxCount} unseen task assignments`}>
-                    {taskInboxCount > 99 ? '99+' : taskInboxCount}
-                  </span>
-                )}
-              </Link>
-            );
-          })
-        ) : (
-          // Default primary + secondary (More) split
-          <>
-            {visiblePrimary.map((item) => {
-              const isActive = isNavPathActive(item.path);
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  className={`nav-link${isActive ? ' nav-link--active' : ''}`}
-                  onClick={() => setDrawerOpen(false)}
-                >
-                  <Icon size={20} strokeWidth={isActive ? 2.25 : 1.75} />
-                  {item.name}
-                  {item.path === '/tasks' && taskInboxCount > 0 && (
-                    <span className="nav-link__badge" aria-label={`${taskInboxCount} unseen task assignments`}>
-                      {taskInboxCount > 99 ? '99+' : taskInboxCount}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
+        {visiblePrimary.map((item) => {
+          const isActive = isNavPathActive(item.path);
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={`nav-link${isActive ? ' nav-link--active' : ''}`}
+              onClick={() => setDrawerOpen(false)}
+            >
+              <Icon size={20} strokeWidth={isActive ? 2.25 : 1.75} />
+              {item.name}
+              {item.path === '/tasks' && taskInboxCount > 0 && (
+                <span className="nav-link__badge" aria-label={`${taskInboxCount} unseen task assignments`}>
+                  {taskInboxCount > 99 ? '99+' : taskInboxCount}
+                </span>
+              )}
+            </Link>
+          );
+        })}
 
-            {visibleSecondary.length > 0 && (
-              <div className="sidebar__nav-more">
-                <button
-                  type="button"
-                  className={`sidebar__nav-disclosure${visibleSecondary.some((i) => isNavPathActive(i.path)) ? ' sidebar__nav-disclosure--child-active' : ''}`}
-                  aria-expanded={moreNavOpen}
-                  aria-controls="sidebar-more-links"
-                  id="sidebar-more-toggle"
-                  onClick={() => setMoreNavOpen((o) => !o)}
-                >
-                  <span>More</span>
-                  <ChevronDown size={18} strokeWidth={2} className={`sidebar__nav-disclosure-chevron${moreNavOpen ? ' sidebar__nav-disclosure-chevron--open' : ''}`} aria-hidden />
-                </button>
-                <div
-                  id="sidebar-more-links"
-                  role="region"
-                  aria-labelledby="sidebar-more-toggle"
-                  hidden={!moreNavOpen}
-                  className="sidebar__nav-sub"
-                >
-                  {visibleSecondary.map((item) => {
-                    const isActive = isNavPathActive(item.path);
-                    const Icon = item.icon;
-                    return (
-                      <Link
-                        key={item.path}
-                        to={item.path}
-                        className={`nav-link${isActive ? ' nav-link--active' : ''}`}
-                        onClick={() => setDrawerOpen(false)}
-                      >
-                        <Icon size={20} strokeWidth={isActive ? 2.25 : 1.75} />
-                        {item.name}
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </>
+        {visibleSecondary.length > 0 && (
+          <div className="sidebar__nav-more">
+            <button
+              type="button"
+              className={`sidebar__nav-disclosure${visibleSecondary.some((i) => isNavPathActive(i.path)) ? ' sidebar__nav-disclosure--child-active' : ''}`}
+              aria-expanded={moreNavOpen}
+              aria-controls="sidebar-more-links"
+              id="sidebar-more-toggle"
+              onClick={() => setMoreNavOpen((o) => !o)}
+            >
+              <span>More</span>
+              <ChevronDown size={18} strokeWidth={2} className={`sidebar__nav-disclosure-chevron${moreNavOpen ? ' sidebar__nav-disclosure-chevron--open' : ''}`} aria-hidden />
+            </button>
+            <div
+              id="sidebar-more-links"
+              role="region"
+              aria-labelledby="sidebar-more-toggle"
+              hidden={!moreNavOpen}
+              className="sidebar__nav-sub"
+            >
+              {visibleSecondary.map((item) => {
+                const isActive = isNavPathActive(item.path);
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={`nav-link${isActive ? ' nav-link--active' : ''}`}
+                    onClick={() => setDrawerOpen(false)}
+                  >
+                    <Icon size={20} strokeWidth={isActive ? 2.25 : 1.75} />
+                    {item.name}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
         )}
       </nav>
 

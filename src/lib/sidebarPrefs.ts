@@ -1,7 +1,9 @@
 export interface SidebarPrefs {
-  /** Paths in user-defined order. Empty array = use app defaults. */
-  order: string[];
-  /** Paths that should be hidden from the sidebar. */
+  /** Paths in the primary (always-visible) nav, in order. Empty = use app defaults. */
+  primary: string[];
+  /** Paths in the collapsible "More" section, in order. Empty = use app defaults. */
+  secondary: string[];
+  /** Paths that are hidden entirely from the sidebar. */
   hidden: string[];
 }
 
@@ -11,9 +13,20 @@ const EVENT = 'ih-sidebar-prefs-changed';
 export function loadSidebarPrefs(): SidebarPrefs {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as SidebarPrefs;
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<SidebarPrefs> & { order?: string[] };
+      // Migrate old `order` field to `primary`
+      if (parsed.order && !parsed.primary) {
+        return { primary: parsed.order, secondary: [], hidden: parsed.hidden ?? [] };
+      }
+      return {
+        primary: parsed.primary ?? [],
+        secondary: parsed.secondary ?? [],
+        hidden: parsed.hidden ?? [],
+      };
+    }
   } catch {}
-  return { order: [], hidden: [] };
+  return { primary: [], secondary: [], hidden: [] };
 }
 
 export function saveSidebarPrefs(prefs: SidebarPrefs): void {
