@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
+import ResetPassword from './pages/ResetPassword';
 import InvoicePay from './pages/InvoicePay';
 import Dashboard from './pages/Dashboard';
 import PreTrips from './pages/PreTrips';
@@ -37,6 +38,7 @@ function App() {
       <Routes>
         {/* Public — no auth, no layout */}
         <Route path="/login" element={<Login />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/pay/:token" element={<InvoicePay />} />
 
         {/* Authenticated app shell */}

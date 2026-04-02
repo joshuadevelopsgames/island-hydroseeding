@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { User, Palette, Info, LayoutList, Eye, EyeOff, RotateCcw, GripVertical, LogOut } from 'lucide-react';
+import { User, Palette, Info, LayoutList, Eye, EyeOff, RotateCcw, GripVertical, LogOut, Lock } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { getThemePreference, setThemePreference, type ThemePreference } from '../lib/theme';
 import {
@@ -138,6 +139,13 @@ export default function Account() {
   const [email, setEmail]         = useState('');
   const [savedFlash, setSavedFlash] = useState(false);
   const [theme, setTheme]         = useState<ThemePreference>(() => getThemePreference());
+
+  // Change-password state
+  const [newPw, setNewPw]           = useState('');
+  const [confirmPw, setConfirmPw]   = useState('');
+  const [pwLoading, setPwLoading]   = useState(false);
+  const [pwError, setPwError]       = useState<string | null>(null);
+  const [pwSuccess, setPwSuccess]   = useState(false);
 
   // Sidebar lists
   const initPrefs = () => {
@@ -330,6 +338,34 @@ export default function Account() {
     // ProtectedRoute will redirect to /login automatically
   };
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwError(null);
+    setPwSuccess(false);
+
+    if (newPw !== confirmPw) {
+      setPwError('Passwords do not match.');
+      return;
+    }
+    if (newPw.length < 8) {
+      setPwError('Password must be at least 8 characters.');
+      return;
+    }
+
+    setPwLoading(true);
+    const { error } = await supabase.auth.updateUser({ password: newPw });
+    setPwLoading(false);
+
+    if (error) {
+      setPwError(error.message);
+    } else {
+      setPwSuccess(true);
+      setNewPw('');
+      setConfirmPw('');
+      window.setTimeout(() => setPwSuccess(false), 3000);
+    }
+  };
+
   const setAppearance = (pref: ThemePreference) => {
     setThemePreference(pref);
     setTheme(pref);
@@ -482,6 +518,64 @@ export default function Account() {
           <strong className="text-primary">Role &amp; pages</strong> — Admins manage who can open which sections under
           Team &amp; access. Permission changes take effect on the user&apos;s next sign-in.
         </p>
+      </div>
+
+      {/* Change password */}
+      <div className="card mt-6">
+        <h2 className="mb-4 flex items-center gap-2" style={{ fontSize: '1.125rem' }}>
+          <Lock size={20} aria-hidden /> Change password
+        </h2>
+        <form onSubmit={handleChangePassword} className="flex flex-col gap-4" style={{ maxWidth: '28rem' }}>
+          <div>
+            <label htmlFor="acct-new-pw">New password</label>
+            <input
+              id="acct-new-pw"
+              type="password"
+              autoComplete="new-password"
+              value={newPw}
+              onChange={(e) => setNewPw(e.target.value)}
+              required
+              minLength={8}
+              placeholder="—"
+            />
+          </div>
+          <div>
+            <label htmlFor="acct-confirm-pw">Confirm new password</label>
+            <input
+              id="acct-confirm-pw"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPw}
+              onChange={(e) => setConfirmPw(e.target.value)}
+              required
+              placeholder="—"
+            />
+          </div>
+
+          {pwError && (
+            <p
+              style={{
+                fontSize: '0.875rem',
+                color: 'var(--color-danger)',
+                background: 'var(--color-danger-bg)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.625rem 0.875rem',
+                margin: 0,
+              }}
+            >
+              {pwError}
+            </p>
+          )}
+
+          <div className="flex gap-2 flex-wrap items-center">
+            <button type="submit" className="btn btn-primary" disabled={pwLoading}>
+              {pwLoading ? 'Saving…' : 'Update password'}
+            </button>
+            {pwSuccess && (
+              <span className="text-sm" style={{ color: 'var(--color-success)' }}>Password updated</span>
+            )}
+          </div>
+        </form>
       </div>
 
       {/* Sign out */}

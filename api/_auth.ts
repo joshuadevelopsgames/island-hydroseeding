@@ -53,10 +53,18 @@ export async function requireAuth(
 
   // Use the service-role client to validate the token server-side
   const sb = createClient(url, key, { auth: { persistSession: false } });
-  const { data: { user }, error } = await sb.auth.getUser(token);
 
-  if (error || !user) {
-    res.status(401).json({ error: 'Invalid or expired token' });
+  let user;
+  try {
+    const { data, error } = await sb.auth.getUser(token);
+    if (error || !data.user) {
+      res.status(401).json({ error: 'Invalid or expired token' });
+      return null;
+    }
+    user = data.user;
+  } catch (err) {
+    // Network-level error reaching Supabase (ECONNREFUSED, timeout, etc.)
+    res.status(503).json({ error: 'Auth service unreachable', detail: String(err) });
     return null;
   }
 
@@ -68,8 +76,8 @@ export async function requireAuth(
     : [];
 
   return {
-    userId:  user.id,
-    email:   user.email ?? '',
+    userId:       user.id,
+    email:        user.email ?? '',
     isAdmin,
     allowedPages,
   };
