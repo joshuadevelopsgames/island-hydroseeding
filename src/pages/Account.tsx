@@ -1,7 +1,39 @@
 import { useEffect, useState } from 'react';
-import { User, Palette, Info } from 'lucide-react';
+import { User, Palette, Info, LayoutList, Eye, EyeOff, ChevronUp, ChevronDown, RotateCcw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getThemePreference, setThemePreference, type ThemePreference } from '../lib/theme';
+import {
+  loadSidebarPrefs,
+  saveSidebarPrefs,
+  resetSidebarPrefs,
+  SIDEBAR_PREFS_EVENT,
+} from '../lib/sidebarPrefs';
+import {
+  LayoutDashboard, Users, Inbox, FileText, Briefcase, Receipt, CreditCard,
+  Calendar, Clock, ClipboardCheck, FolderOpen, CheckSquare,
+  Truck, AlertTriangle, Fuel, Wrench, Package, UserCog,
+} from 'lucide-react';
+
+const ALL_NAV_ITEMS = [
+  { name: 'Dashboard',      path: '/',          icon: LayoutDashboard },
+  { name: 'Leads & CRM',    path: '/crm',        icon: Users },
+  { name: 'Requests',       path: '/requests',   icon: Inbox },
+  { name: 'Quotes',         path: '/quotes',     icon: FileText },
+  { name: 'Jobs',           path: '/jobs',       icon: Briefcase },
+  { name: 'Invoices',       path: '/invoices',   icon: Receipt },
+  { name: 'Payments',       path: '/payments',   icon: CreditCard },
+  { name: 'Schedule',       path: '/schedule',   icon: Calendar },
+  { name: 'Time Tracking',  path: '/time',       icon: Clock },
+  { name: 'Pre-trips',      path: '/pre-trips',  icon: ClipboardCheck },
+  { name: 'Documents',      path: '/documents',  icon: FolderOpen },
+  { name: 'Tasks (To-Do)',  path: '/tasks',      icon: CheckSquare },
+  { name: 'Fleet assets',   path: '/assets',     icon: Truck },
+  { name: 'Fleet issues',   path: '/issues',     icon: AlertTriangle },
+  { name: 'Fuel & road',    path: '/fuel',       icon: Fuel },
+  { name: 'Maintenance',    path: '/equipment',  icon: Wrench },
+  { name: 'Inventory',      path: '/inventory',  icon: Package },
+  { name: 'Team & access',  path: '/team',       icon: UserCog },
+];
 
 export default function Account() {
   const { currentUser, updateCurrentUserProfile } = useAuth();
@@ -9,6 +41,56 @@ export default function Account() {
   const [email, setEmail] = useState('');
   const [savedFlash, setSavedFlash] = useState(false);
   const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference());
+
+  // Sidebar prefs
+  const [sidebarOrder, setSidebarOrder] = useState<string[]>(() => {
+    const p = loadSidebarPrefs();
+    return p.order.length > 0 ? p.order : ALL_NAV_ITEMS.map(i => i.path);
+  });
+  const [sidebarHidden, setSidebarHidden] = useState<string[]>(() => loadSidebarPrefs().hidden);
+
+  // Keep local state in sync if another tab changes prefs
+  useEffect(() => {
+    const onPrefs = () => {
+      const p = loadSidebarPrefs();
+      setSidebarOrder(p.order.length > 0 ? p.order : ALL_NAV_ITEMS.map(i => i.path));
+      setSidebarHidden(p.hidden);
+    };
+    window.addEventListener(SIDEBAR_PREFS_EVENT, onPrefs);
+    return () => window.removeEventListener(SIDEBAR_PREFS_EVENT, onPrefs);
+  }, []);
+
+  // Ordered list of items for the editor (new items not in order go at end)
+  const orderedItems = [
+    ...sidebarOrder.map(p => ALL_NAV_ITEMS.find(i => i.path === p)).filter(Boolean),
+    ...ALL_NAV_ITEMS.filter(i => !sidebarOrder.includes(i.path)),
+  ] as typeof ALL_NAV_ITEMS;
+
+  const moveItem = (path: string, dir: -1 | 1) => {
+    const currentOrder = orderedItems.map(i => i.path);
+    const idx = currentOrder.indexOf(path);
+    if (idx === -1) return;
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= currentOrder.length) return;
+    const next = [...currentOrder];
+    [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
+    setSidebarOrder(next);
+    saveSidebarPrefs({ order: next, hidden: sidebarHidden });
+  };
+
+  const toggleHidden = (path: string) => {
+    const next = sidebarHidden.includes(path)
+      ? sidebarHidden.filter(p => p !== path)
+      : [...sidebarHidden, path];
+    setSidebarHidden(next);
+    saveSidebarPrefs({ order: sidebarOrder, hidden: next });
+  };
+
+  const handleResetSidebar = () => {
+    resetSidebarPrefs();
+    setSidebarOrder(ALL_NAV_ITEMS.map(i => i.path));
+    setSidebarHidden([]);
+  };
 
   useEffect(() => {
     if (!currentUser) return;
@@ -101,6 +183,89 @@ export default function Account() {
               {label}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Sidebar customisation */}
+      <div className="card mb-6">
+        <div className="flex items-center justify-between mb-1" style={{ fontSize: '1.125rem' }}>
+          <h2 className="flex items-center gap-2" style={{ fontSize: '1.125rem' }}>
+            <LayoutList size={20} aria-hidden /> Sidebar
+          </h2>
+          <button
+            type="button"
+            onClick={handleResetSidebar}
+            className="btn btn-secondary flex items-center gap-1.5"
+            style={{ fontSize: '0.75rem', padding: '0.25rem 0.65rem' }}
+          >
+            <RotateCcw size={13} aria-hidden />
+            Reset to default
+          </button>
+        </div>
+        <p className="text-sm text-secondary mb-4">
+          Drag items up or down to reorder. Hide pages you don't use — you can always show them again.
+        </p>
+
+        <div className="flex flex-col gap-1" style={{ maxWidth: '28rem' }}>
+          {orderedItems.map((item, idx) => {
+            const Icon = item.icon;
+            const hidden = sidebarHidden.includes(item.path);
+            return (
+              <div
+                key={item.path}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors"
+                style={{
+                  background: hidden ? 'transparent' : 'var(--surface-raised)',
+                  border: '1px solid var(--border-color)',
+                  opacity: hidden ? 0.45 : 1,
+                }}
+              >
+                {/* Icon + name */}
+                <Icon size={16} strokeWidth={1.75} style={{ color: 'var(--text-muted)', flexShrink: 0 }} aria-hidden />
+                <span
+                  className="flex-1 text-sm font-medium"
+                  style={{ color: 'var(--text-primary)', textDecoration: hidden ? 'line-through' : 'none' }}
+                >
+                  {item.name}
+                </span>
+
+                {/* Up / Down */}
+                <div className="flex gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => moveItem(item.path, -1)}
+                    disabled={idx === 0}
+                    aria-label={`Move ${item.name} up`}
+                    className="rounded p-1 transition-colors hover:bg-[var(--surface-color)] disabled:opacity-20"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    <ChevronUp size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveItem(item.path, 1)}
+                    disabled={idx === orderedItems.length - 1}
+                    aria-label={`Move ${item.name} down`}
+                    className="rounded p-1 transition-colors hover:bg-[var(--surface-color)] disabled:opacity-20"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    <ChevronDown size={15} />
+                  </button>
+                </div>
+
+                {/* Show / Hide toggle */}
+                <button
+                  type="button"
+                  onClick={() => toggleHidden(item.path)}
+                  aria-label={hidden ? `Show ${item.name}` : `Hide ${item.name}`}
+                  className="rounded p-1 transition-colors hover:bg-[var(--surface-color)]"
+                  style={{ color: hidden ? 'var(--text-muted)' : 'var(--primary-green)' }}
+                >
+                  {hidden ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
 
