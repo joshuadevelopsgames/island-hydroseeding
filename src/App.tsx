@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
+import InvoicePay from './pages/InvoicePay';
 import Dashboard from './pages/Dashboard';
 import PreTrips from './pages/PreTrips';
 import FLHA from './pages/FLHA';
@@ -31,6 +32,12 @@ function App() {
   return (
     <BrowserRouter>
       <div className="app-router-fill">
+      <Routes>
+        {/* Public — no auth, no layout */}
+        <Route path="/pay/:token" element={<InvoicePay />} />
+
+        {/* Authenticated app shell */}
+        <Route path="/*" element={
       <Layout>
         <Routes>
           <Route
@@ -235,6 +242,8 @@ function App() {
           />
         </Routes>
       </Layout>
+        } />
+      </Routes>
       </div>
     </BrowserRouter>
   );

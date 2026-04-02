@@ -4,7 +4,7 @@ import { ArrowLeft, Loader2, Plus, Trash2, Save, FileText, Edit2 } from 'lucide-
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useTemplates, useProducts, useTemplateMutations } from '@/hooks/useQuotes';
-import type { QuoteTemplate, QuoteLineItemDraft, ProductService } from '@/lib/quotesTypes';
+import type { QuoteTemplate, QuoteLineItemDraft } from '@/lib/quotesTypes';
 
 export default function QuoteTemplates() {
   const navigate = useNavigate();
@@ -153,7 +153,7 @@ export default function QuoteTemplates() {
             {isCreating ? 'New Template' : `Edit: ${formData.name}`}
           </h1>
           <p style={{ color: 'var(--text-muted)' }}>
-            {isCreating ? 'Create a new quote template to speed up your quoting process.' : 'Update this template's details and line items.'}
+            {isCreating ? 'Create a new quote template to speed up your quoting process.' : "Update this template's details and line items."}
           </p>
         </div>
 

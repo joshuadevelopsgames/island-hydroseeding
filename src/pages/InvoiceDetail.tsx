@@ -15,6 +15,9 @@ import {
   CheckCircle,
   Plus,
   Download,
+  Link,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 const STATUS_COLORS: Record<InvoiceStatus, 'default' | 'secondary' | 'outline'> =
@@ -87,6 +90,10 @@ export default function InvoiceDetail() {
     reference_number: '',
     notes: '',
   });
+
+  const [paymentLink, setPaymentLink] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied]   = useState(false);
+  const [linkLoading, setLinkLoading] = useState(false);
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -199,6 +206,36 @@ export default function InvoiceDetail() {
       );
     } catch (err) {
       console.error('Failed to generate PDF:', err);
+    }
+  };
+
+  const handleGetPaymentLink = async () => {
+    if (!bundle) return;
+    if (paymentLink) {
+      await navigator.clipboard.writeText(paymentLink);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+      return;
+    }
+    setLinkLoading(true);
+    try {
+      const res = await fetch('/api/stripe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'get_payment_link', invoice_id: bundle.invoice.id }),
+      });
+      const data = await res.json() as { url?: string; error?: string };
+      if (data.error) throw new Error(data.error);
+      setPaymentLink(data.url ?? null);
+      if (data.url) {
+        await navigator.clipboard.writeText(data.url);
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 2000);
+      }
+    } catch (err) {
+      console.error('Failed to get payment link:', err);
+    } finally {
+      setLinkLoading(false);
     }
   };
 
@@ -478,6 +515,32 @@ export default function InvoiceDetail() {
             <Download className="h-4 w-4" />
             Download PDF
           </Button>
+
+          {invoice.status !== 'Paid' && (
+            <Button
+              onClick={handleGetPaymentLink}
+              disabled={linkLoading}
+              variant="secondary"
+              className="gap-2"
+            >
+              {linkLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : linkCopied ? (
+                <Check className="h-4 w-4 text-green-600" />
+              ) : paymentLink ? (
+                <Copy className="h-4 w-4" />
+              ) : (
+                <Link className="h-4 w-4" />
+              )}
+              {linkCopied ? 'Copied!' : paymentLink ? 'Copy Payment Link' : 'Get Payment Link'}
+            </Button>
+          )}
+
+          {paymentLink && (
+            <div className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 break-all">
+              {paymentLink}
+            </div>
+          )}
 
           <Button
             onClick={handleDeleteInvoice}

@@ -19,6 +19,8 @@ export type Invoice = {
   balance_due: number;
   notes: string | null;
   payment_terms: string | null;
+  pay_token: string | null;
+  stripe_payment_intent_id: string | null;
   created_at: string;
   updated_at: string;
 };
