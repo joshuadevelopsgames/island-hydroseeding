@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { requireAuth } from './_auth';
 
 function db() {
   const url = process.env.SUPABASE_URL;
@@ -27,6 +28,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(503).json({ error: 'Supabase is not configured' });
     return;
   }
+
+  const auth = await requireAuth(req, res);
+  if (!auth) return;
+
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'GET') {

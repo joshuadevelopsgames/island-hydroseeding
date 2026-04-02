@@ -1,4 +1,5 @@
 import type { WorkRequest } from '@/lib/requestsTypes';
+import { apiFetch } from './apiClient';
 
 const REQUESTS = '/api/requests';
 
@@ -27,7 +28,7 @@ async function readJson<T>(r: Response): Promise<T> {
 }
 
 export async function fetchRequests(): Promise<WorkRequest[]> {
-  const r = await fetch(`${REQUESTS}?action=list`, { cache: 'no-store' });
+  const r = await apiFetch(`${REQUESTS}?action=list`);
   if (r.status === 404 || r.status === 503) return [];
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
@@ -38,7 +39,7 @@ export async function fetchRequests(): Promise<WorkRequest[]> {
 }
 
 export async function fetchRequestDetail(id: string): Promise<{ request: WorkRequest }> {
-  const r = await fetch(`${REQUESTS}?action=get&id=${encodeURIComponent(id)}`, { cache: 'no-store' });
+  const r = await apiFetch(`${REQUESTS}?action=get&id=${encodeURIComponent(id)}`);
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
     throw new Error(j.error || `Request ${r.status}`);
@@ -47,7 +48,7 @@ export async function fetchRequestDetail(id: string): Promise<{ request: WorkReq
 }
 
 export async function requestsPost<T>(body: Record<string, unknown>): Promise<T> {
-  const r = await fetch(REQUESTS, {
+  const r = await apiFetch(REQUESTS, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

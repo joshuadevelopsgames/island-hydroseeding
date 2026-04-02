@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { requireAuth } from './_auth';
 
 const WORKSPACE_ID = 'default';
 
@@ -12,6 +13,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const supabase = createClient(url, key);
+
+  const auth = await requireAuth(req, res);
+  if (!auth) return;
 
   if (req.method === 'GET') {
     const { data, error } = await supabase

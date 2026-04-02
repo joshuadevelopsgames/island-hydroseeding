@@ -5,6 +5,7 @@ import type {
   QuoteTemplate,
   CrmProperty,
 } from '@/lib/quotesTypes';
+import { apiFetch } from './apiClient';
 
 const QUOTES = '/api/quotes';
 const PRODUCTS = '/api/products';
@@ -34,7 +35,7 @@ async function readJson<T>(r: Response): Promise<T> {
 }
 
 export async function fetchQuotes(): Promise<Quote[]> {
-  const r = await fetch(`${QUOTES}?action=list`, { cache: 'no-store' });
+  const r = await apiFetch(`${QUOTES}?action=list`);
   if (r.status === 404 || r.status === 503) return [];
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
@@ -45,7 +46,7 @@ export async function fetchQuotes(): Promise<Quote[]> {
 }
 
 export async function fetchQuoteBundle(quoteId: string): Promise<QuoteBundle> {
-  const r = await fetch(`${QUOTES}?action=get&id=${encodeURIComponent(quoteId)}`, { cache: 'no-store' });
+  const r = await apiFetch(`${QUOTES}?action=get&id=${encodeURIComponent(quoteId)}`);
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
     throw new Error(j.error || `Quote ${r.status}`);
@@ -54,7 +55,7 @@ export async function fetchQuoteBundle(quoteId: string): Promise<QuoteBundle> {
 }
 
 export async function quotesPost<T>(body: Record<string, unknown>): Promise<T> {
-  const r = await fetch(QUOTES, {
+  const r = await apiFetch(QUOTES, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -67,7 +68,7 @@ export async function quotesPost<T>(body: Record<string, unknown>): Promise<T> {
 }
 
 export async function fetchProducts(): Promise<ProductService[]> {
-  const r = await fetch(`${PRODUCTS}?action=list`, { cache: 'no-store' });
+  const r = await apiFetch(`${PRODUCTS}?action=list`);
   if (r.status === 404 || r.status === 503) return [];
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
@@ -78,7 +79,7 @@ export async function fetchProducts(): Promise<ProductService[]> {
 }
 
 export async function fetchTemplates(): Promise<QuoteTemplate[]> {
-  const r = await fetch(`${PRODUCTS}?action=templates`, { cache: 'no-store' });
+  const r = await apiFetch(`${PRODUCTS}?action=templates`);
   if (r.status === 404 || r.status === 503) return [];
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
@@ -89,7 +90,7 @@ export async function fetchTemplates(): Promise<QuoteTemplate[]> {
 }
 
 export async function productsPost<T>(body: Record<string, unknown>): Promise<T> {
-  const r = await fetch(PRODUCTS, {
+  const r = await apiFetch(PRODUCTS, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -102,7 +103,7 @@ export async function productsPost<T>(body: Record<string, unknown>): Promise<T>
 }
 
 export async function fetchAccountProperties(accountId: string): Promise<CrmProperty[]> {
-  const r = await fetch(`${QUOTES}?action=properties&account_id=${encodeURIComponent(accountId)}`, { cache: 'no-store' });
+  const r = await apiFetch(`${QUOTES}?action=properties&account_id=${encodeURIComponent(accountId)}`);
   if (r.status === 404 || r.status === 503) return [];
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };

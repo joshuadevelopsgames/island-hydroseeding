@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { User, Palette, Info, LayoutList, Eye, EyeOff, RotateCcw, GripVertical } from 'lucide-react';
+import { User, Palette, Info, LayoutList, Eye, EyeOff, RotateCcw, GripVertical, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getThemePreference, setThemePreference, type ThemePreference } from '../lib/theme';
 import {
@@ -60,7 +60,11 @@ function NavItem({
   isDragOver,
   isBeingDragged,
   onToggleHidden,
-  onPointerDown,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  onTouchPointerDown,
 }: {
   path: string;
   section: Section;
@@ -68,7 +72,13 @@ function NavItem({
   isDragOver: boolean;
   isBeingDragged: boolean;
   onToggleHidden: () => void;
-  onPointerDown: (e: React.PointerEvent) => void;
+  // Mouse / desktop — HTML5 drag API
+  onDragStart: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
+  // Touch / mobile — pointer events
+  onTouchPointerDown: (e: React.PointerEvent) => void;
 }) {
   const item = ALL_NAV_ITEMS.find((i) => i.path === path)!;
   if (!item) return null;
@@ -76,9 +86,17 @@ function NavItem({
 
   return (
     <div
+      draggable
       data-drag-path={path}
       data-drag-section={section}
-      onPointerDown={onPointerDown}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      onPointerDown={(e) => {
+        // Only intercept touch — let mouse use HTML5 drag
+        if (e.pointerType === 'touch') onTouchPointerDown(e);
+      }}
       className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 select-none transition-colors"
       style={{
         background: isDragOver ? 'var(--accent-muted)' : isHidden ? 'transparent' : 'var(--surface-raised)',
@@ -115,7 +133,7 @@ function NavItem({
 // ── main page ─────────────────────────────────────────────────────────────────
 
 export default function Account() {
-  const { currentUser, updateCurrentUserProfile } = useAuth();
+  const { currentUser, updateCurrentUserProfile, signOut } = useAuth();
   const [name, setName]           = useState('');
   const [email, setEmail]         = useState('');
   const [savedFlash, setSavedFlash] = useState(false);
@@ -149,12 +167,12 @@ export default function Account() {
     return () => window.removeEventListener(SIDEBAR_PREFS_EVENT, onPrefs);
   }, []); // eslint-disable-line
 
-  // ── Pointer-event drag (works on mouse + touch / iOS) ──────────────────────
+  // ── Shared drag state ────────────────────────────────────────────────────────
   const dragSrc = useRef<{ path: string; section: Section } | null>(null);
   const [dragOver, setDragOver] = useState<{ path: string; section: Section } | null>(null);
   const [draggingPath, setDraggingPath] = useState<string | null>(null);
 
-  // Refs so pointermove/up handlers always see latest state
+  // Refs so async handlers (pointermove/up) always see latest list state
   const primaryListRef   = useRef(primaryList);
   const secondaryListRef = useRef(secondaryList);
   const hiddenPathsRef   = useRef(hiddenPaths);
@@ -162,11 +180,66 @@ export default function Account() {
   useEffect(() => { secondaryListRef.current = secondaryList; }, [secondaryList]);
   useEffect(() => { hiddenPathsRef.current = hiddenPaths; }, [hiddenPaths]);
 
+  // Keep a ref to dragOver so the pointerup closure can read the latest value
+  const dragOverRef = useRef<{ path: string; section: Section } | null>(null);
+  useEffect(() => { dragOverRef.current = dragOver; }, [dragOver]);
+
   const save = (primary: string[], secondary: string[], hidden: string[]) => {
     saveSidebarPrefs({ primary, secondary, hidden });
   };
 
-  /** Find the nearest [data-drag-path] ancestor of an element */
+  /** Shared commit — called by both HTML5 drop and touch pointerup */
+  const commitDrop = useCallback((srcPath: string, targetPath: string, targetSection: Section) => {
+    let newPrimary   = [...primaryListRef.current];
+    let newSecondary = [...secondaryListRef.current];
+
+    // Remove from BOTH lists — handles any stale prefs where item exists in both
+    newPrimary   = newPrimary.filter((p) => p !== srcPath);
+    newSecondary = newSecondary.filter((p) => p !== srcPath);
+
+    const destList = targetSection === 'primary' ? newPrimary : newSecondary;
+    const insertIdx = destList.indexOf(targetPath);
+    destList.splice(insertIdx === -1 ? destList.length : insertIdx, 0, srcPath);
+
+    if (targetSection === 'primary') newPrimary = destList;
+    else                             newSecondary = destList;
+
+    setPrimaryList(newPrimary);
+    setSecondaryList(newSecondary);
+    save(newPrimary, newSecondary, hiddenPathsRef.current);
+  }, []); // eslint-disable-line
+
+  // ── HTML5 drag (mouse / desktop) ─────────────────────────────────────────────
+  const handleDragStart = (path: string, section: Section) => (e: React.DragEvent) => {
+    dragSrc.current = { path, section };
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggingPath(path);
+  };
+
+  const handleDragOver = (path: string, section: Section) => (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOver({ path, section });
+  };
+
+  const handleDrop = (targetPath: string, targetSection: Section) => (e: React.DragEvent) => {
+    e.preventDefault();
+    const src = dragSrc.current;
+    if (!src || src.path === targetPath) { setDragOver(null); return; }
+    commitDrop(src.path, targetPath, targetSection);
+    dragSrc.current = null;
+    setDraggingPath(null);
+    setDragOver(null);
+  };
+
+  const handleDragEnd = () => {
+    dragSrc.current = null;
+    setDraggingPath(null);
+    setDragOver(null);
+  };
+
+  // ── Touch / pointer-event drag (iOS + Android) ───────────────────────────────
+  /** Walk up the DOM to find the nearest [data-drag-path] element */
   const findDragTarget = (el: Element | null): { path: string; section: Section } | null => {
     while (el) {
       const p = (el as HTMLElement).dataset?.dragPath;
@@ -177,32 +250,10 @@ export default function Account() {
     return null;
   };
 
-  const commitDrop = useCallback((targetPath: string, targetSection: Section) => {
-    const src = dragSrc.current;
-    if (!src || src.path === targetPath) return;
-
-    let newPrimary   = [...primaryListRef.current];
-    let newSecondary = [...secondaryListRef.current];
-
-    // Remove from BOTH lists
-    newPrimary   = newPrimary.filter((p) => p !== src.path);
-    newSecondary = newSecondary.filter((p) => p !== src.path);
-
-    const destList = targetSection === 'primary' ? newPrimary : newSecondary;
-    const insertIdx = destList.indexOf(targetPath);
-    destList.splice(insertIdx === -1 ? destList.length : insertIdx, 0, src.path);
-
-    if (targetSection === 'primary') newPrimary = destList;
-    else                             newSecondary = destList;
-
-    setPrimaryList(newPrimary);
-    setSecondaryList(newSecondary);
-    save(newPrimary, newSecondary, hiddenPathsRef.current);
-  }, []); // eslint-disable-line
-
-  const handlePointerDown = useCallback((path: string, section: Section) => (e: React.PointerEvent) => {
-    // Ignore right-click
-    if (e.button !== undefined && e.button !== 0) return;
+  const handleTouchPointerDown = useCallback((path: string, section: Section) => (e: React.PointerEvent) => {
+    // Only handle touch — mouse uses HTML5 drag above
+    if (e.pointerType !== 'touch') return;
+    e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     dragSrc.current = { path, section };
     setDraggingPath(path);
@@ -220,17 +271,10 @@ export default function Account() {
     };
 
     const onUp = () => {
-      const over = dragSrc.current
-        ? (() => {
-            // Read latest dragOver from state via a ref trick — capture it at up time
-            return null; // will use the ref below
-          })()
-        : null;
-      void over;
-      // Use the dragOver state captured via ref
       const latestOver = dragOverRef.current;
-      if (latestOver && dragSrc.current && latestOver.path !== dragSrc.current.path) {
-        commitDrop(latestOver.path, latestOver.section);
+      const src = dragSrc.current;
+      if (latestOver && src && latestOver.path !== src.path) {
+        commitDrop(src.path, latestOver.path, latestOver.section);
       }
       dragSrc.current = null;
       setDraggingPath(null);
@@ -242,10 +286,6 @@ export default function Account() {
     document.addEventListener('pointermove', onMove, { passive: false });
     document.addEventListener('pointerup', onUp);
   }, [commitDrop]); // eslint-disable-line
-
-  // Keep a ref to dragOver so the pointerup closure can read the latest value
-  const dragOverRef = useRef<{ path: string; section: Section } | null>(null);
-  useEffect(() => { dragOverRef.current = dragOver; }, [dragOver]);
 
   const toggleHidden = (path: string, newPrimary = primaryList, newSecondary = secondaryList) => {
     const next = hiddenPaths.includes(path)
@@ -276,12 +316,18 @@ export default function Account() {
     return () => window.removeEventListener('ih-theme-changed', onTheme);
   }, []);
 
-  const saveProfile = (e: React.FormEvent) => {
+  const saveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
-    updateCurrentUserProfile({ name, email });
+    const { error } = await updateCurrentUserProfile({ name, email });
+    if (error) return; // could show toast here
     setSavedFlash(true);
     window.setTimeout(() => setSavedFlash(false), 2200);
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    // ProtectedRoute will redirect to /login automatically
   };
 
   const setAppearance = (pref: ThemePreference) => {
@@ -324,7 +370,11 @@ export default function Account() {
             isDragOver={dragOver?.path === path && dragOver?.section === section}
             isBeingDragged={draggingPath === path}
             onToggleHidden={() => toggleHidden(path)}
-            onPointerDown={handlePointerDown(path, section)}
+            onDragStart={handleDragStart(path, section)}
+            onDragOver={handleDragOver(path, section)}
+            onDrop={handleDrop(path, section)}
+            onDragEnd={handleDragEnd}
+            onTouchPointerDown={handleTouchPointerDown(path, section)}
           />
         ))}
       </div>
@@ -430,8 +480,19 @@ export default function Account() {
         <Info size={20} className="flex-shrink-0" style={{ color: 'var(--text-muted)', marginTop: '0.1rem' }} aria-hidden />
         <p className="text-sm text-secondary" style={{ margin: 0 }}>
           <strong className="text-primary">Role &amp; pages</strong> — Admins manage who can open which sections under
-          Team &amp; access. Use <strong>Preview as user</strong> there to walk through the app as someone else.
+          Team &amp; access. Permission changes take effect on the user&apos;s next sign-in.
         </p>
+      </div>
+
+      {/* Sign out */}
+      <div className="card mt-6">
+        <h2 className="mb-3 flex items-center gap-2" style={{ fontSize: '1.125rem' }}>
+          <LogOut size={20} aria-hidden /> Sign out
+        </h2>
+        <p className="text-sm text-secondary mb-4">Sign out on this device. Your data stays saved.</p>
+        <button type="button" className="btn btn-danger" onClick={handleSignOut}>
+          Sign out
+        </button>
       </div>
     </div>
   );

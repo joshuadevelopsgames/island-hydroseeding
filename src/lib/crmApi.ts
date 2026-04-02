@@ -5,6 +5,7 @@ import type {
   CrmResearchNote,
   LegacyLead,
 } from '@/lib/crmTypes';
+import { apiFetch } from './apiClient';
 
 const CRM = '/api/crm';
 
@@ -33,7 +34,7 @@ async function readJson<T>(r: Response): Promise<T> {
 }
 
 export async function fetchCrmAccounts(): Promise<CrmAccount[]> {
-  const r = await fetch(`${CRM}?action=accounts`, { cache: 'no-store' });
+  const r = await apiFetch(`${CRM}?action=accounts`);
   if (r.status === 404 || r.status === 503) return [];
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
@@ -49,7 +50,7 @@ export async function fetchCrmAccountBundle(accountId: string): Promise<{
   interactions: CrmInteraction[];
   research_notes: CrmResearchNote[];
 }> {
-  const r = await fetch(`${CRM}?action=account&id=${encodeURIComponent(accountId)}`, { cache: 'no-store' });
+  const r = await apiFetch(`${CRM}?action=account&id=${encodeURIComponent(accountId)}`);
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
     throw new Error(j.error || `CRM ${r.status}`);
@@ -58,7 +59,7 @@ export async function fetchCrmAccountBundle(accountId: string): Promise<{
 }
 
 export async function crmPost<T>(body: Record<string, unknown>): Promise<T> {
-  const r = await fetch(CRM, {
+  const r = await apiFetch(CRM, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

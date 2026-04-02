@@ -1,4 +1,5 @@
 import type { Job, JobBundle } from '@/lib/jobsTypes';
+import { apiFetch } from './apiClient';
 
 const JOBS = '/api/jobs';
 
@@ -27,7 +28,7 @@ async function readJson<T>(r: Response): Promise<T> {
 }
 
 export async function fetchJobs(): Promise<Job[]> {
-  const r = await fetch(`${JOBS}?action=list`, { cache: 'no-store' });
+  const r = await apiFetch(`${JOBS}?action=list`);
   if (r.status === 404 || r.status === 503) return [];
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
@@ -38,7 +39,7 @@ export async function fetchJobs(): Promise<Job[]> {
 }
 
 export async function fetchJobBundle(jobId: string): Promise<JobBundle> {
-  const r = await fetch(`${JOBS}?action=get&id=${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+  const r = await apiFetch(`${JOBS}?action=get&id=${encodeURIComponent(jobId)}`);
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
     throw new Error(j.error || `Job ${r.status}`);
@@ -47,7 +48,7 @@ export async function fetchJobBundle(jobId: string): Promise<JobBundle> {
 }
 
 export async function jobsPost<T>(body: Record<string, unknown>): Promise<T> {
-  const r = await fetch(JOBS, {
+  const r = await apiFetch(JOBS, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

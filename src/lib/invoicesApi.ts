@@ -1,4 +1,5 @@
 import type { Invoice, InvoiceBundle } from '@/lib/invoicesTypes';
+import { apiFetch } from './apiClient';
 
 const INVOICES = '/api/invoices';
 
@@ -27,7 +28,7 @@ async function readJson<T>(r: Response): Promise<T> {
 }
 
 export async function fetchInvoices(): Promise<Invoice[]> {
-  const r = await fetch(`${INVOICES}?action=list`, { cache: 'no-store' });
+  const r = await apiFetch(`${INVOICES}?action=list`);
   if (r.status === 404 || r.status === 503) return [];
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
@@ -38,7 +39,7 @@ export async function fetchInvoices(): Promise<Invoice[]> {
 }
 
 export async function fetchInvoiceBundle(invoiceId: string): Promise<InvoiceBundle> {
-  const r = await fetch(`${INVOICES}?action=get&id=${encodeURIComponent(invoiceId)}`, { cache: 'no-store' });
+  const r = await apiFetch(`${INVOICES}?action=get&id=${encodeURIComponent(invoiceId)}`);
   if (!r.ok) {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
     throw new Error(j.error || `Invoice ${r.status}`);
@@ -47,7 +48,7 @@ export async function fetchInvoiceBundle(invoiceId: string): Promise<InvoiceBund
 }
 
 export async function invoicesPost<T>(body: Record<string, unknown>): Promise<T> {
-  const r = await fetch(INVOICES, {
+  const r = await apiFetch(INVOICES, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

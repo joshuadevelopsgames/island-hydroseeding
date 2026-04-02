@@ -1,184 +1,177 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { requestCloudPush } from '../lib/cloudSync';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import type { Session } from '@supabase/supabase-js';
+import { supabase, decodeJwtPayload } from '../lib/supabase';
+import { apiFetch } from '../lib/apiClient';
 import { ALL_ASSIGNABLE_PATHS, normalizeAllowedPages } from '../lib/permissions';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export type AppUser = {
   id: string;
   name: string;
   email: string;
-  /** Can open Team & manage users; full access to all assignable pages. */
   isAdmin: boolean;
-  /** Paths from `PAGE_OPTIONS`; ignored for route checks when `isAdmin` (except `/team` still needs admin). */
   allowedPages: string[];
 };
 
-const USERS_KEY = 'appUsers';
-const CURRENT_KEY = 'currentUserId';
-
-/** Default pages for new non-admin users (field-style). */
-const DEFAULT_NEW_USER_PAGES = ['/', '/pre-trips', '/flha', '/documents', '/tasks', '/time'];
-
-const SEED_USERS: AppUser[] = [
-  {
-    id: 'u-admin',
-    name: 'Administrator',
-    email: 'office@islandhydroseeding.com',
-    isAdmin: true,
-    allowedPages: ALL_ASSIGNABLE_PATHS,
-  },
-  {
-    id: 'u-supervisor',
-    name: 'Site supervisor',
-    email: 'supervisor@islandhydroseeding.com',
-    isAdmin: false,
-    allowedPages: ALL_ASSIGNABLE_PATHS,
-  },
-  {
-    id: 'u-field',
-    name: 'Field crew',
-    email: 'crew@islandhydroseeding.com',
-    isAdmin: false,
-    allowedPages: DEFAULT_NEW_USER_PAGES,
-  },
+/** Default pages for new non-admin (field crew) users. */
+export const DEFAULT_NEW_USER_PAGES = [
+  '/', '/pre-trips', '/flha', '/documents', '/tasks', '/time',
 ];
 
-type LegacyRole = 'admin' | 'supervisor' | 'field';
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-function migrateRawUser(raw: Record<string, unknown>): AppUser {
-  const id = String(raw.id ?? '');
-  const name = String(raw.name ?? '');
-  const email = String(raw.email ?? '');
+/** Build an AppUser from a Supabase session using JWT custom claims. */
+function appUserFromSession(session: Session): AppUser {
+  const claims = decodeJwtPayload(session.access_token);
+  const meta   = session.user.user_metadata ?? {};
 
-  if (Array.isArray(raw.allowedPages)) {
-    return {
-      id,
-      name,
-      email,
-      isAdmin: Boolean(raw.isAdmin),
-      allowedPages: normalizeAllowedPages(raw.allowedPages as string[]),
-    };
-  }
+  const rawAllowed = claims.app_allowed_pages;
+  const allowed = Array.isArray(rawAllowed)
+    ? normalizeAllowedPages(rawAllowed as string[])
+    : [];
 
-  const role = raw.role as LegacyRole | undefined;
-  if (role === 'admin') {
-    return { id, name, email, isAdmin: true, allowedPages: [...ALL_ASSIGNABLE_PATHS] };
-  }
-  if (role === 'supervisor') {
-    return { id, name, email, isAdmin: false, allowedPages: [...ALL_ASSIGNABLE_PATHS] };
-  }
   return {
-    id,
-    name,
-    email,
-    isAdmin: false,
-    allowedPages: [...DEFAULT_NEW_USER_PAGES],
+    id:           session.user.id,
+    email:        session.user.email ?? '',
+    name:         String(meta.name ?? meta.full_name ?? session.user.email ?? ''),
+    isAdmin:      Boolean(claims.app_is_admin),
+    allowedPages: allowed,
   };
 }
 
-function readUsers(): AppUser[] {
-  const raw = localStorage.getItem(USERS_KEY);
-  if (!raw) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(SEED_USERS));
-    return SEED_USERS;
-  }
-  try {
-    const parsed = JSON.parse(raw) as unknown[];
-    if (!Array.isArray(parsed) || parsed.length === 0) return SEED_USERS;
-    return parsed.map((row) => migrateRawUser(row as Record<string, unknown>));
-  } catch {
-    return SEED_USERS;
-  }
-}
-
-function getInitialSession(): { users: AppUser[]; currentUserId: string | null } {
-  const users = readUsers();
-  let id = localStorage.getItem(CURRENT_KEY);
-  if (!id || !users.some((u) => u.id === id)) {
-    id = users[0]?.id ?? null;
-    if (id) localStorage.setItem(CURRENT_KEY, id);
-  }
-  return { users, currentUserId: id };
-}
+// ── Context value ─────────────────────────────────────────────────────────────
 
 type AuthContextValue = {
-  users: AppUser[];
+  /** Raw Supabase session (null = not signed in). */
+  session:     Session | null;
+  /** Currently signed-in user, with permissions from JWT. */
   currentUser: AppUser | null;
-  setCurrentUserId: (id: string) => void;
-  saveUsers: (next: AppUser[]) => void;
-  /** Update name/email for the signed-in user (persisted with team roster). */
-  updateCurrentUserProfile: (updates: { name?: string; email?: string }) => void;
+  /** All app users — populated for admins; just [currentUser] for others. */
+  users:       AppUser[];
+  /** True while the initial session check is in flight. */
+  isLoading:   boolean;
+
+  signIn:   (email: string, password: string) => Promise<{ error: string | null }>;
+  signOut:  () => Promise<void>;
+  /** Reload the users list (e.g. after Team page mutations). */
+  reloadUsers: () => Promise<void>;
+  /** Update the current user's display name / email via Supabase Auth. */
+  updateCurrentUserProfile: (updates: { name?: string; email?: string }) => Promise<{ error: string | null }>;
 };
+
+// ── Provider ──────────────────────────────────────────────────────────────────
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const init = getInitialSession();
-  const [users, setUsers] = useState<AppUser[]>(init.users);
-  const [currentUserId, setCurrentUserIdState] = useState<string | null>(init.currentUserId);
+  const [session,   setSession]   = useState<Session | null>(null);
+  const [users,     setUsers]     = useState<AppUser[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
+  /** Fetch the full team roster (requires a valid session). */
+  const fetchUsers = useCallback(async (currentSession: Session | null) => {
+    if (!currentSession) { setUsers([]); return; }
+    try {
+      const res  = await apiFetch('/api/team?action=list');
+      if (!res.ok) throw new Error('fetch failed');
+      const data = await res.json() as { users: AppUser[] };
+      setUsers(data.users ?? []);
+    } catch {
+      // Fallback: just the current user (non-admins may hit 403)
+      const me = appUserFromSession(currentSession);
+      setUsers([me]);
+    }
+  }, []);
+
+  // ── Bootstrap: listen for auth state changes ──────────────────────────────
   useEffect(() => {
-    requestCloudPush();
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      setSession(s);
+      setIsLoading(false);
+      void fetchUsers(s);
+    });
+
+    // Subscribe to future changes (sign in, sign out, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+      void fetchUsers(s);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [fetchUsers]);
+
+  // ── Auth actions ──────────────────────────────────────────────────────────
+  const signIn = useCallback(async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    return { error: error?.message ?? null };
   }, []);
 
-  const setCurrentUserId = useCallback((id: string) => {
-    setCurrentUserIdState(id);
-    localStorage.setItem(CURRENT_KEY, id);
-    window.dispatchEvent(new Event('auth-changed'));
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
+    setUsers([]);
   }, []);
 
-  const saveUsers = useCallback((next: AppUser[]) => {
-    setUsers(next);
-    localStorage.setItem(USERS_KEY, JSON.stringify(next));
-    window.dispatchEvent(new Event('auth-changed'));
-  }, []);
+  const reloadUsers = useCallback(async () => {
+    const { data: { session: s } } = await supabase.auth.getSession();
+    await fetchUsers(s);
+  }, [fetchUsers]);
 
   const updateCurrentUserProfile = useCallback(
-    (updates: { name?: string; email?: string }) => {
-      if (!currentUserId) return;
-      setUsers((prev) => {
-        const next = prev.map((u) => {
-          if (u.id !== currentUserId) return u;
-          const name = updates.name != null ? String(updates.name).trim() : u.name;
-          const email = updates.email != null ? String(updates.email).trim() : u.email;
-          return {
-            ...u,
-            name: name || u.name,
-            email: email || u.email,
-          };
-        });
-        localStorage.setItem(USERS_KEY, JSON.stringify(next));
-        window.dispatchEvent(new Event('auth-changed'));
-        return next;
-      });
+    async (updates: { name?: string; email?: string }) => {
+      const patch: Parameters<typeof supabase.auth.updateUser>[0] = {};
+      if (updates.email) patch.email = updates.email;
+      if (updates.name)  patch.data  = { name: updates.name };
+      const { error } = await supabase.auth.updateUser(patch);
+      if (!error) {
+        // Refresh the session so JWT claims / metadata reflect the update
+        await supabase.auth.refreshSession();
+      }
+      return { error: error?.message ?? null };
     },
-    [currentUserId]
+    []
   );
 
-  const currentUser = useMemo(
-    () => users.find((u) => u.id === currentUserId) ?? null,
-    [users, currentUserId]
+  // ── Derived values ────────────────────────────────────────────────────────
+  const currentUser = useMemo<AppUser | null>(
+    () => (session ? appUserFromSession(session) : null),
+    [session]
   );
 
-  const value = useMemo(
+  const value = useMemo<AuthContextValue>(
     () => ({
-      users,
+      session,
       currentUser,
-      setCurrentUserId,
-      saveUsers,
+      users,
+      isLoading,
+      signIn,
+      signOut,
+      reloadUsers,
       updateCurrentUserProfile,
     }),
-    [users, currentUser, setCurrentUserId, saveUsers, updateCurrentUserProfile]
+    [session, currentUser, users, isLoading, signIn, signOut, reloadUsers, updateCurrentUserProfile]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
 }
 
-export { DEFAULT_NEW_USER_PAGES };
+// ── Keep these exports for pages that still reference them ───────────────────
+export { ALL_ASSIGNABLE_PATHS };

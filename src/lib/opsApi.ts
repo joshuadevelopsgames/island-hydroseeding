@@ -1,3 +1,5 @@
+import { apiFetch } from './apiClient';
+
 const OPS = '/api/ops';
 
 async function readJson<T>(r: Response): Promise<T> {
@@ -33,7 +35,7 @@ export type OpsApproval = {
 };
 
 export async function fetchAnnouncements(): Promise<OpsAnnouncement[]> {
-  const r = await fetch(`${OPS}?resource=announcements`, { cache: 'no-store' });
+  const r = await apiFetch(`${OPS}?resource=announcements`);
   if (r.status === 404 || r.status === 503) return [];
   if (!r.ok) return [];
   const data = await readJson<{ announcements: OpsAnnouncement[] }>(r);
@@ -41,7 +43,7 @@ export async function fetchAnnouncements(): Promise<OpsAnnouncement[]> {
 }
 
 export async function fetchApprovals(status: string): Promise<OpsApproval[]> {
-  const r = await fetch(`${OPS}?resource=approvals&status=${encodeURIComponent(status)}`, { cache: 'no-store' });
+  const r = await apiFetch(`${OPS}?resource=approvals&status=${encodeURIComponent(status)}`);
   if (r.status === 404 || r.status === 503) return [];
   if (!r.ok) return [];
   const data = await readJson<{ approvals: OpsApproval[] }>(r);
@@ -49,7 +51,7 @@ export async function fetchApprovals(status: string): Promise<OpsApproval[]> {
 }
 
 export async function opsPost<T>(body: Record<string, unknown>): Promise<T> {
-  const r = await fetch(OPS, {
+  const r = await apiFetch(OPS, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
