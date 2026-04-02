@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { User, Palette, Info, LayoutList, Eye, EyeOff, RotateCcw, GripVertical } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getThemePreference, setThemePreference, type ThemePreference } from '../lib/theme';
@@ -55,22 +55,20 @@ function resolveList(paths: string[], defaults: string[]) {
 
 function NavItem({
   path,
+  section,
   isHidden,
   isDragOver,
+  isBeingDragged,
   onToggleHidden,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
+  onPointerDown,
 }: {
   path: string;
+  section: Section;
   isHidden: boolean;
   isDragOver: boolean;
+  isBeingDragged: boolean;
   onToggleHidden: () => void;
-  onDragStart: (e: React.DragEvent) => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDrop: (e: React.DragEvent) => void;
-  onDragEnd: () => void;
+  onPointerDown: (e: React.PointerEvent) => void;
 }) {
   const item = ALL_NAV_ITEMS.find((i) => i.path === path)!;
   if (!item) return null;
@@ -78,18 +76,18 @@ function NavItem({
 
   return (
     <div
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onDragEnd={onDragEnd}
+      data-drag-path={path}
+      data-drag-section={section}
+      onPointerDown={onPointerDown}
       className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 select-none transition-colors"
       style={{
         background: isDragOver ? 'var(--accent-muted)' : isHidden ? 'transparent' : 'var(--surface-raised)',
         border: `1px solid ${isDragOver ? 'var(--primary-green)' : 'var(--border-color)'}`,
-        opacity: isHidden ? 0.45 : 1,
+        opacity: isBeingDragged ? 0.35 : isHidden ? 0.45 : 1,
         cursor: 'grab',
+        touchAction: 'none',
         boxShadow: isDragOver ? '0 0 0 1px var(--primary-green)' : undefined,
+        transform: isBeingDragged ? 'scale(0.97)' : undefined,
       }}
     >
       <GripVertical size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} aria-hidden />
@@ -102,6 +100,7 @@ function NavItem({
       </span>
       <button
         type="button"
+        onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); onToggleHidden(); }}
         aria-label={isHidden ? `Show ${item.name}` : `Hide ${item.name}`}
         className="rounded p-1 transition-colors"
@@ -150,42 +149,47 @@ export default function Account() {
     return () => window.removeEventListener(SIDEBAR_PREFS_EVENT, onPrefs);
   }, []); // eslint-disable-line
 
-  // Drag state
+  // ── Pointer-event drag (works on mouse + touch / iOS) ──────────────────────
   const dragSrc = useRef<{ path: string; section: Section } | null>(null);
-  const [dragOver, setDragOver] = useState<{ path: string | '__end__'; section: Section } | null>(null);
+  const [dragOver, setDragOver] = useState<{ path: string; section: Section } | null>(null);
+  const [draggingPath, setDraggingPath] = useState<string | null>(null);
+
+  // Refs so pointermove/up handlers always see latest state
+  const primaryListRef   = useRef(primaryList);
+  const secondaryListRef = useRef(secondaryList);
+  const hiddenPathsRef   = useRef(hiddenPaths);
+  useEffect(() => { primaryListRef.current = primaryList; }, [primaryList]);
+  useEffect(() => { secondaryListRef.current = secondaryList; }, [secondaryList]);
+  useEffect(() => { hiddenPathsRef.current = hiddenPaths; }, [hiddenPaths]);
 
   const save = (primary: string[], secondary: string[], hidden: string[]) => {
     saveSidebarPrefs({ primary, secondary, hidden });
   };
 
-  const handleDragStart = (path: string, section: Section) => (e: React.DragEvent) => {
-    dragSrc.current = { path, section };
-    e.dataTransfer.effectAllowed = 'move';
+  /** Find the nearest [data-drag-path] ancestor of an element */
+  const findDragTarget = (el: Element | null): { path: string; section: Section } | null => {
+    while (el) {
+      const p = (el as HTMLElement).dataset?.dragPath;
+      const s = (el as HTMLElement).dataset?.dragSection as Section | undefined;
+      if (p && s) return { path: p, section: s };
+      el = el.parentElement;
+    }
+    return null;
   };
 
-  const handleDragOver = (path: string, section: Section) => (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDragOver({ path, section });
-  };
-
-  const handleDrop = (targetPath: string | '__end__', targetSection: Section) => (e: React.DragEvent) => {
-    e.preventDefault();
+  const commitDrop = useCallback((targetPath: string, targetSection: Section) => {
     const src = dragSrc.current;
-    if (!src || src.path === targetPath) { setDragOver(null); return; }
+    if (!src || src.path === targetPath) return;
 
-    let newPrimary   = [...primaryList];
-    let newSecondary = [...secondaryList];
+    let newPrimary   = [...primaryListRef.current];
+    let newSecondary = [...secondaryListRef.current];
 
-    // Remove from BOTH lists — handles stale prefs where item may exist in both
+    // Remove from BOTH lists
     newPrimary   = newPrimary.filter((p) => p !== src.path);
     newSecondary = newSecondary.filter((p) => p !== src.path);
 
-    // Insert into dest section at target position
     const destList = targetSection === 'primary' ? newPrimary : newSecondary;
-    const insertIdx = targetPath === '__end__'
-      ? destList.length
-      : destList.indexOf(targetPath);
+    const insertIdx = destList.indexOf(targetPath);
     destList.splice(insertIdx === -1 ? destList.length : insertIdx, 0, src.path);
 
     if (targetSection === 'primary') newPrimary = destList;
@@ -193,15 +197,55 @@ export default function Account() {
 
     setPrimaryList(newPrimary);
     setSecondaryList(newSecondary);
-    save(newPrimary, newSecondary, hiddenPaths);
-    dragSrc.current = null;
-    setDragOver(null);
-  };
+    save(newPrimary, newSecondary, hiddenPathsRef.current);
+  }, []); // eslint-disable-line
 
-  const handleDragEnd = () => {
-    dragSrc.current = null;
+  const handlePointerDown = useCallback((path: string, section: Section) => (e: React.PointerEvent) => {
+    // Ignore right-click
+    if (e.button !== undefined && e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragSrc.current = { path, section };
+    setDraggingPath(path);
     setDragOver(null);
-  };
+
+    const onMove = (me: PointerEvent) => {
+      me.preventDefault();
+      const el = document.elementFromPoint(me.clientX, me.clientY);
+      const target = findDragTarget(el);
+      if (target && target.path !== dragSrc.current?.path) {
+        setDragOver(target);
+      } else if (!target) {
+        setDragOver(null);
+      }
+    };
+
+    const onUp = () => {
+      const over = dragSrc.current
+        ? (() => {
+            // Read latest dragOver from state via a ref trick — capture it at up time
+            return null; // will use the ref below
+          })()
+        : null;
+      void over;
+      // Use the dragOver state captured via ref
+      const latestOver = dragOverRef.current;
+      if (latestOver && dragSrc.current && latestOver.path !== dragSrc.current.path) {
+        commitDrop(latestOver.path, latestOver.section);
+      }
+      dragSrc.current = null;
+      setDraggingPath(null);
+      setDragOver(null);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    };
+
+    document.addEventListener('pointermove', onMove, { passive: false });
+    document.addEventListener('pointerup', onUp);
+  }, [commitDrop]); // eslint-disable-line
+
+  // Keep a ref to dragOver so the pointerup closure can read the latest value
+  const dragOverRef = useRef<{ path: string; section: Section } | null>(null);
+  useEffect(() => { dragOverRef.current = dragOver; }, [dragOver]);
 
   const toggleHidden = (path: string, newPrimary = primaryList, newSecondary = secondaryList) => {
     const next = hiddenPaths.includes(path)
@@ -262,28 +306,25 @@ export default function Account() {
       <div
         className="flex flex-col gap-1 rounded-lg p-1.5 min-h-12"
         style={{ background: 'var(--surface-color)', border: '1px solid var(--border-color)' }}
-        onDragOver={(e) => { e.preventDefault(); setDragOver({ path: '__end__', section }); }}
-        onDrop={handleDrop('__end__', section)}
       >
         {list.length === 0 && (
           <div
             className="flex items-center justify-center rounded py-3 text-xs"
             style={{ color: 'var(--text-muted)', border: '1.5px dashed var(--border-color)' }}
           >
-            Drop pages here
+            Drag pages here
           </div>
         )}
         {list.map((path) => (
           <NavItem
             key={path}
             path={path}
+            section={section}
             isHidden={hiddenPaths.includes(path)}
             isDragOver={dragOver?.path === path && dragOver?.section === section}
+            isBeingDragged={draggingPath === path}
             onToggleHidden={() => toggleHidden(path)}
-            onDragStart={handleDragStart(path, section)}
-            onDragOver={handleDragOver(path, section)}
-            onDrop={handleDrop(path, section)}
-            onDragEnd={handleDragEnd}
+            onPointerDown={handlePointerDown(path, section)}
           />
         ))}
       </div>

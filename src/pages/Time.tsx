@@ -6,13 +6,15 @@ import {
   Calendar as CalendarIcon,
   History,
   Users,
-  Plus,
   Pencil,
   Trash2,
   X,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import {
   format,
   differenceInMinutes,
@@ -38,7 +40,6 @@ import {
 } from '../lib/vancouverTime';
 
 const LOGS_KEY = 'timeLogs';
-const EMPLOYEES_KEY = 'timeEmployees';
 const LAST_EMPLOYEE_KEY = 'timeLastEmployeeId';
 
 type Employee = {
@@ -74,26 +75,24 @@ function fromDatetimeLocalValue(s: string) {
 }
 
 export default function Time() {
+  const { users } = useAuth();
+  // Derive employees list directly from app users (no separate local storage list needed)
+  const employees = useMemo<Employee[]>(
+    () => users.map((u) => ({ id: u.id, name: u.name })),
+    [users]
+  );
+
   const [logs, setLogs] = useState<TimeLog[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
   const [activeLog, setActiveLog] = useState<TimeLog | null>(null);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
   const [editingLog, setEditingLog] = useState<TimeLog | null>(null);
-  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
-  const [editingMemberName, setEditingMemberName] = useState('');
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(vancouverNow()));
   const [alertDialog, setAlertDialog] = useState<{ title: string; message: string } | null>(null);
-  const [confirmDeleteMemberId, setConfirmDeleteMemberId] = useState<string | null>(null);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
 
   const persistLogs = useCallback((next: TimeLog[]) => {
     setLogs(next);
     localStorage.setItem(LOGS_KEY, JSON.stringify(next));
-  }, []);
-
-  const persistEmployees = useCallback((next: Employee[]) => {
-    setEmployees(next);
-    localStorage.setItem(EMPLOYEES_KEY, JSON.stringify(next));
   }, []);
 
   useEffect(() => {
@@ -110,31 +109,17 @@ export default function Time() {
     setLogs(logsData);
     const active = logsData.find((log) => log.clockOut === null);
     if (active) setActiveLog(active);
-
-    const rawEmp = localStorage.getItem(EMPLOYEES_KEY);
-    let empData: Employee[] = [];
-    if (rawEmp) {
-      try {
-        const parsed = JSON.parse(rawEmp) as Employee[];
-        empData = Array.isArray(parsed)
-          ? parsed.filter((e) => e && typeof e.name === 'string').map((e) => ({ id: String(e.id), name: e.name }))
-          : [];
-      } catch {
-        empData = [];
-      }
-    }
-    if (!rawEmp) {
-      localStorage.setItem(EMPLOYEES_KEY, JSON.stringify([]));
-    }
-    setEmployees(empData);
-
-    const lastId = localStorage.getItem(LAST_EMPLOYEE_KEY);
-    if (lastId && empData.some((e) => e.id === lastId)) {
-      setSelectedEmployeeId(lastId);
-    } else if (empData.length === 1) {
-      setSelectedEmployeeId(empData[0].id);
-    }
   }, []);
+
+  // Keep selectedEmployeeId in sync if users change
+  useEffect(() => {
+    const lastId = localStorage.getItem(LAST_EMPLOYEE_KEY);
+    if (lastId && employees.some((e) => e.id === lastId)) {
+      setSelectedEmployeeId(lastId);
+    } else if (employees.length === 1) {
+      setSelectedEmployeeId(employees[0].id);
+    }
+  }, [employees]);
 
   const sortedLogs = useMemo(
     () => [...logs].sort((a, b) => parseISO(b.clockIn).getTime() - parseISO(a.clockIn).getTime()),
@@ -149,40 +134,6 @@ export default function Time() {
     },
     [employees]
   );
-
-  const handleAddEmployee = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    const name = String(fd.get('newEmployeeName') || '').trim();
-    if (!name) return;
-    const row: Employee = { id: Math.random().toString(36).slice(2, 11), name };
-    const next = [...employees, row];
-    persistEmployees(next);
-    setSelectedEmployeeId(row.id);
-    localStorage.setItem(LAST_EMPLOYEE_KEY, row.id);
-    e.currentTarget.reset();
-  };
-
-  const saveMemberName = (id: string) => {
-    const trimmed = editingMemberName.trim();
-    if (!trimmed) return;
-    const next = employees.map((x) => (x.id === id ? { ...x, name: trimmed } : x));
-    persistEmployees(next);
-    setEditingMemberId(null);
-    persistLogs(
-      logs.map((log) =>
-        log.employeeId === id ? { ...log, employeeName: trimmed } : log
-      )
-    );
-  };
-
-  const executeDeleteEmployee = (id: string) => {
-    const next = employees.filter((x) => x.id !== id);
-    persistEmployees(next);
-    if (selectedEmployeeId === id) setSelectedEmployeeId(next[0]?.id ?? '');
-    setEditingMemberId(null);
-    setConfirmDeleteMemberId(null);
-  };
 
   const handleClockIn = () => {
     if (!selectedEmployeeId || !employees.some((e) => e.id === selectedEmployeeId)) {
@@ -392,18 +343,6 @@ export default function Time() {
         onClose={() => setAlertDialog(null)}
       />
       <ConfirmDialog
-        open={confirmDeleteMemberId !== null}
-        title="Remove team member?"
-        message="Remove this person from the team list? Past time entries keep their saved names."
-        confirmLabel="Remove"
-        cancelLabel="Cancel"
-        variant="danger"
-        onConfirm={() =>
-          confirmDeleteMemberId ? executeDeleteEmployee(confirmDeleteMemberId) : undefined
-        }
-        onCancel={() => setConfirmDeleteMemberId(null)}
-      />
-      <ConfirmDialog
         open={confirmDeleteLogId !== null}
         title="Delete time entry?"
         message="Remove this clock entry permanently? This cannot be undone."
@@ -421,7 +360,7 @@ export default function Time() {
             Time tracking
           </h1>
           <p className="time-intro text-[0.9375rem] sm:text-base leading-snug">
-            Punch in by person, manage the team list, and correct entries when needed.
+            Punch in by person and correct entries when needed.
           </p>
         </div>
       </div>
@@ -471,7 +410,7 @@ export default function Time() {
                   disabled={employees.length === 0}
                 >
                   {employees.length === 0 ? (
-                    <option value="">Add team members first ↓</option>
+                    <option value="">No users found</option>
                   ) : (
                     <>
                       <option value="">Select…</option>
@@ -501,65 +440,20 @@ export default function Time() {
               <Users size={20} className="flex-shrink-0" /> Team
             </h3>
             <p className="time-team-help text-sm text-secondary mb-3 sm:mb-4">
-              People who can be selected for punches. Names sync onto each time entry.
+              Pulled from your team roster. Add or remove people under{' '}
+              <Link to="/team" className="font-semibold" style={{ color: 'var(--primary-green)' }}>
+                Team &amp; access <ExternalLink size={11} style={{ display: 'inline', verticalAlign: 'middle' }} />
+              </Link>.
             </p>
-            <form onSubmit={handleAddEmployee} className="flex flex-col gap-2 mb-4 min-w-0">
-              <div className="flex gap-2 min-w-0 items-stretch">
-                <input
-                  name="newEmployeeName"
-                  placeholder="Full name"
-                  aria-label="New employee name"
-                  className="min-w-0 flex-1"
-                />
-                <button type="submit" className="btn btn-secondary flex-shrink-0" title="Add">
-                  <Plus size={18} />
-                </button>
-              </div>
-            </form>
             <div className="team-list">
               {employees.length === 0 && (
-                <p className="text-sm text-muted">No team members yet — add at least one to use the clock.</p>
+                <p className="text-sm text-muted">No users found. Add team members under Team &amp; access.</p>
               )}
               {employees.map((emp) => (
                 <div key={emp.id} className="team-row">
                   <div className="flex items-center gap-2 min-w-0" style={{ flex: 1 }}>
                     <span className="avatar-dot">{emp.name.slice(0, 1).toUpperCase()}</span>
-                    {editingMemberId === emp.id ? (
-                      <input
-                        value={editingMemberName}
-                        onChange={(ev) => setEditingMemberName(ev.target.value)}
-                        onBlur={() => saveMemberName(emp.id)}
-                        onKeyDown={(ev) => {
-                          if (ev.key === 'Enter') saveMemberName(emp.id);
-                          if (ev.key === 'Escape') setEditingMemberId(null);
-                        }}
-                        autoFocus
-                        style={{ flex: 1, minWidth: 0 }}
-                      />
-                    ) : (
-                      <span className="font-semibold text-sm truncate">{emp.name}</span>
-                    )}
-                  </div>
-                  <div className="flex gap-1 flex-shrink-0">
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      title="Rename"
-                      onClick={() => {
-                        setEditingMemberId(emp.id);
-                        setEditingMemberName(emp.name);
-                      }}
-                    >
-                      <Pencil size={16} />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-icon btn-icon--danger"
-                      title="Remove"
-                      onClick={() => setConfirmDeleteMemberId(emp.id)}
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <span className="font-semibold text-sm truncate">{emp.name}</span>
                   </div>
                 </div>
               ))}
