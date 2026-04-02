@@ -15,6 +15,7 @@ import CRM from './pages/CRM';
 import CrmAccountDetail from './pages/CrmAccountDetail';
 import Quotes from './pages/Quotes';
 import QuoteDetail from './pages/QuoteDetail';
+import QuoteTemplates from './pages/QuoteTemplates';
 import Requests from './pages/Requests';
 import RequestDetail from './pages/RequestDetail';
 import Jobs from './pages/Jobs';
@@ -133,6 +134,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Quotes />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/quotes/templates"
+            element={
+              <ProtectedRoute>
+                <QuoteTemplates />
               </ProtectedRoute>
             }
           />

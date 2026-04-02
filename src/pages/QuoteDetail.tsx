@@ -56,7 +56,11 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
   const [introduction, setIntroduction] = useState<string>('');
   const [contractDisclaimer, setContractDisclaimer] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
-  const [lineItems, setLineItems] = useState<Array<{ product_service_name: string; description: string | null; quantity: number; unit_price: number; sort_order: number }>>(
+  const [discountType, setDiscountType] = useState<'none' | 'amount' | 'percent'>('none');
+  const [discountValue, setDiscountValue] = useState<number>(0);
+  const [depositRequired, setDepositRequired] = useState<boolean>(false);
+  const [depositAmount, setDepositAmount] = useState<number>(0);
+  const [lineItems, setLineItems] = useState<Array<{ product_service_name: string; description: string | null; quantity: number; unit_price: number; sort_order: number; is_optional?: boolean }>>(
     []
   );
   const [showLineItemDialog, setShowLineItemDialog] = useState(false);
@@ -66,20 +70,24 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
     description: string | null;
     quantity: number;
     unit_price: number;
+    is_optional?: boolean;
   }>({
     idx: null,
     product_service_name: '',
     description: null,
     quantity: 1,
     unit_price: 0,
+    is_optional: false,
   });
 
   const selectedAccount = accounts?.find((a) => a.id === selectedAccountId);
   const selectedProperty = properties?.find((p) => p.id === selectedPropertyId);
 
   const subtotal = lineItems.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
-  const tax = subtotal * TAX_RATE;
-  const total = subtotal + tax;
+  const discountAmount = discountType === 'amount' ? discountValue : discountType === 'percent' ? subtotal * (discountValue / 100) : 0;
+  const discountedSubtotal = Math.max(0, subtotal - discountAmount);
+  const tax = discountedSubtotal * TAX_RATE;
+  const total = discountedSubtotal + tax;
 
   const handleTemplateSelect = (templateId: string) => {
     setSelectedTemplateId(templateId);
@@ -100,6 +108,7 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
       description: null,
       quantity: 1,
       unit_price: 0,
+      is_optional: false,
     });
     setShowLineItemDialog(true);
   };
@@ -112,6 +121,7 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
       description: item.description,
       quantity: item.quantity,
       unit_price: item.unit_price,
+      is_optional: item.is_optional ?? false,
     });
     setShowLineItemDialog(true);
   };
@@ -134,6 +144,7 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
         quantity: currentLineItem.quantity,
         unit_price: currentLineItem.unit_price,
         sort_order: currentLineItem.idx,
+        is_optional: currentLineItem.is_optional ?? false,
       };
     } else {
       newItems.push({
@@ -142,6 +153,7 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
         quantity: currentLineItem.quantity,
         unit_price: currentLineItem.unit_price,
         sort_order: newItems.length,
+        is_optional: currentLineItem.is_optional ?? false,
       });
     }
     setLineItems(newItems);
@@ -174,6 +186,10 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
         notes,
         line_items_json: lineItems,
         status: 'Draft',
+        discount_type: discountType,
+        discount_value: discountValue,
+        deposit_required: depositRequired,
+        deposit_amount: depositAmount,
       } as Record<string, unknown>);
 
       const newQuote = (response as { quote?: Quote })?.quote;
@@ -208,6 +224,10 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
         notes,
         line_items_json: lineItems,
         status: 'Sent',
+        discount_type: discountType,
+        discount_value: discountValue,
+        deposit_required: depositRequired,
+        deposit_amount: depositAmount,
       } as Record<string, unknown>);
 
       const newQuote = (response as { quote?: Quote })?.quote;
@@ -351,7 +371,10 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
                           <tr key={idx} className="border-b border-[var(--border-color)] hover:bg-[var(--bg-secondary)]">
                             <td className="py-3 pr-2">
                               <div>
-                                <p className="font-medium">{item.product_service_name}</p>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-medium">{item.product_service_name}</p>
+                                  {item.is_optional && <Badge variant="secondary">(Optional)</Badge>}
+                                </div>
                                 {item.description && <p className="text-xs text-[var(--text-muted)]">{item.description}</p>}
                               </div>
                             </td>
@@ -381,6 +404,45 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
                       <span className="text-[var(--text-secondary)]">Subtotal: </span>
                       <span className="font-semibold">{formatCurrency(subtotal)}</span>
                     </p>
+                    {discountType !== 'none' ? (
+                      <div className="w-full flex flex-col items-end gap-2">
+                        <select
+                          value={discountType}
+                          onChange={(e) => setDiscountType(e.target.value as 'none' | 'amount' | 'percent')}
+                          className="mt-1 flex h-8 w-32 rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--input-bg)] px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-[var(--primary-green)] focus:ring-opacity-50"
+                        >
+                          <option value="none">No discount</option>
+                          <option value="amount">Amount ($)</option>
+                          <option value="percent">Percentage (%)</option>
+                        </select>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={discountValue}
+                          onChange={(e) => setDiscountValue(parseFloat(e.target.value) || 0)}
+                          className="flex h-8 w-32 rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--input-bg)] px-2 py-1 text-xs outline-none placeholder:text-[var(--text-muted)] focus:ring-2 focus:ring-[var(--primary-green)] focus:ring-opacity-50"
+                          placeholder={discountType === 'percent' ? 'Percent' : 'Amount'}
+                        />
+                        <button
+                          onClick={() => { setDiscountType('none'); setDiscountValue(0); }}
+                          className="text-xs text-[var(--color-danger)] hover:underline"
+                        >
+                          Remove
+                        </button>
+                        <p>
+                          <span className="text-[var(--text-secondary)]">Discount: </span>
+                          <span className="font-semibold">-{formatCurrency(discountAmount)}</span>
+                        </p>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setDiscountType('amount')}
+                        className="text-xs text-[var(--primary-green)] hover:underline"
+                      >
+                        Add Discount
+                      </button>
+                    )}
                     <p>
                       <span className="text-[var(--text-secondary)]">GST (5%): </span>
                       <span className="font-semibold">{formatCurrency(tax)}</span>
@@ -389,6 +451,44 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
                       <span className="text-[var(--text-secondary)]">Total: </span>
                       <span>{formatCurrency(total)}</span>
                     </p>
+                  </div>
+
+                  <Separator />
+
+                  <div className="flex flex-col items-end gap-2 text-sm">
+                    {depositRequired ? (
+                      <div className="w-full flex flex-col items-end gap-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={depositRequired}
+                            onChange={(e) => setDepositRequired(e.target.checked)}
+                            className="h-4 w-4 rounded border-[var(--border-color)]"
+                          />
+                          Deposit Required
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={depositAmount}
+                          onChange={(e) => setDepositAmount(parseFloat(e.target.value) || 0)}
+                          className="flex h-8 w-32 rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--input-bg)] px-2 py-1 text-xs outline-none placeholder:text-[var(--text-muted)] focus:ring-2 focus:ring-[var(--primary-green)] focus:ring-opacity-50"
+                          placeholder="Deposit amount"
+                        />
+                        <p>
+                          <span className="text-[var(--text-secondary)]">Deposit: </span>
+                          <span className="font-semibold">{formatCurrency(depositAmount)}</span>
+                        </p>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setDepositRequired(true)}
+                        className="text-xs text-[var(--primary-green)] hover:underline"
+                      >
+                        Add Deposit or Payment Schedule
+                      </button>
+                    )}
                   </div>
                 </>
               )}
@@ -449,10 +549,22 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
                 <p className="text-[var(--text-muted)]">Subtotal</p>
                 <p className="font-semibold">{formatCurrency(subtotal)}</p>
               </div>
+              {discountType !== 'none' && (
+                <div>
+                  <p className="text-[var(--text-muted)]">Discount</p>
+                  <p className="font-semibold">-{formatCurrency(discountAmount)}</p>
+                </div>
+              )}
               <div>
                 <p className="text-[var(--text-muted)]">Tax (5%)</p>
                 <p className="font-semibold">{formatCurrency(tax)}</p>
               </div>
+              {depositRequired && (
+                <div>
+                  <p className="text-[var(--text-muted)]">Deposit</p>
+                  <p className="font-semibold">{formatCurrency(depositAmount)}</p>
+                </div>
+              )}
               <div className="rounded-[var(--radius-sm)] bg-[var(--bg-secondary)] p-3">
                 <p className="text-[var(--text-muted)]">Total</p>
                 <p className="text-lg font-bold">{formatCurrency(total)}</p>
@@ -951,6 +1063,7 @@ function LineItemDialog({
     description: string | null;
     quantity: number;
     unit_price: number;
+    is_optional?: boolean;
   };
   setCurrentLineItem: (item: typeof currentLineItem) => void;
   products: ProductService[];
@@ -1038,6 +1151,17 @@ function LineItemDialog({
                 onChange={(e) => setCurrentLineItem({ ...currentLineItem, unit_price: parseFloat(e.target.value) || 0 })}
               />
             </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              id="li-optional"
+              type="checkbox"
+              checked={currentLineItem.is_optional ?? false}
+              onChange={(e) => setCurrentLineItem({ ...currentLineItem, is_optional: e.target.checked })}
+              className="h-4 w-4 rounded border-[var(--border-color)]"
+            />
+            <Label htmlFor="li-optional" className="cursor-pointer">Mark as optional</Label>
           </div>
 
           <div className="rounded-[var(--radius-sm)] bg-[var(--bg-secondary)] p-3">

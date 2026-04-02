@@ -142,12 +142,20 @@ export default function Quotes() {
           </h1>
           <p className="text-secondary mb-0">Create, send, and track quotes for your projects.</p>
         </div>
-        <Button
-          onClick={() => navigate('/quotes/new')}
-          className="btn btn-primary page-toolbar__cta"
-        >
-          New Quote
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={() => navigate('/quotes/templates')}
+            variant="secondary"
+          >
+            Templates
+          </Button>
+          <Button
+            onClick={() => navigate('/quotes/new')}
+            className="btn btn-primary page-toolbar__cta"
+          >
+            New Quote
+          </Button>
+        </div>
       </div>
 
       {error && (

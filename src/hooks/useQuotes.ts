@@ -6,8 +6,9 @@ import {
   fetchProducts,
   fetchTemplates,
   fetchAccountProperties,
+  productsPost,
 } from '@/lib/quotesApi';
-import type { Quote } from '@/lib/quotesTypes';
+import type { Quote, QuoteTemplate } from '@/lib/quotesTypes';
 
 export const quotesKeys = {
   all: ['quotes'] as const,
@@ -117,4 +118,31 @@ export function useQuotesMutations() {
     sendQuote,
     convertQuote,
   };
+}
+
+export function useTemplateMutations() {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: quotesKeys.templates() });
+  };
+
+  const createTemplate = useMutation({
+    mutationFn: (payload: Record<string, unknown>) =>
+      productsPost<{ template: QuoteTemplate }>({ action: 'template.create', ...payload }),
+    onSuccess: invalidate,
+  });
+
+  const updateTemplate = useMutation({
+    mutationFn: (payload: Record<string, unknown>) =>
+      productsPost<{ template: QuoteTemplate }>({ action: 'template.update', ...payload }),
+    onSuccess: invalidate,
+  });
+
+  const deleteTemplate = useMutation({
+    mutationFn: (id: string) =>
+      productsPost({ action: 'template.delete', id }),
+    onSuccess: invalidate,
+  });
+
+  return { createTemplate, updateTemplate, deleteTemplate };
 }
