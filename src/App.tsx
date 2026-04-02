@@ -23,6 +23,7 @@ import Jobs from './pages/Jobs';
 import JobDetail from './pages/JobDetail';
 import Invoices from './pages/Invoices';
 import InvoiceDetail from './pages/InvoiceDetail';
+import Payments from './pages/Payments';
 import Schedule from './pages/Schedule';
 import Time from './pages/Time';
 import Team from './pages/Team';
@@ -205,6 +206,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <InvoiceDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/payments"
+            element={
+              <ProtectedRoute>
+                <Payments />
               </ProtectedRoute>
             }
           />

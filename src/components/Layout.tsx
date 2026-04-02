@@ -22,6 +22,7 @@ import {
   Inbox,
   Briefcase,
   Receipt,
+  CreditCard,
 } from 'lucide-react';
 import { formatInVancouver } from '../lib/vancouverTime';
 import { useAuth } from '../context/AuthContext';
@@ -47,6 +48,7 @@ const primaryNavItems: { name: string; path: string; icon: typeof LayoutDashboar
   { name: 'Quotes', path: '/quotes', icon: FileText },
   { name: 'Jobs', path: '/jobs', icon: Briefcase },
   { name: 'Invoices', path: '/invoices', icon: Receipt },
+  { name: 'Payments', path: '/payments', icon: CreditCard },
   { name: 'Schedule', path: '/schedule', icon: Calendar },
   { name: 'Time Tracking', path: '/time', icon: Clock },
   { name: 'Pre-trips', path: '/pre-trips', icon: ClipboardCheck },

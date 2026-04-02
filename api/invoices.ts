@@ -500,6 +500,104 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
     return res.status(200).json({ ok: true });
   }
 
+  if (action === 'payments.list') {
+    // Fetch all payments joined with invoice + account for the Payments page
+    const { data: payments, error: payErr } = await db
+      .from('payments')
+      .select('*')
+      .order('payment_date', { ascending: false });
+
+    if (payErr) return res.status(400).json({ error: errTable('payments', payErr) });
+
+    const list = payments || [];
+
+    // Batch-fetch invoices referenced by these payments
+    const invoiceIds = [...new Set(list.map((p: any) => p.invoice_id).filter(Boolean))];
+    const { data: invoices } = invoiceIds.length
+      ? await db.from('invoices').select('id, invoice_number, account_id, due_date, title').in('id', invoiceIds)
+      : { data: [] };
+
+    const invoiceMap: Record<string, any> = {};
+    (invoices || []).forEach((inv: any) => { invoiceMap[inv.id] = inv; });
+
+    // Batch-fetch accounts
+    const accountIds = [...new Set((invoices || []).map((inv: any) => inv.account_id).filter(Boolean))];
+    const { data: accounts } = accountIds.length
+      ? await db.from('accounts').select('id, name, account_type').in('id', accountIds)
+      : { data: [] };
+
+    const accountMap: Record<string, any> = {};
+    (accounts || []).forEach((acc: any) => { accountMap[acc.id] = acc; });
+
+    // Compute stats
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo  = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+
+    // Invoice payment time (days from issue_date to payment_date) — last 30 days
+    const recentPaid = list.filter((p: any) => {
+      const pd = new Date(p.payment_date);
+      return pd >= thirtyDaysAgo;
+    });
+
+    function avgDaysToPayByType(type: string) {
+      const inv60 = (invoices || []).filter((inv: any) => {
+        const acc = accountMap[inv.account_id];
+        return acc?.account_type?.toLowerCase() === type.toLowerCase();
+      });
+      const inv60Ids = new Set(inv60.map((i: any) => i.id));
+      const relevant = recentPaid.filter((p: any) => inv60Ids.has(p.invoice_id));
+      if (!relevant.length) return null;
+      // We don't have issue_date on payment; use payment_date minus invoice due_date as proxy
+      const days = relevant.map((p: any) => {
+        const inv = invoiceMap[p.invoice_id];
+        if (!inv?.due_date) return 0;
+        const diff = (new Date(p.payment_date).getTime() - new Date(inv.due_date).getTime()) / (1000 * 60 * 60 * 24);
+        return Math.max(0, Math.round(diff));
+      });
+      return Math.round(days.reduce((a: number, b: number) => a + b, 0) / days.length);
+    }
+
+    function paidOnTimeRatioByType(type: string) {
+      const inv60 = (invoices || []).filter((inv: any) => {
+        const acc = accountMap[inv.account_id];
+        const pd = new Date(inv.due_date);
+        return acc?.account_type?.toLowerCase() === type.toLowerCase() && pd >= sixtyDaysAgo;
+      });
+      if (!inv60.length) return null;
+      const inv60Ids = new Set(inv60.map((i: any) => i.id));
+      const onTime = list.filter((p: any) => {
+        if (!inv60Ids.has(p.invoice_id)) return false;
+        const inv = invoiceMap[p.invoice_id];
+        return inv && new Date(p.payment_date) <= new Date(inv.due_date);
+      });
+      return Math.round((onTime.length / inv60.length) * 100);
+    }
+
+    const totalCollected = list.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+    const totalThisMonth = list
+      .filter((p: any) => new Date(p.payment_date) >= thirtyDaysAgo)
+      .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+
+    const enriched = list.map((p: any) => {
+      const inv = invoiceMap[p.invoice_id] || null;
+      const acc = inv ? (accountMap[inv.account_id] || null) : null;
+      return { ...p, invoice: inv, account: acc };
+    });
+
+    return res.status(200).json({
+      payments: enriched,
+      stats: {
+        total_collected:   totalCollected,
+        total_this_month:  totalThisMonth,
+        avg_days_residential: avgDaysToPayByType('residential'),
+        avg_days_commercial:  avgDaysToPayByType('commercial'),
+        paid_on_time_residential: paidOnTimeRatioByType('residential'),
+        paid_on_time_commercial:  paidOnTimeRatioByType('commercial'),
+      },
+    });
+  }
+
   if (action === 'invoice.create_from_job') {
     const { job_id } = body;
 
