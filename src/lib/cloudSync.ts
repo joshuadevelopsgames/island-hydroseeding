@@ -137,6 +137,7 @@ export function runAppBootstrap(): Promise<'reload' | 'ready'> {
   if (!bootstrapOnce) {
     bootstrapOnce = (async () => {
       installStorageSyncHook();
+      installVisibilitySync();
       const { merge } = await pullFromServer();
       if (merge) return 'reload';
       void pushToServer();
@@ -144,4 +145,25 @@ export function runAppBootstrap(): Promise<'reload' | 'ready'> {
     })();
   }
   return bootstrapOnce;
+}
+
+/* ── Re-sync when the PWA resumes from background ── */
+
+let visHookInstalled = false;
+
+function installVisibilitySync() {
+  if (visHookInstalled || typeof document === 'undefined') return;
+  visHookInstalled = true;
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    // App just came back to the foreground — pull latest data
+    void pullFromServer().then(({ merge }) => {
+      if (merge) {
+        // Most stores read localStorage once on mount, so a reload is the
+        // simplest way to guarantee every component picks up fresh data.
+        window.location.reload();
+      }
+    });
+  });
 }
