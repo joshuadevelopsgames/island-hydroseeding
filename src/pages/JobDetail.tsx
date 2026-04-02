@@ -320,35 +320,33 @@ function CreateJobForm({ onSuccess }: { onSuccess: (jobId: string) => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-background">
       <div className="max-w-2xl mx-auto px-6 py-12">
         <Button onClick={() => navigate('/jobs')} variant="ghost" size="sm" className="mb-6">
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back
         </Button>
 
-        <h1 className="text-3xl font-bold mb-8">Create New Job</h1>
+        <h1 className="text-3xl font-bold mb-8 tracking-tight text-foreground">Create New Job</h1>
 
-        <form onSubmit={handleSubmit} className="bg-white p-6 rounded-lg border border-slate-200 space-y-6">
+        <form onSubmit={handleSubmit} className="card space-y-6">
           <div>
-            <label className="block text-sm font-medium text-slate-900 mb-2">Title</label>
+            <label>Title</label>
             <input
               type="text"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               placeholder="—"
               required
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg"
             />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-900 mb-2">Job Type</label>
+              <label>Job Type</label>
               <select
                 value={formData.job_type}
                 onChange={(e) => setFormData({ ...formData, job_type: e.target.value as 'One-off' | 'Recurring' })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg"
               >
                 <option value="One-off">One-off</option>
                 <option value="Recurring">Recurring</option>
@@ -356,11 +354,10 @@ function CreateJobForm({ onSuccess }: { onSuccess: (jobId: string) => void }) {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-900 mb-2">Status</label>
+              <label>Status</label>
               <select
                 value={formData.status}
                 onChange={(e) => setFormData({ ...formData, status: e.target.value as JobStatus })}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg"
               >
                 <option value="Active">Active</option>
                 <option value="Late">Late</option>
@@ -372,38 +369,36 @@ function CreateJobForm({ onSuccess }: { onSuccess: (jobId: string) => void }) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-900 mb-2">Start Date</label>
+            <label>Start Date</label>
             <input
               type="date"
               value={formData.start_date}
               onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
               required
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-900 mb-2">Account ID</label>
+            <label>Account ID</label>
             <input
               type="text"
               value={formData.account_id}
               onChange={(e) => setFormData({ ...formData, account_id: e.target.value })}
               placeholder="—"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-900 mb-2">Notes</label>
+            <label>Notes</label>
             <textarea
               value={formData.notes}
               onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
               placeholder="—"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg h-32"
+              className="h-32"
             />
           </div>
 
-          <Button type="submit" disabled={createJob.isPending}>
+          <Button type="submit" className="btn-primary" disabled={createJob.isPending}>
             {createJob.isPending ? 'Creating...' : 'Create Job'}
           </Button>
         </form>
