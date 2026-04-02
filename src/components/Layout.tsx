@@ -114,31 +114,31 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const allNavItems = [...primaryNavItems, ...secondaryNavItems];
   const hiddenSet = new Set(sidebarPrefs.hidden);
 
-  // Build a nav section: apply user order if set, fall back to defaults, filter by access + hidden
+  // Build a section from user prefs (or defaults), filtered by permissions + hidden.
+  // excludePaths prevents the same item appearing in both primary and More.
   const buildSection = (
     defaults: typeof primaryNavItems,
-    customPaths: string[]
+    customPaths: string[],
+    excludePaths: Set<string> = new Set()
   ) => {
     const base =
       customPaths.length > 0
-        ? [
-            ...customPaths
-              .map((p) => allNavItems.find((i) => i.path === p))
-              .filter(Boolean),
-            // append new items not yet in prefs
-            ...allNavItems.filter((i) => !customPaths.includes(i.path) && defaults.some((d) => d.path === i.path)),
-          ] as typeof primaryNavItems
+        ? (customPaths
+            .map((p) => allNavItems.find((i) => i.path === p))
+            .filter(Boolean) as typeof primaryNavItems)
         : defaults;
     return base.filter(
       (item) =>
         currentUser &&
         userCanAccessPath(item.path, currentUser) &&
-        !hiddenSet.has(item.path)
+        !hiddenSet.has(item.path) &&
+        !excludePaths.has(item.path)
     );
   };
 
   const visiblePrimary   = buildSection(primaryNavItems,   sidebarPrefs.primary);
-  const visibleSecondary = buildSection(secondaryNavItems, sidebarPrefs.secondary);
+  const primaryPaths     = new Set(visiblePrimary.map((i) => i.path));
+  const visibleSecondary = buildSection(secondaryNavItems, sidebarPrefs.secondary, primaryPaths);
 
   const [moreNavOpen, setMoreNavOpen] = useState(false);
 
