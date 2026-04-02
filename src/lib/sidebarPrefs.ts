@@ -19,11 +19,11 @@ export function loadSidebarPrefs(): SidebarPrefs {
       if (parsed.order && !parsed.primary) {
         return { primary: parsed.order, secondary: [], hidden: parsed.hidden ?? [] };
       }
-      return {
-        primary: parsed.primary ?? [],
-        secondary: parsed.secondary ?? [],
-        hidden: parsed.hidden ?? [],
-      };
+      const primary = parsed.primary ?? [];
+      const primarySet = new Set(primary);
+      // Deduplicate: remove from secondary anything already in primary
+      const secondary = (parsed.secondary ?? []).filter((p) => !primarySet.has(p));
+      return { primary, secondary, hidden: parsed.hidden ?? [] };
     }
   } catch {}
   return { primary: [], secondary: [], hidden: [] };

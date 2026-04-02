@@ -124,12 +124,15 @@ export default function Account() {
 
   // Sidebar lists
   const initPrefs = () => {
-    const p = loadSidebarPrefs();
-    return {
-      primary:   resolveList(p.primary,   DEFAULT_PRIMARY_PATHS),
-      secondary: resolveList(p.secondary, DEFAULT_SECONDARY_PATHS),
-      hidden:    p.hidden,
-    };
+    const p = loadSidebarPrefs(); // already deduped by loadSidebarPrefs
+    const primary = resolveList(p.primary, DEFAULT_PRIMARY_PATHS);
+    const primarySet = new Set(primary);
+    // Secondary must never contain items already in primary
+    const secondary = resolveList(
+      p.secondary.filter((path) => !primarySet.has(path)),
+      DEFAULT_SECONDARY_PATHS.filter((path) => !primarySet.has(path))
+    );
+    return { primary, secondary, hidden: p.hidden };
   };
   const [primaryList,   setPrimaryList]   = useState(() => initPrefs().primary);
   const [secondaryList, setSecondaryList] = useState(() => initPrefs().secondary);
@@ -174,9 +177,9 @@ export default function Account() {
     let newPrimary   = [...primaryList];
     let newSecondary = [...secondaryList];
 
-    // Remove from source section
-    if (src.section === 'primary')   newPrimary   = newPrimary.filter((p) => p !== src.path);
-    else                             newSecondary = newSecondary.filter((p) => p !== src.path);
+    // Remove from BOTH lists — handles stale prefs where item may exist in both
+    newPrimary   = newPrimary.filter((p) => p !== src.path);
+    newSecondary = newSecondary.filter((p) => p !== src.path);
 
     // Insert into dest section at target position
     const destList = targetSection === 'primary' ? newPrimary : newSecondary;
