@@ -501,13 +501,16 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
   }
 
   if (action === 'payments.list') {
-    // Fetch all payments joined with invoice + account for the Payments page
-    const { data: payments, error: payErr } = await db
-      .from('payments')
-      .select('*')
-      .order('payment_date', { ascending: false });
-
-    if (payErr) return res.status(400).json({ error: errTable('payments', payErr) });
+    // Fetch all payments joined with invoice + account for the Payments page.
+    // Try invoice_payments (migration name) first, fall back to payments (legacy alias).
+    let payments: any[] = [];
+    for (const table of ['invoice_payments', 'payments']) {
+      const { data, error } = await db
+        .from(table)
+        .select('*')
+        .order('payment_date', { ascending: false });
+      if (!error) { payments = data || []; break; }
+    }
 
     const list = payments || [];
 

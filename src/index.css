@@ -600,6 +600,7 @@ html.theme-dark .card:hover {
 .sidebar {
   width: 16rem;
   flex-shrink: 0;
+  overflow: hidden;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 249, 251, 0.98) 100%);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
