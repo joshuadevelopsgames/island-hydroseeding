@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Search, CreditCard, DollarSign, Clock, CheckCircle } from 'lucide-react';
+import { apiFetch } from '../lib/apiClient';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -52,9 +53,8 @@ function fmtDate(s: string | null) {
 }
 
 async function fetchPayments(): Promise<PaymentsResponse> {
-  const res = await fetch('/api/invoices', {
+  const res = await apiFetch('/api/invoices', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'payments.list' }),
   });
   if (!res.ok) throw new Error('Failed to load payments');

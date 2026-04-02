@@ -3,6 +3,7 @@ import { User, Palette, Info, LayoutList, Eye, EyeOff, RotateCcw, GripVertical, 
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { getThemePreference, setThemePreference, type ThemePreference } from '../lib/theme';
+import { userCanAccessPath } from '../lib/permissions';
 import {
   loadSidebarPrefs,
   saveSidebarPrefs,
@@ -45,10 +46,10 @@ type Section = 'primary' | 'secondary';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-function resolveList(paths: string[], defaults: string[]) {
+function resolveList(paths: string[], defaults: string[], positioned: Set<string> = new Set()) {
   const base = paths.length > 0 ? paths : defaults;
-  // Ensure any new items not yet in the list are appended
-  const extra = defaults.filter((p) => !base.includes(p));
+  // Only append defaults that haven't been explicitly placed anywhere
+  const extra = defaults.filter((p) => !base.includes(p) && !positioned.has(p));
   return [...base, ...extra];
 }
 
@@ -150,12 +151,15 @@ export default function Account() {
   // Sidebar lists
   const initPrefs = () => {
     const p = loadSidebarPrefs(); // already deduped by loadSidebarPrefs
-    const primary = resolveList(p.primary, DEFAULT_PRIMARY_PATHS);
+    // Items explicitly placed in either section — don't auto-add these back as extras
+    const positioned = new Set([...p.primary, ...p.secondary]);
+    const primary = resolveList(p.primary, DEFAULT_PRIMARY_PATHS, positioned);
     const primarySet = new Set(primary);
     // Secondary must never contain items already in primary
     const secondary = resolveList(
       p.secondary.filter((path) => !primarySet.has(path)),
-      DEFAULT_SECONDARY_PATHS.filter((path) => !primarySet.has(path))
+      DEFAULT_SECONDARY_PATHS.filter((path) => !primarySet.has(path)),
+      positioned
     );
     return { primary, secondary, hidden: p.hidden };
   };
@@ -499,13 +503,13 @@ export default function Account() {
           {renderZone(
             'Main navigation',
             'Always visible in the sidebar.',
-            primaryList,
+            primaryList.filter((p) => userCanAccessPath(p, currentUser)),
             'primary'
           )}
           {renderZone(
             'More (collapsible)',
             'Tucked under the expandable "More" section.',
-            secondaryList,
+            secondaryList.filter((p) => userCanAccessPath(p, currentUser)),
             'secondary'
           )}
         </div>

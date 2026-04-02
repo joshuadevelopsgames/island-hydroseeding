@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, RefreshCw, X } from 'lucide-react';
 
 const INSTALL_DISMISS_KEY = 'pwa-install-dismissed-at';
@@ -35,9 +35,14 @@ export default function PwaPrompts() {
   const [deferredInstall, setDeferredInstall] = useState<BeforeInstallPromptEventTyped | null>(null);
 
   const [isMobile, setIsMobile] = useState(false);
+  const isMobileRef = useRef(false);
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)');
-    const apply = () => setIsMobile(mq.matches);
+    const apply = () => {
+      const mobile = mq.matches && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+      isMobileRef.current = mobile;
+      setIsMobile(mobile);
+    };
     apply();
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
@@ -64,7 +69,8 @@ export default function PwaPrompts() {
 
   useEffect(() => {
     const onBip = (e: Event) => {
-      e.preventDefault();
+      e.preventDefault(); // always suppress the browser's native install UI
+      if (!isMobileRef.current) return; // only show our custom banner on mobile
       setDeferredInstall(e as BeforeInstallPromptEventTyped);
     };
     window.addEventListener('beforeinstallprompt', onBip);
