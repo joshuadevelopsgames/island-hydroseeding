@@ -61,25 +61,16 @@ async function fetchPayments(): Promise<PaymentsResponse> {
   return res.json() as Promise<PaymentsResponse>;
 }
 
-const METHOD_COLORS: Record<string, string> = {
-  stripe:       'bg-purple-100 text-purple-700',
-  'credit card':'bg-purple-100 text-purple-700',
-  card:         'bg-purple-100 text-purple-700',
-  'e-transfer': 'bg-blue-100 text-blue-700',
-  cash:         'bg-green-100 text-green-700',
-  cheque:       'bg-amber-100 text-amber-700',
-  other:        'bg-slate-100 text-slate-600',
-};
-
+// Method badge — uses border + muted bg so it works in both light and dark mode
 function methodBadge(method: string | null) {
   const m = (method ?? 'other').toLowerCase();
-  const cls = METHOD_COLORS[m] ?? METHOD_COLORS.other;
-  const label = method === 'stripe' ? 'Card (Stripe)'
+  const label = m === 'stripe' ? 'Card (Stripe)'
     : method ? method.charAt(0).toUpperCase() + method.slice(1)
     : 'Other';
+  const showCard = m === 'stripe' || m === 'credit card' || m === 'card';
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>
-      {(m === 'stripe' || m === 'credit card' || m === 'card') && <CreditCard className="h-3 w-3" />}
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--surface-raised)] px-2.5 py-0.5 text-xs font-medium text-[var(--text-primary)]">
+      {showCard && <CreditCard className="h-3 w-3 text-[var(--text-muted)]" />}
       {label}
     </span>
   );
@@ -89,12 +80,10 @@ function methodBadge(method: string | null) {
 
 function StatCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-6">
-      <div className="mb-4 flex items-start justify-between">
-        <div>
-          <p className="text-sm font-semibold text-slate-800">{title}</p>
-          {subtitle && <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>}
-        </div>
+    <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-color)] p-6">
+      <div className="mb-4">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">{title}</p>
+        {subtitle && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{subtitle}</p>}
       </div>
       {children}
     </div>
@@ -119,7 +108,6 @@ export default function Payments() {
   const payments = data?.payments ?? [];
   const stats    = data?.stats;
 
-  // All unique methods for the filter dropdown
   const allMethods = useMemo(() => {
     const s = new Set(payments.map(p => p.payment_method ?? 'Other'));
     return ['All', ...Array.from(s)];
@@ -143,14 +131,14 @@ export default function Payments() {
   if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-7 w-7 animate-spin text-slate-400" />
+        <Loader2 className="h-7 w-7 animate-spin text-[var(--text-muted)]" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="p-8 text-center text-sm text-slate-500">
+      <div className="p-8 text-center text-sm text-[var(--text-muted)]">
         Failed to load payments.
       </div>
     );
@@ -167,15 +155,15 @@ export default function Payments() {
       </div>
 
       {/* Tabs */}
-      <div className="mb-6 flex gap-0 border-b border-slate-200">
+      <div className="mb-6 flex gap-0 border-b border-[var(--border-color)]">
         {(['overview', 'payouts'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`px-5 py-2.5 text-sm font-medium capitalize transition-colors ${
               activeTab === tab
-                ? 'border-b-2 border-green-600 text-green-700'
-                : 'text-slate-500 hover:text-slate-700'
+                ? 'border-b-2 border-[var(--primary-green)] text-[var(--primary-green)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
             }`}
           >
             {tab}
@@ -184,7 +172,7 @@ export default function Payments() {
       </div>
 
       {activeTab === 'payouts' ? (
-        <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white text-sm text-slate-400">
+        <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-[var(--border-color)] bg-[var(--surface-color)] text-sm text-[var(--text-muted)]">
           Payout reporting coming soon.
         </div>
       ) : (
@@ -194,11 +182,11 @@ export default function Payments() {
 
             {/* Total collected */}
             <StatCard title="Total collected" subtitle="All time">
-              <p className="text-3xl font-bold text-slate-900">{CAD.format(stats?.total_collected ?? 0)}</p>
-              <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
-                <DollarSign className="h-4 w-4 text-green-500" />
-                <span>{CAD.format(stats?.total_this_month ?? 0)}</span>
-                <span className="text-slate-400">this month</span>
+              <p className="text-3xl font-bold text-[var(--text-primary)]">{CAD.format(stats?.total_collected ?? 0)}</p>
+              <div className="mt-3 flex items-center gap-2 text-sm text-[var(--text-muted)]">
+                <DollarSign className="h-4 w-4 text-[var(--primary-green)]" />
+                <span className="text-[var(--text-primary)]">{CAD.format(stats?.total_this_month ?? 0)}</span>
+                <span>this month</span>
               </div>
             </StatCard>
 
@@ -207,21 +195,25 @@ export default function Payments() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-2xl font-bold text-slate-900">
-                      {stats?.avg_days_residential != null ? `${stats.avg_days_residential} day${stats.avg_days_residential === 1 ? '' : 's'}` : '—'}
+                    <p className="text-2xl font-bold text-[var(--text-primary)]">
+                      {stats?.avg_days_residential != null
+                        ? `${stats.avg_days_residential} day${stats.avg_days_residential === 1 ? '' : 's'}`
+                        : '—'}
                     </p>
-                    <p className="text-xs text-slate-500">Residential</p>
+                    <p className="text-xs text-[var(--text-muted)]">Residential</p>
                   </div>
-                  <Clock className="h-5 w-5 text-slate-300" />
+                  <Clock className="h-5 w-5 text-[var(--text-muted)] opacity-40" />
                 </div>
-                <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+                <div className="flex items-center justify-between border-t border-[var(--border-color)] pt-3">
                   <div>
-                    <p className="text-2xl font-bold text-slate-900">
-                      {stats?.avg_days_commercial != null ? `${stats.avg_days_commercial} day${stats.avg_days_commercial === 1 ? '' : 's'}` : '—'}
+                    <p className="text-2xl font-bold text-[var(--text-primary)]">
+                      {stats?.avg_days_commercial != null
+                        ? `${stats.avg_days_commercial} day${stats.avg_days_commercial === 1 ? '' : 's'}`
+                        : '—'}
                     </p>
-                    <p className="text-xs text-slate-500">Commercial</p>
+                    <p className="text-xs text-[var(--text-muted)]">Commercial</p>
                   </div>
-                  <Clock className="h-5 w-5 text-slate-300" />
+                  <Clock className="h-5 w-5 text-[var(--text-muted)] opacity-40" />
                 </div>
               </div>
             </StatCard>
@@ -231,21 +223,21 @@ export default function Payments() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-2xl font-bold text-slate-900">
+                    <p className="text-2xl font-bold text-[var(--text-primary)]">
                       {stats?.paid_on_time_residential != null ? `${stats.paid_on_time_residential}%` : '—'}
                     </p>
-                    <p className="text-xs text-slate-500">Residential</p>
+                    <p className="text-xs text-[var(--text-muted)]">Residential</p>
                   </div>
-                  <CheckCircle className="h-5 w-5 text-slate-300" />
+                  <CheckCircle className="h-5 w-5 text-[var(--text-muted)] opacity-40" />
                 </div>
-                <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+                <div className="flex items-center justify-between border-t border-[var(--border-color)] pt-3">
                   <div>
-                    <p className="text-2xl font-bold text-slate-900">
+                    <p className="text-2xl font-bold text-[var(--text-primary)]">
                       {stats?.paid_on_time_commercial != null ? `${stats.paid_on_time_commercial}%` : '—'}
                     </p>
-                    <p className="text-xs text-slate-500">Commercial</p>
+                    <p className="text-xs text-[var(--text-muted)]">Commercial</p>
                   </div>
-                  <CheckCircle className="h-5 w-5 text-slate-300" />
+                  <CheckCircle className="h-5 w-5 text-[var(--text-muted)] opacity-40" />
                 </div>
               </div>
             </StatCard>
@@ -253,21 +245,25 @@ export default function Payments() {
 
           {/* Table header */}
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold text-slate-800">
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">
               All payments
-              <span className="ml-2 text-sm font-normal text-slate-400">({filtered.length} results)</span>
+              <span className="ml-2 text-sm font-normal text-[var(--text-muted)]">({filtered.length} results)</span>
             </h2>
 
             <div className="flex flex-wrap items-center gap-2">
               {/* Status filter */}
-              <div className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm">
-                <span className="font-medium text-slate-600">Status</span>
-                <span className="text-slate-300">|</span>
+              <div className="flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--surface-color)] px-3 py-1.5 text-sm">
+                <span className="font-medium text-[var(--text-primary)]">Status</span>
+                <span className="text-[var(--border-color)]">|</span>
                 {(['All', 'Succeeded', 'Pending'] as const).map(s => (
                   <button
                     key={s}
                     onClick={() => setStatusFilter(s)}
-                    className={`rounded px-1.5 py-0.5 text-xs font-medium transition-colors ${statusFilter === s ? 'bg-slate-100 text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+                    className={`rounded px-1.5 py-0.5 text-xs font-medium transition-colors ${
+                      statusFilter === s
+                        ? 'bg-[var(--border-color)] text-[var(--text-primary)]'
+                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                    }`}
                   >
                     {s}
                   </button>
@@ -275,13 +271,13 @@ export default function Payments() {
               </div>
 
               {/* Method filter */}
-              <div className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm">
-                <span className="font-medium text-slate-600">Method</span>
-                <span className="text-slate-300">|</span>
+              <div className="flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--surface-color)] px-3 py-1.5 text-sm">
+                <span className="font-medium text-[var(--text-primary)]">Method</span>
+                <span className="text-[var(--border-color)]">|</span>
                 <select
                   value={methodFilter}
                   onChange={e => setMethodFilter(e.target.value)}
-                  className="bg-transparent text-xs font-medium text-slate-700 outline-none"
+                  className="bg-transparent text-xs font-medium text-[var(--text-primary)] outline-none"
                 >
                   {allMethods.map(m => (
                     <option key={m} value={m}>{m}</option>
@@ -290,52 +286,52 @@ export default function Payments() {
               </div>
 
               {/* Search */}
-              <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5">
-                <Search className="h-3.5 w-3.5 text-slate-400" />
+              <div className="flex items-center gap-2 rounded-full border border-[var(--border-color)] bg-[var(--surface-color)] px-3 py-1.5">
+                <Search className="h-3.5 w-3.5 text-[var(--text-muted)]" />
                 <input
                   type="text"
                   placeholder="Search payments..."
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  className="w-40 bg-transparent text-sm text-slate-700 placeholder-slate-400 outline-none"
+                  className="w-40 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
                 />
               </div>
             </div>
           </div>
 
           {/* Table */}
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--surface-color)]">
             {filtered.length === 0 ? (
-              <div className="py-16 text-center text-sm text-slate-400">
+              <div className="py-16 text-center text-sm text-[var(--text-muted)]">
                 No payments found.
               </div>
             ) : (
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50">
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Client</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Payment date</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Reference</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Status</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Method</th>
-                    <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">Amount</th>
+                  <tr className="border-b border-[var(--border-color)]">
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Client</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Payment date</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Reference</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Status</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Method</th>
+                    <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Amount</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody>
                   {filtered.map(payment => (
                     <tr
                       key={payment.id}
-                      className="group transition-colors hover:bg-slate-50"
+                      className="border-b border-[var(--border-color)] last:border-0 transition-colors hover:bg-[var(--surface-raised)]"
                     >
                       {/* Client + Invoice */}
                       <td className="px-5 py-4">
-                        <p className="font-semibold text-slate-800">
+                        <p className="font-semibold text-[var(--text-primary)]">
                           {payment.account?.name ?? '—'}
                         </p>
                         {payment.invoice && (
                           <button
                             onClick={() => navigate(`/invoices/${payment.invoice!.id}`)}
-                            className="mt-0.5 text-xs text-green-600 hover:underline"
+                            className="mt-0.5 text-xs text-[var(--primary-green)] hover:underline"
                           >
                             Invoice #{String(payment.invoice.invoice_number).padStart(4, '0')}
                             {payment.invoice.title ? ` — ${payment.invoice.title}` : ''}
@@ -344,21 +340,21 @@ export default function Payments() {
                       </td>
 
                       {/* Payment date */}
-                      <td className="px-5 py-4 text-slate-600">
+                      <td className="px-5 py-4 text-[var(--text-muted)]">
                         {fmtDate(payment.payment_date)}
                       </td>
 
                       {/* Reference */}
-                      <td className="px-5 py-4 text-slate-500">
+                      <td className="px-5 py-4 text-[var(--text-muted)]">
                         {payment.reference_number
                           ? <span className="font-mono text-xs">{payment.reference_number}</span>
-                          : <span className="text-slate-300">—</span>}
+                          : <span className="opacity-30">—</span>}
                       </td>
 
                       {/* Status */}
                       <td className="px-5 py-4">
-                        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-green-700">
-                          <span className="h-2 w-2 rounded-full bg-green-500" />
+                        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--text-primary)]">
+                          <span className="h-2 w-2 rounded-full bg-emerald-500" />
                           Succeeded
                         </span>
                       </td>
@@ -369,7 +365,7 @@ export default function Payments() {
                       </td>
 
                       {/* Amount */}
-                      <td className="px-5 py-4 text-right font-semibold text-slate-800">
+                      <td className="px-5 py-4 text-right font-semibold text-[var(--text-primary)]">
                         {CAD.format(payment.amount)}
                       </td>
                     </tr>
