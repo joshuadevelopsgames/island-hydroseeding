@@ -1,21 +1,24 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl  = import.meta.env.VITE_SUPABASE_URL  as string;
-const supabaseAnon = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+// These are safe to read at module init — Vite replaces them at build time.
+// If missing, the Supabase client will fail gracefully on actual requests
+// rather than crashing the whole module graph on import.
+const supabaseUrl  = (import.meta.env.VITE_SUPABASE_URL  as string | undefined) ?? '';
+const supabaseAnon = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? '';
 
-if (!supabaseUrl || !supabaseAnon) {
-  throw new Error(
-    'Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY — add them to .env.local'
-  );
-}
+export const isMisconfigured = !supabaseUrl || !supabaseAnon;
 
-export const supabase = createClient(supabaseUrl, supabaseAnon, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-});
+export const supabase = createClient(
+  supabaseUrl  || 'https://placeholder.supabase.co',
+  supabaseAnon || 'placeholder-anon-key',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  }
+);
 
 /** Decode a JWT payload without verifying the signature (safe for UI use). */
 export function decodeJwtPayload(token: string): Record<string, unknown> {
