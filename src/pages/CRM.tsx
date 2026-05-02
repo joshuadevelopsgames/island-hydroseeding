@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { crmKeys, useCrmAccounts, useCrmMutations } from '@/hooks/useCrm';
 import { formatErrorForUi, importLegacyLeads as postLegacyLeads } from '@/lib/crmApi';
 import { formatInVancouver } from '@/lib/vancouverTime';
+import { formatPhone, normalizePhoneForSave } from '@/lib/phone';
 import type { CrmAccountStatus, CrmAccountType, LegacyLead } from '@/lib/crmTypes';
 
 const LEGACY_LEADS_KEY = 'crmLeads';
@@ -197,7 +198,7 @@ export default function CRM() {
                   <p className="truncate font-semibold">{a.name}</p>
                   {(a.company || a.email || a.phone) && (
                     <p className="mt-0.5 truncate text-sm text-secondary">
-                      {[a.company, a.phone, a.email].filter(Boolean).join(' · ')}
+                      {[a.company, formatPhone(a.phone) || null, a.email].filter(Boolean).join(' · ')}
                     </p>
                   )}
                 </div>
@@ -245,7 +246,7 @@ function CreateAccountDialog({
         account_type: type,
         status,
         marketing_source: String(fd.get('marketing_source') ?? '') || null,
-        phone: String(fd.get('phone') ?? '').trim() || null,
+        phone: normalizePhoneForSave(String(fd.get('phone') ?? '')),
         email: String(fd.get('email') ?? '').trim() || null,
         address: String(fd.get('address') ?? '').trim() || null,
         notes: String(fd.get('notes') ?? '') || null,

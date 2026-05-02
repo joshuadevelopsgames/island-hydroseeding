@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { formatInVancouver } from '@/lib/vancouverTime';
-import { ArrowLeft, Loader2, Trash2 } from 'lucide-react';
+import { ArrowLeft, Download, FileText, Loader2, Trash2, Upload } from 'lucide-react';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,14 @@ import { useCrmAccountDetail, useCrmMutations } from '@/hooks/useCrm';
 import type { CrmAccountStatus, CrmAccountType } from '@/lib/crmTypes';
 import { useAuth } from '@/context/AuthContext';
 import { formatErrorForUi } from '@/lib/crmApi';
+import { formatPhone, normalizePhoneForSave } from '@/lib/phone';
+import {
+  deleteAccountAttachment,
+  listAccountAttachments,
+  uploadAccountAttachment,
+  type AccountAttachment,
+} from '@/lib/accountAttachments';
+import { toast } from 'sonner';
 
 const INTERACTION_KINDS = [
   { value: 'call', label: 'Call' },
@@ -133,6 +141,7 @@ export default function CrmAccountDetail() {
           <TabsTrigger value="contacts">Contacts</TabsTrigger>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
           <TabsTrigger value="research">Research</TabsTrigger>
+          <TabsTrigger value="files">Files</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
@@ -152,6 +161,9 @@ export default function CrmAccountDetail() {
         <TabsContent value="research">
           <ResearchTab accountId={account.id} notes={data?.research_notes ?? []} m={m} />
         </TabsContent>
+        <TabsContent value="files">
+          <FilesTab accountId={account.id} currentUserId={currentUser?.id ?? null} />
+        </TabsContent>
       </Tabs>
     </div>
   );
@@ -167,7 +179,7 @@ function OverviewCard({ account }: { account: NonNullable<ReturnType<typeof useC
       <CardContent className="space-y-3 text-sm">
         <p>
           <span className="font-semibold text-[var(--text-primary)]">Phone:</span>{' '}
-          <span className="text-[var(--text-secondary)]">{account.phone ?? '—'}</span>
+          <span className="text-[var(--text-secondary)]">{formatPhone(account.phone) || '—'}</span>
         </p>
         <p>
           <span className="font-semibold text-[var(--text-primary)]">Email:</span>{' '}
@@ -210,7 +222,7 @@ function ContactsTab({
       account_id: accountId,
       name: String(fd.get('name') ?? '').trim(),
       role: String(fd.get('role') ?? '') || null,
-      phone: String(fd.get('phone') ?? '').trim() || null,
+      phone: normalizePhoneForSave(String(fd.get('phone') ?? '')),
       email: String(fd.get('email') ?? '').trim() || null,
       is_primary: fd.get('primary') === 'on',
       notes: String(fd.get('notes') ?? '') || null,
@@ -300,7 +312,7 @@ function ContactsTab({
                     {c.role && <p className="text-xs text-[var(--text-muted)]">{c.role}</p>}
                     {(c.phone || c.email) && (
                       <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                        {[c.phone, c.email].filter(Boolean).join(' · ')}
+                        {[formatPhone(c.phone) || null, c.email].filter(Boolean).join(' · ')}
                       </p>
                     )}
                     {c.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">{c.notes}</p>}
@@ -593,7 +605,7 @@ function EditAccountDialog({
         account_type: type,
         status,
         marketing_source: String(fd.get('marketing_source') ?? '') || null,
-        phone: String(fd.get('phone') ?? '').trim() || null,
+        phone: normalizePhoneForSave(String(fd.get('phone') ?? '')),
         email: String(fd.get('email') ?? '').trim() || null,
         address: String(fd.get('address') ?? '').trim() || null,
         notes: String(fd.get('notes') ?? '') || null,
@@ -678,5 +690,180 @@ function EditAccountDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function formatFileSize(bytes: number | null): string {
+  if (bytes == null) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function FilesTab({ accountId, currentUserId }: { accountId: string; currentUserId: string | null }) {
+  const [files, setFiles] = useState<AccountAttachment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const reload = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const list = await listAccountAttachments(accountId);
+      setFiles(list);
+    } catch (e) {
+      setError(formatErrorForUi(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
+
+  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File too large', { description: 'Maximum upload size is 10 MB.' });
+      return;
+    }
+    setUploading(true);
+    try {
+      const created = await uploadAccountAttachment(accountId, file);
+      setFiles((prev) => [created, ...prev]);
+      toast.success('File uploaded');
+    } catch (e) {
+      toast.error('Upload failed', { description: formatErrorForUi(e) });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeletingId(id);
+    try {
+      await deleteAccountAttachment(id);
+      setFiles((prev) => prev.filter((f) => f.id !== id));
+      toast.success('File deleted');
+    } catch (e) {
+      toast.error('Delete failed', { description: formatErrorForUi(e) });
+    } finally {
+      setDeletingId(null);
+      setConfirmDeleteId(null);
+    }
+  };
+
+  const pendingDelete = confirmDeleteId ? files.find((f) => f.id === confirmDeleteId) : null;
+
+  return (
+    <Card>
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        title="Delete this file?"
+        message={
+          pendingDelete
+            ? `Permanently delete “${pendingDelete.file_name}”? This cannot be undone.`
+            : 'Permanently delete this file?'
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
+
+      <CardHeader className="flex flex-row items-center justify-between gap-4">
+        <div>
+          <CardTitle className="text-base">Files</CardTitle>
+          <CardDescription>Upload documents or photos related to this account. Max 10 MB.</CardDescription>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+        >
+          <Upload className="mr-2 h-4 w-4" />
+          {uploading ? 'Uploading…' : 'Upload file'}
+        </Button>
+        <input ref={inputRef} type="file" className="hidden" onChange={handleUpload} disabled={uploading} />
+      </CardHeader>
+
+      <CardContent>
+        {loading ? (
+          <div className="flex items-center gap-2 py-6 text-sm text-[var(--text-secondary)]">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading files…
+          </div>
+        ) : error ? (
+          <p className="py-6 text-sm text-red-600">{error}</p>
+        ) : files.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-[var(--radius-sm)] border border-dashed border-[var(--border-color)] p-10 text-center">
+            <FileText className="h-10 w-10 text-[var(--text-muted)]" />
+            <p className="text-sm text-[var(--text-muted)]">No files yet for this account.</p>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => inputRef.current?.click()}
+              disabled={uploading}
+            >
+              <Upload className="mr-2 h-4 w-4" /> Upload first file
+            </Button>
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {files.map((f) => {
+              const canDelete = !currentUserId || f.uploaded_by_user_id === currentUserId;
+              return (
+                <li
+                  key={f.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-[var(--border-color)] p-3"
+                >
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <FileText className="h-5 w-5 flex-shrink-0 text-[var(--text-muted)]" aria-hidden />
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{f.file_name}</p>
+                      <p className="text-xs text-[var(--text-muted)]">
+                        {formatFileSize(f.file_size)} · {formatInVancouver(f.created_at, 'MMM d, yyyy')}
+                        {f.uploaded_by_email ? ` · ${f.uploaded_by_email}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {f.signed_url && (
+                      <Button asChild type="button" variant="ghost" size="sm">
+                        <a href={f.signed_url} target="_blank" rel="noopener noreferrer" download={f.file_name}>
+                          <Download className="mr-1.5 h-4 w-4" /> Download
+                        </a>
+                      </Button>
+                    )}
+                    {canDelete && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setConfirmDeleteId(f.id)}
+                        disabled={deletingId === f.id}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }
