@@ -27,10 +27,19 @@
  *   JOBBER_GRAPHQL_PAGE_SIZE=8
  *   JOBBER_PAGINATION_DELAY_MS=12000
  *   JOBBER_THROTTLE_RETRY_MAX=20
+ * Jobs import uses a cheap `jobs` list then `job(id:)` for line items/visits (Jobber docs).
+ * Tune list vs detail:
+ *   JOBBER_JOBS_LIST_PAGE_SIZE=20
+ *   JOBBER_JOBS_LIST_DELAY_MS=4000
+ *   JOBBER_JOB_DETAIL_DELAY_MS=800
+ *   JOBBER_JOB_CONNECTION_PAGE=50   (lineItems/visits `first` per page on job(id:))
  * Waits also honor Retry-After (when Jobber sends it) and max with backoff.
  *
  * RUN (from repo root, logged into the Jobber account you want to export — or use JOBBER_ACCESS_TOKEN):
  *   node scripts/jobber-migrate.mjs
+ *   node scripts/jobber-import-skip-clients.mjs
+ *   node scripts/jobber-import-jobs-only.mjs   (no quotes fetch — less throttling before jobs)
+ *   node scripts/jobber-import-invoices-only.mjs (after jobs are in Supabase)
  *
  * The script will print an authorization URL. Open it in your browser,
  * click "Allow Access", and the migration will start automatically.
@@ -80,6 +89,33 @@ const JOBBER_THROTTLE_RETRY_MAX = Math.max(
   Number.parseInt(env.JOBBER_THROTTLE_RETRY_MAX ?? '12', 10) || 12,
 );
 
+/** Jobs list is shallow; larger pages are OK. Detail uses `job(id:)` + explicit `first`. */
+const JOBBER_JOBS_LIST_PAGE_SIZE = Math.min(
+  100,
+  Math.max(
+    1,
+    Number.parseInt(
+      env.JOBBER_JOBS_LIST_PAGE_SIZE ?? String(JOBBER_GRAPHQL_PAGE_SIZE),
+      10,
+    ) || JOBBER_GRAPHQL_PAGE_SIZE,
+  ),
+);
+const JOBBER_JOBS_LIST_DELAY_MS = Math.max(
+  0,
+  Number.parseInt(
+    env.JOBBER_JOBS_LIST_DELAY_MS ?? String(JOBBER_PAGINATION_DELAY_MS),
+    10,
+  ) || JOBBER_PAGINATION_DELAY_MS,
+);
+const JOBBER_JOB_DETAIL_DELAY_MS = Math.max(
+  0,
+  Number.parseInt(env.JOBBER_JOB_DETAIL_DELAY_MS ?? '600', 10) || 600,
+);
+const JOBBER_JOB_CONNECTION_PAGE = Math.min(
+  100,
+  Math.max(1, Number.parseInt(env.JOBBER_JOB_CONNECTION_PAGE ?? '50', 10) || 50),
+);
+
 // ── Validate env ──────────────────────────────────────────────────────────────
 
 const missing = [];
@@ -122,6 +158,24 @@ function dedupeRowsByJobberId(rows) {
     if (r.jobber_id != null) m.set(r.jobber_id, r);
   }
   return [...m.values()];
+}
+
+/** Distinct job UUIDs that have at least one row in `job_line_items` or `job_visits`. */
+async function jobIdsHavingAnyChildRow(table, jobUuids) {
+  const out = new Set();
+  const CHUNK = 150;
+  for (let i = 0; i < jobUuids.length; i += CHUNK) {
+    const chunk = jobUuids.slice(i, i + CHUNK);
+    if (!chunk.length) continue;
+    const { data, error } = await sb
+      .from(table)
+      .select('job_id')
+      .eq('tenant_id', TENANT_ID)
+      .in('job_id', chunk);
+    if (error) throw new Error(`[${table}] ${error.message}`);
+    for (const r of data ?? []) out.add(r.job_id);
+  }
+  return out;
 }
 
 /** Must match seed tenant in supabase/migrations/009_multi_tenancy.sql */
@@ -220,11 +274,15 @@ async function gql(token, query, variables = {}) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// Paginate through all nodes of a connection
-async function paginate(token, query, getConnection, variables = {}) {
+/**
+ * Paginate through all nodes of a connection.
+ * @param {{ pageSize?: number, delayMs?: number }} [opts]  Override page size / delay between pages
+ */
+async function paginate(token, query, getConnection, variables = {}, opts = {}) {
   const nodes = [];
   let cursor = null;
-  const first = JOBBER_GRAPHQL_PAGE_SIZE;
+  const first = opts.pageSize ?? JOBBER_GRAPHQL_PAGE_SIZE;
+  const delayMs = opts.delayMs ?? JOBBER_PAGINATION_DELAY_MS;
 
   do {
     const data = await gql(token, query, { ...variables, first, cursor });
@@ -232,7 +290,7 @@ async function paginate(token, query, getConnection, variables = {}) {
     nodes.push(...conn.nodes);
     cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
     process.stdout.write(`  fetched ${nodes.length}...\r`);
-    if (cursor) await sleep(JOBBER_PAGINATION_DELAY_MS);
+    if (cursor) await sleep(delayMs);
   } while (cursor);
 
   return nodes;
@@ -316,8 +374,9 @@ const QUOTES_QUERY = `
   }
 `;
 
-const JOBS_QUERY = `
-  query GetJobs($first: Int!, $cursor: String) {
+/** Shallow list only — nested lineItems/visits on `jobs` cost ~100 nodes/connection (Jobber docs). */
+const JOBS_SLIM_QUERY = `
+  query GetJobsSlim($first: Int!, $cursor: String) {
     jobs(first: $first, after: $cursor) {
       nodes {
         id
@@ -331,26 +390,44 @@ const JOBS_QUERY = `
         total
         client { id }
         property { id }
-        lineItems {
-          nodes {
-            id
-            name
-            description
-            quantity
-            unitPrice
-            totalPrice
-          }
-        }
-        visits {
-          nodes {
-            id
-            startAt
-            endAt
-            isComplete
-          }
-        }
       }
       pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
+const JOB_LINE_ITEMS_PAGE_QUERY = `
+  query JobLineItems($id: EncodedId!, $first: Int!, $cursor: String) {
+    job(id: $id) {
+      id
+      lineItems(first: $first, after: $cursor) {
+        nodes {
+          id
+          name
+          description
+          quantity
+          unitPrice
+          totalPrice
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+`;
+
+const JOB_VISITS_PAGE_QUERY = `
+  query JobVisits($id: EncodedId!, $first: Int!, $cursor: String) {
+    job(id: $id) {
+      id
+      visits(first: $first, after: $cursor) {
+        nodes {
+          id
+          startAt
+          endAt
+          isComplete
+        }
+        pageInfo { hasNextPage endCursor }
+      }
     }
   }
 `;
@@ -376,7 +453,6 @@ const INVOICES_QUERY = `
           total
           taxAmount
           paymentsTotal
-          outstandingBalance
         }
         lineItems {
           nodes {
@@ -386,14 +462,14 @@ const INVOICES_QUERY = `
             quantity
             unitPrice
             totalPrice
-            sortOrder
           }
         }
         paymentRecords(first: 100) {
           nodes {
             id
             amount
-            recordedDate
+            createdAt
+            updatedAt
           }
         }
       }
@@ -633,9 +709,47 @@ async function migrateQuotes(token, accountIdMap, propertyIdMap) {
   return quoteIdMap;
 }
 
-async function migrateJobs(token, accountIdMap, propertyIdMap, quoteIdMap) {
-  console.log('\n🔨  Fetching jobs...');
-  const jobs = await paginate(token, JOBS_QUERY, d => d.jobs);
+async function fetchJobLineItemNodesPaged(token, jobberJobId) {
+  const nodes = [];
+  let cursor = null;
+  const first = JOBBER_JOB_CONNECTION_PAGE;
+  const subDelay = Math.min(400, JOBBER_JOB_DETAIL_DELAY_MS || 200);
+  for (;;) {
+    const data = await gql(token, JOB_LINE_ITEMS_PAGE_QUERY, { id: jobberJobId, first, cursor });
+    const conn = data?.job?.lineItems;
+    if (!conn) break;
+    nodes.push(...(conn.nodes ?? []));
+    if (!conn.pageInfo?.hasNextPage) break;
+    cursor = conn.pageInfo.endCursor;
+    if (cursor) await sleep(subDelay);
+  }
+  return nodes;
+}
+
+async function fetchJobVisitNodesPaged(token, jobberJobId) {
+  const nodes = [];
+  let cursor = null;
+  const first = JOBBER_JOB_CONNECTION_PAGE;
+  const subDelay = Math.min(400, JOBBER_JOB_DETAIL_DELAY_MS || 200);
+  for (;;) {
+    const data = await gql(token, JOB_VISITS_PAGE_QUERY, { id: jobberJobId, first, cursor });
+    const conn = data?.job?.visits;
+    if (!conn) break;
+    nodes.push(...(conn.nodes ?? []));
+    if (!conn.pageInfo?.hasNextPage) break;
+    cursor = conn.pageInfo.endCursor;
+    if (cursor) await sleep(subDelay);
+  }
+  return nodes;
+}
+
+async function migrateJobs(token, accountIdMap, propertyIdMap) {
+  console.log('\n🔨  Fetching jobs (shallow list, then job(id) for line items & visits)...');
+  const jobs = await paginate(token, JOBS_SLIM_QUERY, d => d.jobs, {}, {
+    pageSize: JOBBER_JOBS_LIST_PAGE_SIZE,
+    delayMs:  JOBBER_JOBS_LIST_DELAY_MS,
+  });
+  if (jobs.length) process.stdout.write('\n');
   console.log(`  ✓ ${jobs.length} jobs`);
 
   const jobRows = [];
@@ -673,18 +787,46 @@ async function migrateJobs(token, accountIdMap, propertyIdMap, quoteIdMap) {
     (inserted ?? []).forEach(j => { jobIdMap[j.jobber_id] = j.id; });
   }
 
+  const mappedJobUuids = [
+    ...new Set(
+      jobs.map(j => jobIdMap[j.id]).filter(Boolean),
+    ),
+  ];
+  const withLineItems = await jobIdsHavingAnyChildRow('job_line_items', mappedJobUuids);
+  const withVisits = await jobIdsHavingAnyChildRow('job_visits', mappedJobUuids);
+
   const lineItemRows = [];
   const visitRows    = [];
 
+  const needDetails = jobs.filter(j => {
+    const id = jobIdMap[j.id];
+    if (!id) return false;
+    return !withLineItems.has(id) || !withVisits.has(id);
+  });
+  let detailIdx = 0;
+
   for (const j of jobs) {
     const jobId = jobIdMap[j.id];
-    if (!jobId || existingJobIds.has(j.id)) continue;
+    if (!jobId) continue;
 
-    (j.lineItems?.nodes ?? []).forEach((li, i) => {
+    const needLi = !withLineItems.has(jobId);
+    const needVi = !withVisits.has(jobId);
+    if (!needLi && !needVi) continue;
+
+    if (detailIdx > 0 && JOBBER_JOB_DETAIL_DELAY_MS > 0) {
+      await sleep(JOBBER_JOB_DETAIL_DELAY_MS);
+    }
+    detailIdx++;
+    process.stdout.write(`  job line items & visits ${detailIdx}/${needDetails.length}...\r`);
+
+    const lineNodes = needLi ? await fetchJobLineItemNodesPaged(token, j.id) : [];
+    const visitNodes = needVi ? await fetchJobVisitNodesPaged(token, j.id) : [];
+
+    lineNodes.forEach((li, i) => {
       lineItemRows.push(mapLineItem(li, 'job_id', jobId, i));
     });
 
-    (j.visits?.nodes ?? []).forEach(v => {
+    visitNodes.forEach(v => {
       visitRows.push({
         tenant_id:    TENANT_ID,
         job_id:       jobId,
@@ -696,6 +838,8 @@ async function migrateJobs(token, accountIdMap, propertyIdMap, quoteIdMap) {
       });
     });
   }
+
+  if (needDetails.length) console.log('');
 
   if (lineItemRows.length) {
     const { error: liErr } = await sb.from('job_line_items').insert(lineItemRows);
@@ -730,7 +874,10 @@ async function migrateInvoices(token, accountIdMap, propertyIdMap, jobIdMap) {
       tax_amount:  moneyVal(inv.amounts?.taxAmount),
       total:       moneyVal(inv.amounts?.total),
       amount_paid: moneyVal(inv.amounts?.paymentsTotal),
-      balance_due: moneyVal(inv.amounts?.outstandingBalance),
+      balance_due: Math.max(
+        0,
+        moneyVal(inv.amounts?.total) - moneyVal(inv.amounts?.paymentsTotal),
+      ),
       created_at:  inv.createdAt ?? new Date().toISOString(),
       updated_at:  inv.updatedAt ?? new Date().toISOString(),
       jobber_id:   inv.id,
@@ -762,7 +909,8 @@ async function migrateInvoices(token, accountIdMap, propertyIdMap, jobIdMap) {
 
     (inv.paymentRecords?.nodes ?? []).forEach(p => {
       const payDate =
-        p.recordedDate?.slice(0, 10) ??
+        p.createdAt?.slice(0, 10) ??
+        p.updatedAt?.slice(0, 10) ??
         inv.issuedDate?.slice(0, 10) ??
         new Date().toISOString().slice(0, 10);
       paymentRows.push({
@@ -799,15 +947,44 @@ async function buildAccountIdMapFromSupabase() {
   return accountIdMap;
 }
 
+async function buildQuoteIdMapFromSupabase() {
+  const rows = await selectAllIdJobber('quotes');
+  const quoteIdMap = {};
+  rows.forEach((q) => {
+    if (q.jobber_id) quoteIdMap[q.jobber_id] = q.id;
+  });
+  return quoteIdMap;
+}
+
+async function buildJobIdMapFromSupabase() {
+  const rows = await selectAllIdJobber('jobs');
+  const jobIdMap = {};
+  rows.forEach((j) => {
+    if (j.jobber_id) jobIdMap[j.jobber_id] = j.id;
+  });
+  return jobIdMap;
+}
+
 // ── Exported runner (CLI + Vercel cron) ─────────────────────────────────────
 
 /**
  * @param {string} accessToken
- * @param {{ skipClients?: boolean }} [options]
- *   skipClients — use crm_accounts.jobber_id map from DB (no Jobber clients fetch); for resuming after accounts are synced
+ * @param {{
+ *   skipClients?: boolean,
+ *   skipQuotes?: boolean,
+ *   skipJobs?: boolean,
+ *   skipInvoices?: boolean,
+ * }} [options]
+ *   skipClients — use crm_accounts.jobber_id map from DB (no Jobber clients fetch)
+ *   skipQuotes — use quotes.id ↔ jobber_id from Supabase (no Jobber quotes fetch; saves API budget before jobs)
+ *   skipJobs — use jobs.id ↔ jobber_id from Supabase (no Jobber jobs fetch; for invoice-only resume)
+ *   skipInvoices — do not fetch invoices from Jobber
  */
 export async function runJobberImport(accessToken, options = {}) {
   const skipClients = Boolean(options.skipClients);
+  const skipQuotes = Boolean(options.skipQuotes);
+  const skipJobs = Boolean(options.skipJobs);
+  const skipInvoices = Boolean(options.skipInvoices);
 
   console.log('\n🌱  Island Hydroseeding — Jobber import\n');
 
@@ -833,9 +1010,28 @@ export async function runJobberImport(accessToken, options = {}) {
   const propertyIdMap = {};
   allProps.forEach(p => { propertyIdMap[p.jobber_id] = p.id; });
 
-  const quoteIdMap = await migrateQuotes(token, accountIdMap, propertyIdMap);
-  const jobIdMap = await migrateJobs(token, accountIdMap, propertyIdMap, quoteIdMap);
-  await migrateInvoices(token, accountIdMap, propertyIdMap, jobIdMap);
+  if (skipQuotes) {
+    console.log('⏭️  Skipping Jobber quotes — using existing quotes (jobber_id map from Supabase).\n');
+    const qMap = await buildQuoteIdMapFromSupabase();
+    console.log(`  ✓ ${Object.keys(qMap).length} quotes mapped from Supabase\n`);
+  } else {
+    await migrateQuotes(token, accountIdMap, propertyIdMap);
+  }
+
+  let jobIdMap;
+  if (skipJobs) {
+    console.log('⏭️  Skipping Jobber jobs — using existing jobs (jobber_id map from Supabase).\n');
+    jobIdMap = await buildJobIdMapFromSupabase();
+    console.log(`  ✓ ${Object.keys(jobIdMap).length} jobs mapped from Supabase\n`);
+  } else {
+    jobIdMap = await migrateJobs(token, accountIdMap, propertyIdMap);
+  }
+
+  if (!skipInvoices) {
+    await migrateInvoices(token, accountIdMap, propertyIdMap, jobIdMap);
+  } else {
+    console.log('\n⏭️  Skipping invoices (skipInvoices).\n');
+  }
 
   console.log('\n✅  Import complete!\n');
 }

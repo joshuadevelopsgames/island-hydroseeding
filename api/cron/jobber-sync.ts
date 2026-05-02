@@ -8,9 +8,9 @@ import { getJobberAccessTokenForSync } from '../_jobberOAuth';
  * - JOBBER_REFRESH_TOKEN (first run) or tenants.jobber_refresh_token_encrypted after first success
  * - QUICKBOOKS_TOKEN_ENCRYPTION_KEY (64 hex) to encrypt stored refresh token
  * - Large accounts may exceed function duration; consider a self-hosted runner or smaller sync scope.
+ * - Cron route maxDuration 800 (Vercel Pro cap). Avoid JSDoc on individual keys inside `export const config` (Vercel static-config parse bug).
  */
 export const config = {
-  /** Vercel Pro caps serverless duration at 800s. */
   maxDuration: 800,
 };
 
