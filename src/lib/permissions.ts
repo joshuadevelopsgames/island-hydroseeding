@@ -10,7 +10,7 @@ export const PAGE_OPTIONS: { path: string; label: string }[] = [
   { path: '/issues', label: 'Fleet issues' },
   { path: '/inventory', label: 'Inventory' },
   { path: '/tasks', label: 'Tasks' },
-  { path: '/crm', label: 'Leads & CRM' },
+  { path: '/crm', label: 'Accounts' },
   { path: '/time', label: 'Time tracking' },
   { path: '/requests', label: 'Requests' },
   { path: '/quotes', label: 'Quotes' },

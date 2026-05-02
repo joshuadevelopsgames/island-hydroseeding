@@ -23,7 +23,7 @@ const DEFAULT_SECONDARY_PATHS = ['/assets', '/issues', '/fuel', '/equipment', '/
 
 const ALL_NAV_ITEMS = [
   { name: 'Dashboard',     path: '/',           icon: LayoutDashboard },
-  { name: 'Leads & CRM',   path: '/crm',        icon: Users },
+  { name: 'Accounts',      path: '/crm',       icon: Users },
   { name: 'Requests',      path: '/requests',   icon: Inbox },
   { name: 'Quotes',        path: '/quotes',     icon: FileText },
   { name: 'Jobs',          path: '/jobs',       icon: Briefcase },
