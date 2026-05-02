@@ -36,7 +36,7 @@ const PIPELINE_STATUSES: CrmAccountStatus[] = [
 ];
 
 const FILTER_SELECT_CLASS =
-  'h-10 min-w-[10rem] shrink-0 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm text-[var(--text-primary)]';
+  'h-10 w-full min-w-0 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm text-[var(--text-primary)]';
 
 type TypeFilter = 'all' | CrmAccountType;
 type StatusFilter = 'all' | CrmAccountStatus;
@@ -252,9 +252,9 @@ export default function CRM() {
         </div>
       </div>
 
-      <Card className="mb-4 min-w-0 overflow-hidden p-4">
-        <div className="flex min-w-0 flex-row flex-nowrap items-center gap-3 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="relative min-w-[11rem] max-w-md shrink-0 grow basis-[14rem] sm:max-w-none sm:basis-auto sm:flex-1">
+      <Card className="mb-4 min-w-0 p-4">
+        <div className="flex w-full min-w-0 flex-wrap items-end gap-3">
+          <div className="relative min-w-0 w-full basis-full sm:basis-[min(100%,18rem)] sm:max-w-md sm:grow">
             <Search
               size={18}
               aria-hidden
@@ -269,36 +269,40 @@ export default function CRM() {
               aria-label="Search accounts"
             />
           </div>
-          <select
-            className={cn(FILTER_SELECT_CLASS, 'shrink-0')}
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
-            aria-label="Filter by account type"
-          >
-            <option value="all">All types</option>
-            {ACCOUNT_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-          <select
-            className={cn(FILTER_SELECT_CLASS, 'shrink-0')}
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-            aria-label="Filter by lead status"
-          >
-            <option value="all">All statuses</option>
-            {PIPELINE_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="w-[calc(50%-0.375rem)] min-w-0 max-w-[11rem] sm:w-40 sm:max-w-none">
+            <select
+              className={FILTER_SELECT_CLASS}
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
+              aria-label="Filter by account type"
+            >
+              <option value="all">All types</option>
+              {ACCOUNT_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="w-[calc(50%-0.375rem)] min-w-0 max-w-[11rem] sm:w-44 sm:max-w-none">
+            <select
+              className={FILTER_SELECT_CLASS}
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+              aria-label="Filter by lead status"
+            >
+              <option value="all">All statuses</option>
+              {PIPELINE_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex min-w-0 w-full basis-full items-center gap-2 sm:w-[min(100%,17rem)] sm:max-w-[17rem] sm:basis-auto sm:shrink-0">
             <ArrowUpDown size={16} aria-hidden className="shrink-0 text-[var(--text-muted)]" />
             <select
-              className={cn(FILTER_SELECT_CLASS, 'min-w-[11rem]', 'shrink-0')}
+              className={FILTER_SELECT_CLASS}
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as SortKey)}
               aria-label="Sort accounts"
