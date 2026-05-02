@@ -579,7 +579,12 @@ export default function Insights() {
         </div>
       </Section>
 
-      <Section title="Revenue" subtitle={`${revenueYoY.periodLabel} vs ${revenueYoY.priorLabel}`}>
+      <Section
+        title="Revenue"
+        subtitle={`${revenueYoY.periodLabel} vs ${revenueYoY.priorLabel}`}
+        drillTo={`/reports?report=revenue_by_service&range=${range}`}
+        drillLabel="Open revenue by service"
+      >
         <div className="ins-yoy-totals">
           <div>
             <div className="ins-yoy-num">{CAD.format(revenueYoY.thisTotal)}</div>
@@ -593,7 +598,12 @@ export default function Insights() {
         <YoYBars current={revenueYoY.current} prev={revenueYoY.prev} />
       </Section>
 
-      <Section title="Lead conversion" subtitle="From request to job — stacked by source">
+      <Section
+        title="Lead conversion"
+        subtitle="From request to job — stacked by source"
+        drillTo={`/reports?report=lead_source_revenue&range=${range}`}
+        drillLabel="Open lead-source revenue"
+      >
         <div className="ins-lead-grid">
           <div className="ins-lead-times">
             <KpiTile
@@ -657,7 +667,12 @@ export default function Insights() {
         </div>
       </Section>
 
-      <Section title="Cashflow" subtitle="Outstanding, projected, and how fast you're paid">
+      <Section
+        title="Cashflow"
+        subtitle="Outstanding, projected, and how fast you're paid"
+        drillTo={`/reports?report=aged_receivables&range=${range}`}
+        drillLabel="Open aged receivables"
+      >
         <div className="ins-cashflow-grid">
           <div className="ins-kpi-grid ins-kpi-grid--3 ins-cashflow-tiles">
             <KpiTile
@@ -748,7 +763,12 @@ export default function Insights() {
         <SentVsApprovedBars weeks={funnel.weeks} />
       </Section>
 
-      <Section title="Jobs" subtitle="Work in progress">
+      <Section
+        title="Jobs"
+        subtitle="Work in progress"
+        drillTo={`/reports?report=products_services_usage&range=${range}`}
+        drillLabel="Open products & services usage"
+      >
         <div className="ins-jobs-row">
           <div className="ins-kpi-grid ins-kpi-grid--2 ins-jobs-tiles">
             <KpiTile label="New jobs" value={String(jobsSummary.total)} sub={rangeLabel(range)} />
@@ -801,12 +821,30 @@ function RangePicker({ value, onChange }: { value: RangeKey; onChange: (v: Range
   );
 }
 
-function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Section({
+  title,
+  subtitle,
+  drillTo,
+  drillLabel = 'Open in Reports',
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  /** When set, renders a small "Open in Reports →" anchor in the header. */
+  drillTo?: string;
+  drillLabel?: string;
+  children: React.ReactNode;
+}) {
   return (
     <section className="ins-section">
       <div className="ins-section-head">
         <h2 className="ins-section-title">{title}</h2>
         {subtitle && <span className="ins-section-sub">{subtitle}</span>}
+        {drillTo && (
+          <Link to={drillTo} className="ins-section-drill">
+            {drillLabel} →
+          </Link>
+        )}
       </div>
       {children}
     </section>
@@ -1125,10 +1163,12 @@ const INSIGHTS_CSS = `
   .ins-hero-value { font-size: 22px; font-weight: 700; color: var(--text-primary); margin-top: 2px; line-height: 1.2; }
 
   .ins-section { background: var(--surface-color); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px 22px; margin-bottom: 20px; }
-  .ins-section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+  .ins-section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
   .ins-section-title { font-size: 18px; font-weight: 600; margin: 0; }
   .ins-section-sub { font-size: 12px; color: var(--text-muted); }
   .ins-section-sub-head { display: flex; align-items: baseline; gap: 12px; margin: 20px 0 8px; font-size: 14px; font-weight: 600; }
+  .ins-section-drill { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--primary-green, #2a7a3a); text-decoration: none; padding: 4px 10px; border-radius: 6px; transition: background 0.12s; }
+  .ins-section-drill:hover { background: rgba(42, 122, 58, 0.08); }
 
   .ins-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
   .ins-kpi-grid--2 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
