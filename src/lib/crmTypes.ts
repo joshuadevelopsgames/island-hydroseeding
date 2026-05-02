@@ -7,8 +7,6 @@ export type CrmAccountStatus =
   | 'Won / Closed'
   | 'Lost';
 
-export type AccountLifecycle = 'Lead' | 'Active' | 'Inactive' | 'Archived';
-
 export type CrmTag = {
   id: string;
   name: string;
@@ -28,7 +26,6 @@ export type CrmAccount = {
   company: string | null;
   account_type: string;
   status: string;
-  account_lifecycle?: AccountLifecycle;
   marketing_source: string | null;
   lead_source_id: string | null;
   phone: string | null;

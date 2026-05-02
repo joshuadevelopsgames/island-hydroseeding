@@ -22,13 +22,7 @@ import { formatErrorForUi, importLegacyLeads as postLegacyLeads } from '@/lib/cr
 import { cn } from '@/lib/utils';
 import { formatInVancouver } from '@/lib/vancouverTime';
 import { formatPhone, normalizePhoneForSave } from '@/lib/phone';
-import type {
-  AccountLifecycle,
-  CrmAccount,
-  CrmAccountStatus,
-  CrmAccountType,
-  LegacyLead,
-} from '@/lib/crmTypes';
+import type { CrmAccount, CrmAccountStatus, CrmAccountType, LegacyLead } from '@/lib/crmTypes';
 
 const LEGACY_LEADS_KEY = 'crmLeads';
 
@@ -47,10 +41,7 @@ const FILTER_SELECT_CLASS =
 
 type TypeFilter = 'all' | CrmAccountType;
 type StatusFilter = 'all' | CrmAccountStatus;
-type LifecycleFilter = 'all' | AccountLifecycle;
 type SortKey = 'name_asc' | 'name_desc' | 'updated_desc' | 'updated_asc' | 'type_asc';
-
-const LIFECYCLE_OPTIONS: AccountLifecycle[] = ['Lead', 'Active', 'Inactive', 'Archived'];
 
 function cad(n: number) {
   return new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(n);
@@ -61,7 +52,6 @@ type AccountForExport = {
   company: string | null;
   account_type: string;
   status: string;
-  account_lifecycle?: string;
   lead_source_name?: string | null;
   tags?: { name: string }[];
   lifetime_value?: number;
@@ -78,7 +68,6 @@ function accountsToTable(accounts: AccountForExport[]): { headers: string[]; row
     'Company',
     'Type',
     'Status',
-    'Lifecycle',
     'Lead source',
     'Tags',
     'Lifetime value',
@@ -93,7 +82,6 @@ function accountsToTable(accounts: AccountForExport[]): { headers: string[]; row
     a.company ?? null,
     a.account_type ?? null,
     a.status ?? null,
-    a.account_lifecycle ?? null,
     a.lead_source_name ?? null,
     (a.tags ?? []).map((t) => t.name).join('; ') || null,
     typeof a.lifetime_value === 'number' ? a.lifetime_value : null,
@@ -139,18 +127,6 @@ function statusBadge(status: string) {
       {status}
     </span>
   );
-}
-
-function lifecycleBadge(l: string) {
-  const x = l as AccountLifecycle;
-  const pill = cn(
-    'inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
-    x === 'Lead' && 'bg-sky-50 text-sky-900 dark:bg-sky-950/45 dark:text-sky-100',
-    x === 'Active' && 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-100',
-    x === 'Inactive' && 'bg-slate-100 text-slate-700 dark:bg-slate-800/80 dark:text-slate-200',
-    x === 'Archived' && 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300'
-  );
-  return <span className={pill}>{l}</span>;
 }
 
 function typeBadge(type: string) {
@@ -216,7 +192,6 @@ export default function CRM() {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>('all');
   const [leadSourceFilter, setLeadSourceFilter] = useState<string>('all');
   const [tagFilter, setTagFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<SortKey>('name_asc');
@@ -264,9 +239,6 @@ export default function CRM() {
     if (statusFilter !== 'all') {
       next = next.filter((a) => a.status === statusFilter);
     }
-    if (lifecycleFilter !== 'all') {
-      next = next.filter((a) => (a.account_lifecycle ?? 'Lead') === lifecycleFilter);
-    }
     if (leadSourceFilter !== 'all') {
       next = next.filter((a) => a.lead_source_id === leadSourceFilter);
     }
@@ -274,7 +246,7 @@ export default function CRM() {
       next = next.filter((a) => (a.tags ?? []).some((t) => t.id === tagFilter));
     }
     return sortedAccounts(next, sortBy);
-  }, [accounts, search, typeFilter, statusFilter, lifecycleFilter, leadSourceFilter, tagFilter, sortBy]);
+  }, [accounts, search, typeFilter, statusFilter, leadSourceFilter, tagFilter, sortBy]);
 
   const exportXlsx = () => {
     const { headers, rows } = accountsToTable(filtered);
@@ -382,21 +354,6 @@ export default function CRM() {
               ))}
             </select>
           </div>
-          <div className="w-36 shrink-0 min-w-0 sm:w-40">
-            <select
-              className={FILTER_SELECT_CLASS}
-              value={lifecycleFilter}
-              onChange={(e) => setLifecycleFilter(e.target.value as LifecycleFilter)}
-              aria-label="Filter by lifecycle"
-            >
-              <option value="all">All lifecycle</option>
-              {LIFECYCLE_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
           <div className="w-40 shrink-0 min-w-0 sm:w-44">
             <select
               className={FILTER_SELECT_CLASS}
@@ -460,13 +417,12 @@ export default function CRM() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1100px] table-fixed border-collapse text-sm">
+              <table className="w-full min-w-[1000px] table-fixed border-collapse text-sm">
                 <thead className="sticky top-0 z-[1] border-b border-[var(--border-color)] bg-[var(--surface-raised)]">
                   <tr className="text-left text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                     <th className="px-4 py-3 sm:px-6 w-[18%]">Account</th>
                     <th className="px-3 py-3 w-[9%]">Type</th>
                     <th className="px-3 py-3 w-[12%]">Pipeline</th>
-                    <th className="px-3 py-3 w-[10%]">Lifecycle</th>
                     <th className="px-3 py-3 w-[10%]">Source</th>
                     <th className="px-3 py-3 w-[12%]">Tags</th>
                     <th className="px-3 py-3 text-right w-[8%]">LTV</th>
@@ -499,7 +455,6 @@ export default function CRM() {
                       </td>
                       <td className="px-3 py-3 align-middle">{typeBadge(a.account_type)}</td>
                       <td className="px-3 py-3 align-middle">{statusBadge(a.status)}</td>
-                      <td className="px-3 py-3 align-middle">{lifecycleBadge(a.account_lifecycle ?? 'Lead')}</td>
                       <td className="px-3 py-3 align-middle text-[var(--text-secondary)] truncate" title={a.lead_source_name ?? ''}>
                         {a.lead_source_name ?? '—'}
                       </td>

@@ -271,7 +271,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'email',
       'address',
       'notes',
-      'account_lifecycle',
       'lead_source_id',
       'stripe_customer_id',
     ] as const;

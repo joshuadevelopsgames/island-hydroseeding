@@ -39,7 +39,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { useCrmAccountDetail, useCrmLeadSources, useCrmMutations, useCrmTagList } from '@/hooks/useCrm';
 import {
   CRM_CONTACT_TIER_RANK,
-  type AccountLifecycle,
   type CrmAccountStatus,
   type CrmAccountType,
   type CrmCommLog,
@@ -123,23 +122,6 @@ function money(n: number): string {
 
 function cadMoney(n: number): string {
   return new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(n);
-}
-
-function lifecyclePill(l: string) {
-  const x = l as AccountLifecycle;
-  const pill = cn(
-    'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium',
-    x === 'Lead' && 'bg-sky-50 text-blue-950 dark:bg-sky-950/45 dark:text-sky-100',
-    x === 'Active' && 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-100',
-    x === 'Inactive' && 'bg-slate-100 text-slate-700 dark:bg-slate-800/80 dark:text-slate-200',
-    x === 'Archived' && 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300'
-  );
-  return (
-    <span className={pill}>
-      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current opacity-90" />
-      {l}
-    </span>
-  );
 }
 
 export default function CrmAccountDetail() {
@@ -251,7 +233,6 @@ export default function CrmAccountDetail() {
               {account.company && <p className="mt-0.5 text-sm text-[var(--text-muted)]">{account.company}</p>}
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {crmStatusPill(account.status)}
-                {lifecyclePill(account.account_lifecycle ?? 'Lead')}
                 {crmTypeBadge(account.account_type)}
                 <span className="font-mono text-xs text-[var(--text-muted)]">ID: {account.id}</span>
               </div>
@@ -1674,8 +1655,6 @@ function ResearchNoteRow({
   );
 }
 
-const LIFECYCLE_EDIT: AccountLifecycle[] = ['Lead', 'Active', 'Inactive', 'Archived'];
-
 function EditAccountDialog({
   open,
   onOpenChange,
@@ -1712,7 +1691,6 @@ function EditAccountDialog({
         company: String(fd.get('company') ?? '').trim() || null,
         account_type: type,
         status,
-        account_lifecycle: String(fd.get('account_lifecycle') ?? 'Lead'),
         lead_source_id: ls || null,
         marketing_source: String(fd.get('marketing_source') ?? '') || null,
         phone: normalizePhoneForSave(String(fd.get('phone') ?? '')),
@@ -1770,21 +1748,6 @@ function EditAccountDialog({
                 <option>Estimate Sent</option>
                 <option>Won / Closed</option>
                 <option>Lost</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ea-lifecycle">Lifecycle</Label>
-              <select
-                id="ea-lifecycle"
-                name="account_lifecycle"
-                className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
-                defaultValue={account.account_lifecycle ?? 'Lead'}
-              >
-                {LIFECYCLE_EDIT.map((x) => (
-                  <option key={x} value={x}>
-                    {x}
-                  </option>
-                ))}
               </select>
             </div>
             <div className="space-y-2 sm:col-span-2">
