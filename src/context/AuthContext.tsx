@@ -4,11 +4,13 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, decodeJwtPayload } from '../lib/supabase';
 import { apiFetch } from '../lib/apiClient';
+import { scheduleWorkspaceSyncOnAuth } from '../lib/cloudSync';
 import { ALL_ASSIGNABLE_PATHS, normalizeAllowedPages } from '../lib/permissions';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -75,6 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session,   setSession]   = useState<Session | null>(null);
   const [users,     setUsers]     = useState<AppUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const lastSyncedUserId = useRef<string | null>(null);
 
   /** Fetch the full team roster (requires a valid session). */
   const fetchUsers = useCallback(async (currentSession: Session | null) => {
@@ -108,6 +111,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => subscription.unsubscribe();
   }, [fetchUsers]);
+
+  useEffect(() => {
+    const uid = session?.user?.id ?? null;
+    if (!uid) {
+      lastSyncedUserId.current = null;
+      return;
+    }
+    if (lastSyncedUserId.current === uid) return;
+    lastSyncedUserId.current = uid;
+    scheduleWorkspaceSyncOnAuth();
+  }, [session]);
 
   // ── Auth actions ──────────────────────────────────────────────────────────
   const signIn = useCallback(async (email: string, password: string) => {

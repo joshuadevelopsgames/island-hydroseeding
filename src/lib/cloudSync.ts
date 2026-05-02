@@ -1,7 +1,11 @@
 /**
- * Syncs shared app data to Supabase via Vercel `/api/workspace` (service role on server).
+ * Syncs shared app data to Supabase via Vercel `/api/workspace` (tenant JSON blob).
+ * Fleet assets / fuel / issues / inventory sync separately via `/api/fleet` — not listed here.
  * Per-device keys (current user, last selected employee) stay local only.
  */
+
+import { apiFetch } from './apiClient';
+import { supabase, isMisconfigured } from './supabase';
 
 export const CLOUD_SYNC_KEYS = [
   'appUsers',
@@ -11,15 +15,7 @@ export const CLOUD_SYNC_KEYS = [
   'tasksColumns_v1',
   'customCalendarEvents_v1',
   'equipmentMaintenance',
-  'fleetAssets_v1',
-  'fleetWorkOrders_v1',
-  'fleetMigratedLegacyMaint_v1',
-  'fleetFuelEntries_v1',
-  'fleetRoadCosts_v1',
-  'fleetIssues_v1',
-  'fleetPurchaseOrders_v1',
   'preTripLogs_v2',
-  'inventoryState',
   'documentsRepository',
   'documentsRepositoryV2',
   'flhaLogs_v2',
@@ -27,6 +23,7 @@ export const CLOUD_SYNC_KEYS = [
 
 const SYNC_KEY_SET = new Set<string>(CLOUD_SYNC_KEYS);
 const META_SERVER_AT = 'cloudSync_lastServerAt';
+const PENDING_PUSH_KEY = 'workspace_sync_pending_v1';
 
 const API = '/api/workspace';
 
@@ -63,6 +60,26 @@ function applyServerPayload(payload: Record<string, unknown> | null | undefined)
   }
 }
 
+function markWorkspacePushPending() {
+  try {
+    localStorage.setItem(PENDING_PUSH_KEY, '1');
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearWorkspacePushPending() {
+  try {
+    localStorage.removeItem(PENDING_PUSH_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function canReachNetwork(): boolean {
+  return typeof navigator !== 'undefined' && navigator.onLine;
+}
+
 function schedulePush() {
   if (suppressPush) return;
   if (pushTimer) clearTimeout(pushTimer);
@@ -88,24 +105,43 @@ export function requestCloudPush() {
 }
 
 async function pushToServer() {
+  if (isMisconfigured) return;
+  if (!canReachNetwork()) {
+    markWorkspacePushPending();
+    return;
+  }
   try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return;
+
     const payload = readBundle();
-    const r = await fetch(API, {
+    const r = await apiFetch(API, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ payload }),
     });
-    if (!r.ok) return;
+    if (!r.ok) {
+      markWorkspacePushPending();
+      return;
+    }
+    clearWorkspacePushPending();
     const data = (await r.json()) as { updated_at?: string };
     if (data.updated_at) localStorage.setItem(META_SERVER_AT, data.updated_at);
   } catch {
-    /* offline or local dev without API */
+    markWorkspacePushPending();
   }
 }
 
 async function pullFromServer(): Promise<{ merge: boolean; updated_at: string | null }> {
+  if (isMisconfigured) return { merge: false, updated_at: null };
   try {
-    const r = await fetch(API, { cache: 'no-store' });
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return { merge: false, updated_at: null };
+
+    const r = await apiFetch(API, { cache: 'no-store' });
     if (r.status === 404 || r.status === 503) return { merge: false, updated_at: null };
     if (!r.ok) return { merge: false, updated_at: null };
     const data = (await r.json()) as {
@@ -140,13 +176,52 @@ export function runAppBootstrap(): Promise<'reload' | 'ready'> {
     bootstrapOnce = (async () => {
       installStorageSyncHook();
       installVisibilitySync();
-      const { merge } = await pullFromServer();
-      if (merge) return 'reload';
-      void pushToServer();
+      window.addEventListener('online', () => {
+        void pullFromServer().then(({ merge }) => {
+          if (merge) {
+            window.location.reload();
+            return;
+          }
+          void pushToServer();
+        });
+      });
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session) {
+        const { merge } = await pullFromServer();
+        if (merge) return 'reload';
+        void pushToServer();
+      }
       return 'ready';
     })();
   }
   return bootstrapOnce;
+}
+
+/** Call when the user session becomes available (e.g. after login). Debounced. */
+let authSyncTimer: ReturnType<typeof setTimeout> | null = null;
+export function scheduleWorkspaceSyncOnAuth(): void {
+  if (authSyncTimer) clearTimeout(authSyncTimer);
+  authSyncTimer = setTimeout(() => {
+    authSyncTimer = null;
+    void syncWorkspaceOnAuth();
+  }, 400);
+}
+
+export async function syncWorkspaceOnAuth(): Promise<void> {
+  if (isMisconfigured) return;
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) return;
+  const { merge } = await pullFromServer();
+  if (merge) {
+    window.location.reload();
+    return;
+  }
+  await pushToServer();
 }
 
 /* ── Re-sync when the PWA resumes from background ── */
