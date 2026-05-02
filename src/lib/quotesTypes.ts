@@ -175,10 +175,3 @@ export type QuoteBundle = {
   account: { id: string; name: string; company: string | null; phone: string | null; email: string | null } | null;
   property: CrmProperty | null;
 };
-
-export type CrmTag = {
-  id: string;
-  name: string;
-  color: string;
-  created_at: string;
-};

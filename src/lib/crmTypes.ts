@@ -7,12 +7,6 @@ export type CrmAccountStatus =
   | 'Won / Closed'
   | 'Lost';
 
-export type CrmTag = {
-  id: string;
-  name: string;
-  color: string | null;
-};
-
 export type CrmLeadSource = {
   id: string;
   name: string;
@@ -38,7 +32,6 @@ export type CrmAccount = {
   lifetime_value?: number;
   /** Sum of invoice balance_due */
   current_balance?: number;
-  tags?: CrmTag[];
   lead_source_name?: string | null;
   /** Stripe Customer on the Connect account (card on file). */
   stripe_customer_id?: string | null;

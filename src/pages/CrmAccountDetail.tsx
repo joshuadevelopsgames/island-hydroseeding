@@ -36,7 +36,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { useCrmAccountDetail, useCrmLeadSources, useCrmMutations, useCrmTagList } from '@/hooks/useCrm';
+import { useCrmAccountDetail, useCrmLeadSources, useCrmMutations } from '@/hooks/useCrm';
 import {
   CRM_CONTACT_TIER_RANK,
   type CrmAccountStatus,
@@ -216,19 +216,19 @@ export default function CrmAccountDetail() {
         onCancel={() => setDeleteOpen(false)}
       />
 
-      <div>
+      <div className="w-full text-left">
         <Link to="/crm" className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-[var(--primary-green)]">
           <ArrowLeft className="h-4 w-4" /> Accounts
         </Link>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-0 flex-1 gap-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 flex-1 items-start gap-4">
             <div
               className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-green)] text-lg font-bold text-white"
               aria-hidden
             >
               {accountInitials(account.name)}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1 text-left">
               <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">{account.name}</h1>
               {account.company && <p className="mt-0.5 text-sm text-[var(--text-muted)]">{account.company}</p>}
               <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -236,7 +236,7 @@ export default function CrmAccountDetail() {
                 {crmTypeBadge(account.account_type)}
                 <span className="font-mono text-xs text-[var(--text-muted)]">ID: {account.id}</span>
               </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--surface-raised)] p-3">
                   <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                     Lifetime value
@@ -263,24 +263,10 @@ export default function CrmAccountDetail() {
                     {account.lead_source_name ?? account.marketing_source ?? '—'}
                   </p>
                 </div>
-                <div className="rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--surface-raised)] p-3">
-                  <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Tags</p>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {(account.tags ?? []).length ? (
-                      (account.tags ?? []).map((t) => (
-                        <Badge key={t.id} variant="secondary">
-                          {t.name}
-                        </Badge>
-                      ))
-                    ) : (
-                      <span className="text-sm text-[var(--text-muted)]">No tags</span>
-                    )}
-                  </div>
-                </div>
               </div>
             </div>
           </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-2 overflow-x-auto overscroll-x-contain py-1.5 [-webkit-overflow-scrolling:touch] [scrollbar-width:thin] lg:justify-end lg:overflow-visible lg:py-0.5">
+          <div className="flex w-full min-w-0 shrink-0 flex-wrap items-center justify-start gap-2 overflow-x-auto overscroll-x-contain py-1.5 [-webkit-overflow-scrolling:touch] [scrollbar-width:thin] sm:w-auto lg:justify-end lg:overflow-visible lg:py-0.5">
             <label className="inline-flex shrink-0 items-center gap-2 text-sm text-[var(--text-muted)]">
               <Calendar className="h-4 w-4 shrink-0 self-center" aria-hidden />
               <select
@@ -327,11 +313,10 @@ export default function CrmAccountDetail() {
         onOpenChange={setEditOpen}
         account={account}
         onSave={(patch) => m.updateAccount.mutateAsync({ id: account.id, ...patch })}
-        onSaveTags={(tag_ids) => m.setAccountTags.mutateAsync({ account_id: account.id, tag_ids })}
       />
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="h-auto w-full flex-wrap justify-start gap-1 bg-transparent p-0 sm:w-auto">
+        <TabsList className="h-auto w-full flex-wrap !justify-start gap-1 bg-transparent p-0 sm:w-auto">
           <TabsTrigger
             value="info"
             className="rounded-none border-b-2 border-transparent px-3 py-2 data-[state=active]:border-[var(--primary-green)] data-[state=active]:bg-transparent"
@@ -749,15 +734,6 @@ function AccountNotesCard({ notes, onEdit }: { notes: string | null; onEdit: () 
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div
-          className="flex gap-3 rounded-[var(--radius-sm)] border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-100"
-          role="status"
-        >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-200/80 text-amber-900 dark:bg-amber-900/80 dark:text-amber-100">
-            !
-          </span>
-          <p className="pt-0.5 font-medium">Don&apos;t be creepy! Use notes for helpful context only.</p>
-        </div>
         {lines.length > 0 ? (
           <ul className="list-disc space-y-2 pl-5 text-sm text-[var(--text-secondary)]">
             {lines.map((line, i) => (
@@ -1660,16 +1636,13 @@ function EditAccountDialog({
   onOpenChange,
   account,
   onSave,
-  onSaveTags,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   account: NonNullable<ReturnType<typeof useCrmAccountDetail>['data']>['account'];
   onSave: (patch: Record<string, unknown>) => Promise<unknown>;
-  onSaveTags?: (tag_ids: string[]) => Promise<unknown>;
 }) {
   const { data: leadSources = [] } = useCrmLeadSources();
-  const { data: allTags = [] } = useCrmTagList();
   const [type, setType] = useState<CrmAccountType>(account.account_type as CrmAccountType);
   const [status, setStatus] = useState<CrmAccountStatus>(account.status as CrmAccountStatus);
   const [pending, setPending] = useState(false);
@@ -1698,10 +1671,6 @@ function EditAccountDialog({
         address: String(fd.get('address') ?? '').trim() || null,
         notes: String(fd.get('notes') ?? '') || null,
       });
-      if (onSaveTags) {
-        const tagIds = fd.getAll('tag').map((x) => String(x));
-        await onSaveTags(tagIds);
-      }
       onOpenChange(false);
     } finally {
       setPending(false);
@@ -1737,7 +1706,7 @@ function EditAccountDialog({
               </select>
             </div>
             <div className="space-y-2">
-              <Label>Pipeline status</Label>
+              <Label>Status</Label>
               <select
                 className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
                 value={status}
@@ -1765,26 +1734,6 @@ function EditAccountDialog({
                   </option>
                 ))}
               </select>
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label>Tags</Label>
-              <div className="flex max-h-36 flex-wrap gap-3 overflow-y-auto rounded-[var(--radius-sm)] border border-[var(--border-strong)] p-3">
-                {allTags.length === 0 ? (
-                  <p className="text-sm text-[var(--text-muted)]">No tags defined yet.</p>
-                ) : (
-                  allTags.map((t) => (
-                    <label key={t.id} className="flex cursor-pointer items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        name="tag"
-                        value={t.id}
-                        defaultChecked={(account.tags ?? []).some((x) => x.id === t.id)}
-                      />
-                      {t.name}
-                    </label>
-                  ))
-                )}
-              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="ea-phone">Phone</Label>

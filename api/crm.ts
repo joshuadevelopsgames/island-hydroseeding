@@ -36,9 +36,7 @@ function normalizeContactTier(raw: unknown, isPrimaryHint?: unknown): ContactTie
   return isPrimaryHint ? 'primary' : 'other';
 }
 
-type CrmTagRow = { id: string; name: string; color: string | null };
-
-/** Adds lifetime_value, current_balance, tags[], lead_source_name to each account (Phase 2). */
+/** Adds lifetime_value, current_balance, lead_source_name to each account (Phase 2). */
 async function enrichAccounts(
   db: SupabaseClient,
   tenantId: string,
@@ -46,28 +44,11 @@ async function enrichAccounts(
 ): Promise<Record<string, unknown>[]> {
   if (accounts.length === 0) return [];
   const ids = accounts.map((a) => String(a.id));
-  const [invRes, tagLinkRes, lsRes] = await Promise.all([
+  const [invRes, lsRes] = await Promise.all([
     db.from('invoices').select('account_id, amount_paid, balance_due').eq('tenant_id', tenantId).in('account_id', ids),
-    db.from('crm_account_tags').select('account_id, tag_id').eq('tenant_id', tenantId).in('account_id', ids),
     db.from('crm_lead_sources').select('id, name').eq('tenant_id', tenantId),
   ]);
   const invoices = (invRes.data ?? []) as { account_id: string | null; amount_paid: unknown; balance_due: unknown }[];
-  const acctTagRows = (tagLinkRes.data ?? []) as { account_id: string; tag_id: string }[];
-  const tagIds = [...new Set(acctTagRows.map((r) => r.tag_id))];
-  let tagMeta: CrmTagRow[] = [];
-  if (tagIds.length > 0) {
-    const tr = await db.from('crm_tags').select('id, name, color').eq('tenant_id', tenantId).in('id', tagIds);
-    tagMeta = (tr.data ?? []) as CrmTagRow[];
-  }
-  const tagMap = new Map(tagMeta.map((t) => [t.id, t]));
-  const tagsByAccount = new Map<string, CrmTagRow[]>();
-  for (const r of acctTagRows) {
-    const t = tagMap.get(r.tag_id);
-    if (!t) continue;
-    const arr = tagsByAccount.get(r.account_id) ?? [];
-    arr.push(t);
-    tagsByAccount.set(r.account_id, arr);
-  }
   const lv = new Map<string, number>();
   const bal = new Map<string, number>();
   for (const inv of invoices) {
@@ -84,7 +65,6 @@ async function enrichAccounts(
       ...a,
       lifetime_value: lv.get(id) ?? 0,
       current_balance: bal.get(id) ?? 0,
-      tags: tagsByAccount.get(id) ?? [],
       lead_source_name: lsid ? lsName.get(lsid) ?? null : null,
     };
   });
@@ -133,19 +113,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
       res.status(200).json({ lead_sources: data ?? [] });
-      return;
-    }
-    if (action === 'tags') {
-      const { data, error } = await db
-        .from('crm_tags')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('name', { ascending: true });
-      if (error) {
-        res.status(500).json({ error: error.message });
-        return;
-      }
-      res.status(200).json({ tags: data ?? [] });
       return;
     }
     if (action === 'comm_log') {
@@ -208,7 +175,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     res.status(400).json({
       error:
-        'Invalid GET: use action=accounts, lead_sources, tags, comm_log, or action=account&id=',
+        'Invalid GET: use action=accounts, lead_sources, comm_log, or action=account&id=',
     });
     return;
   }
@@ -643,46 +610,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .single();
     if (await errTable(error)) return;
     res.status(200).json({ lead_source: data });
-    return;
-  }
-
-  if (action === 'tag.create') {
-    const name = String(body.name ?? '').trim();
-    if (!name) {
-      res.status(400).json({ error: 'name is required' });
-      return;
-    }
-    const color = body.color != null ? String(body.color) : '#6B7280';
-    const { data, error } = await db
-      .from('crm_tags')
-      .insert({ tenant_id: tenantId, name, color })
-      .select('*')
-      .single();
-    if (await errTable(error)) return;
-    res.status(200).json({ tag: data });
-    return;
-  }
-
-  if (action === 'account.tags.set') {
-    const account_id = String(body.account_id ?? '');
-    if (!account_id) {
-      res.status(400).json({ error: 'account_id is required' });
-      return;
-    }
-    const tagIds = Array.isArray(body.tag_ids) ? (body.tag_ids as unknown[]).map((x) => String(x)) : [];
-    const accOk = await db.from('crm_accounts').select('id').eq('id', account_id).eq('tenant_id', tenantId).maybeSingle();
-    if (!accOk.data) {
-      res.status(404).json({ error: 'Account not found' });
-      return;
-    }
-    const { error: delErr } = await db.from('crm_account_tags').delete().eq('account_id', account_id).eq('tenant_id', tenantId);
-    if (await errTable(delErr)) return;
-    if (tagIds.length > 0) {
-      const rows = tagIds.map((tag_id) => ({ tenant_id: tenantId, account_id, tag_id }));
-      const { error: insErr } = await db.from('crm_account_tags').insert(rows);
-      if (await errTable(insErr)) return;
-    }
-    res.status(200).json({ ok: true });
     return;
   }
 

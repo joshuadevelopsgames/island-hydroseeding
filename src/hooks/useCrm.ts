@@ -4,7 +4,6 @@ import {
   fetchCrmAccountBundle,
   fetchCrmAccounts,
   fetchCrmLeadSources,
-  fetchCrmTagList,
   importLegacyLeads,
 } from '@/lib/crmApi';
 import type { CrmAccount, CrmCommLog, LegacyLead } from '@/lib/crmTypes';
@@ -14,7 +13,6 @@ export const crmKeys = {
   accounts: () => [...crmKeys.all, 'accounts'] as const,
   account: (id: string) => [...crmKeys.all, 'account', id] as const,
   leadSources: () => [...crmKeys.all, 'lead_sources'] as const,
-  tagList: () => [...crmKeys.all, 'tags'] as const,
 };
 
 export function useCrmAccounts() {
@@ -36,13 +34,6 @@ export function useCrmLeadSources() {
   return useQuery({
     queryKey: crmKeys.leadSources(),
     queryFn: fetchCrmLeadSources,
-  });
-}
-
-export function useCrmTagList() {
-  return useQuery({
-    queryKey: crmKeys.tagList(),
-    queryFn: fetchCrmTagList,
   });
 }
 
@@ -132,24 +123,10 @@ export function useCrmMutations() {
     onSuccess: invalidate,
   });
 
-  const setAccountTags = useMutation({
-    mutationFn: (p: { account_id: string; tag_ids: string[] }) =>
-      crmPost({ action: 'account.tags.set', account_id: p.account_id, tag_ids: p.tag_ids }),
-    onSuccess: invalidate,
-  });
-
   const createLeadSource = useMutation({
     mutationFn: (payload: Record<string, unknown>) => crmPost({ action: 'lead_source.create', ...payload }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: crmKeys.leadSources() });
-      invalidate();
-    },
-  });
-
-  const createCrmTag = useMutation({
-    mutationFn: (payload: Record<string, unknown>) => crmPost({ action: 'tag.create', ...payload }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: crmKeys.tagList() });
       invalidate();
     },
   });
@@ -180,9 +157,7 @@ export function useCrmMutations() {
     updateResearchNote,
     deleteResearchNote,
     legacyImport,
-    setAccountTags,
     createLeadSource,
-    createCrmTag,
     createCommLog,
   };
 }

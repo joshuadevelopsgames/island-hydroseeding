@@ -17,7 +17,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { crmKeys, useCrmAccounts, useCrmLeadSources, useCrmMutations, useCrmTagList } from '@/hooks/useCrm';
+import { crmKeys, useCrmAccounts, useCrmLeadSources, useCrmMutations } from '@/hooks/useCrm';
 import { formatErrorForUi, importLegacyLeads as postLegacyLeads } from '@/lib/crmApi';
 import { cn } from '@/lib/utils';
 import { formatInVancouver } from '@/lib/vancouverTime';
@@ -28,7 +28,7 @@ const LEGACY_LEADS_KEY = 'crmLeads';
 
 const ACCOUNT_TYPES: CrmAccountType[] = ['Residential', 'Commercial', 'Municipal'];
 
-const PIPELINE_STATUSES: CrmAccountStatus[] = [
+const ACCOUNT_STATUS_OPTIONS: CrmAccountStatus[] = [
   'New Lead',
   'Contacted',
   'Estimate Sent',
@@ -53,7 +53,6 @@ type AccountForExport = {
   account_type: string;
   status: string;
   lead_source_name?: string | null;
-  tags?: { name: string }[];
   lifetime_value?: number;
   current_balance?: number;
   phone: string | null;
@@ -69,7 +68,6 @@ function accountsToTable(accounts: AccountForExport[]): { headers: string[]; row
     'Type',
     'Status',
     'Lead source',
-    'Tags',
     'Lifetime value',
     'Current balance',
     'Phone',
@@ -83,7 +81,6 @@ function accountsToTable(accounts: AccountForExport[]): { headers: string[]; row
     a.account_type ?? null,
     a.status ?? null,
     a.lead_source_name ?? null,
-    (a.tags ?? []).map((t) => t.name).join('; ') || null,
     typeof a.lifetime_value === 'number' ? a.lifetime_value : null,
     typeof a.current_balance === 'number' ? a.current_balance : null,
     a.phone ?? null,
@@ -187,13 +184,11 @@ export default function CRM() {
   const qc = useQueryClient();
   const { data: accounts = [], isLoading, isError, error, refetch } = useCrmAccounts();
   const { data: leadSources = [] } = useCrmLeadSources();
-  const { data: tagList = [] } = useCrmTagList();
   const m = useCrmMutations();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [leadSourceFilter, setLeadSourceFilter] = useState<string>('all');
-  const [tagFilter, setTagFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<SortKey>('name_asc');
   const [createOpen, setCreateOpen] = useState(false);
   const legacyDone = useRef(false);
@@ -242,11 +237,8 @@ export default function CRM() {
     if (leadSourceFilter !== 'all') {
       next = next.filter((a) => a.lead_source_id === leadSourceFilter);
     }
-    if (tagFilter !== 'all') {
-      next = next.filter((a) => (a.tags ?? []).some((t) => t.id === tagFilter));
-    }
     return sortedAccounts(next, sortBy);
-  }, [accounts, search, typeFilter, statusFilter, leadSourceFilter, tagFilter, sortBy]);
+  }, [accounts, search, typeFilter, statusFilter, leadSourceFilter, sortBy]);
 
   const exportXlsx = () => {
     const { headers, rows } = accountsToTable(filtered);
@@ -344,10 +336,10 @@ export default function CRM() {
               className={FILTER_SELECT_CLASS}
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-              aria-label="Filter by lead status"
+              aria-label="Filter by status"
             >
               <option value="all">All statuses</option>
-              {PIPELINE_STATUSES.map((s) => (
+              {ACCOUNT_STATUS_OPTIONS.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
@@ -365,21 +357,6 @@ export default function CRM() {
               {leadSources.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="w-36 shrink-0 min-w-0 sm:w-40">
-            <select
-              className={FILTER_SELECT_CLASS}
-              value={tagFilter}
-              onChange={(e) => setTagFilter(e.target.value)}
-              aria-label="Filter by tag"
-            >
-              <option value="all">All tags</option>
-              {tagList.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
                 </option>
               ))}
             </select>
@@ -417,14 +394,13 @@ export default function CRM() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1000px] table-fixed border-collapse text-sm">
+              <table className="w-full min-w-[880px] table-fixed border-collapse text-sm">
                 <thead className="sticky top-0 z-[1] border-b border-[var(--border-color)] bg-[var(--surface-raised)]">
                   <tr className="text-left text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                     <th className="px-4 py-3 sm:px-6 w-[18%]">Account</th>
                     <th className="px-3 py-3 w-[9%]">Type</th>
-                    <th className="px-3 py-3 w-[12%]">Pipeline</th>
+                    <th className="px-3 py-3 w-[12%]">Status</th>
                     <th className="px-3 py-3 w-[10%]">Source</th>
-                    <th className="px-3 py-3 w-[12%]">Tags</th>
                     <th className="px-3 py-3 text-right w-[8%]">LTV</th>
                     <th className="px-3 py-3 text-right w-[8%]">Balance</th>
                     <th className="px-3 py-3 w-[11%]">Phone</th>
@@ -457,19 +433,6 @@ export default function CRM() {
                       <td className="px-3 py-3 align-middle">{statusBadge(a.status)}</td>
                       <td className="px-3 py-3 align-middle text-[var(--text-secondary)] truncate" title={a.lead_source_name ?? ''}>
                         {a.lead_source_name ?? '—'}
-                      </td>
-                      <td className="px-3 py-3 align-middle">
-                        <div className="flex flex-wrap gap-1">
-                          {(a.tags ?? []).slice(0, 3).map((t) => (
-                            <Badge key={t.id} variant="outline" className="text-[0.65rem] font-normal">
-                              {t.name}
-                            </Badge>
-                          ))}
-                          {(a.tags ?? []).length > 3 ? (
-                            <span className="text-xs text-[var(--text-muted)]">+{(a.tags ?? []).length - 3}</span>
-                          ) : null}
-                          {(a.tags ?? []).length === 0 ? <span className="text-[var(--text-muted)]">—</span> : null}
-                        </div>
                       </td>
                       <td className="px-3 py-3 align-middle text-right tabular-nums text-[var(--text-primary)]">
                         {cad(a.lifetime_value ?? 0)}
