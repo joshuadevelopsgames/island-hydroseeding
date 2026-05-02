@@ -3,9 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { Briefcase, Loader2, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { useJobs } from '@/hooks/useJobs';
 import { formatInVancouver } from '@/lib/vancouverTime';
 import type { Job, JobStatus } from '@/lib/jobsTypes';
+
+const FILTER_SELECT_CLASS =
+  'h-10 w-full min-w-0 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm text-[var(--text-primary)]';
 
 const STATUS_COLORS: Record<JobStatus, 'default' | 'secondary' | 'outline'> = {
   Active: 'default',
@@ -183,35 +188,38 @@ export default function Jobs() {
         />
       </div>
 
-      <div className="card min-w-0 overflow-hidden p-0">
-        <div className="flex flex-col gap-4 border-b border-[var(--border-color)] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h3 className="mb-1 flex items-center gap-2 text-[1.125rem] font-semibold">
-              <Briefcase size={20} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
-              All Jobs
-            </h3>
-            <p className="mb-0 text-sm text-secondary">
-              {isLoading ? 'Loading…' : `${filtered.length} shown · ${jobs.length} total`}
-            </p>
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="mb-0.5 flex items-center gap-2 text-lg font-semibold">
+            <Briefcase size={20} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
+            All Jobs
+          </h2>
+          <p className="mb-0 text-sm text-[var(--text-secondary)]">
+            {isLoading ? 'Loading…' : `${filtered.length} shown · ${jobs.length} total`}
+          </p>
+        </div>
+      </div>
+
+      <Card className="mb-4 min-w-0 p-4">
+        <div className="flex w-full min-w-0 flex-wrap items-end gap-3">
+          <div className="relative min-w-0 w-full basis-full sm:basis-[min(100%,18rem)] sm:max-w-md sm:grow">
+            <Search
+              size={18}
+              aria-hidden
+              className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[var(--text-muted)]"
+            />
+            <Input
+              type="search"
+              className="w-full min-w-0 pl-10"
+              placeholder="Job #, title…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search jobs"
+            />
           </div>
-          <div className="flex flex-col gap-3 w-full sm:w-auto sm:flex-row sm:items-center">
-            <div className="relative w-full sm:max-w-xs">
-              <Search
-                size={18}
-                aria-hidden
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
-              />
-              <input
-                type="search"
-                className="w-full pl-10 h-10"
-                placeholder="Job #, title…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                aria-label="Search jobs"
-              />
-            </div>
+          <div className="w-full min-w-0 sm:w-44 sm:max-w-none sm:shrink-0">
             <select
-              className="flex h-10 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
+              className={FILTER_SELECT_CLASS}
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               aria-label="Filter by status"
@@ -225,55 +233,76 @@ export default function Jobs() {
             </select>
           </div>
         </div>
+      </Card>
 
-        <div className="max-h-[min(60vh,520px)] overflow-y-auto">
-          <div className="divide-y divide-[var(--border-color)]">
-            {isLoading && jobs.length === 0 && (
-              <div className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-secondary">
-                <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
-                <span>Loading jobs…</span>
-              </div>
-            )}
-            {filtered.map((job) => (
-              <div
-                key={job.id}
-                onClick={() => navigate(`/jobs/${job.id}`)}
-                className="flex flex-col gap-3 px-6 py-4 transition-colors hover:bg-[var(--surface-hover)] cursor-pointer sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <p className="font-semibold text-[var(--text-primary)]">
-                      Job #{String(job.job_number).padStart(4, '0')}
-                    </p>
-                    {job.title && (
-                      <p className="text-sm text-[var(--text-muted)] truncate">— {job.title}</p>
-                    )}
-                  </div>
-                  {job.job_type && (
-                    <p className="text-sm text-[var(--text-muted)] truncate">{job.job_type}</p>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-3 justify-between sm:gap-4">
-                  <p className="text-sm text-secondary">
-                    {formatInVancouver(new Date(job.created_at), 'MMM d, yyyy')}
-                  </p>
-                  <Badge variant={getStatusBadgeVariant(job.status)}>{job.status}</Badge>
-                  <p className="font-semibold text-[var(--text-primary)] w-24 text-right">
-                    {formatCurrency(job.total_price || 0)}
-                  </p>
-                </div>
-              </div>
-            ))}
-            {!isLoading && filtered.length === 0 && (
-              <div className="px-6 py-16 text-center text-sm text-secondary">
-                {jobs.length === 0
-                  ? 'No jobs yet. Create one with New Job.'
-                  : 'No jobs match your search or filter.'}
-              </div>
-            )}
-          </div>
+      <Card className="min-w-0 overflow-hidden p-0">
+        <div className="max-h-[min(70vh,640px)] overflow-auto">
+          {isLoading && jobs.length === 0 ? (
+            <div className="flex items-center justify-center gap-3 px-6 py-20 text-sm text-[var(--text-secondary)]">
+              <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
+              <span>Loading jobs…</span>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="px-6 py-16 text-center text-sm text-[var(--text-secondary)]">
+              {jobs.length === 0
+                ? 'No jobs yet. Create one with New Job.'
+                : 'No jobs match your search or filter.'}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] table-fixed border-collapse text-sm">
+                <thead className="sticky top-0 z-[1] border-b border-[var(--border-color)] bg-[var(--surface-raised)]">
+                  <tr className="text-left text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                    <th className="px-4 py-3 sm:px-6 w-[38%]">Job</th>
+                    <th className="px-3 py-3 w-[14%]">Type</th>
+                    <th className="px-3 py-3 w-[16%]">Status</th>
+                    <th className="px-3 py-3 w-[14%]">Created</th>
+                    <th className="px-4 py-3 text-right sm:px-6 w-[18%]">Value</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border-color)] bg-[var(--surface-color)]">
+                  {filtered.map((job) => (
+                    <tr
+                      key={job.id}
+                      tabIndex={0}
+                      role="button"
+                      onClick={() => navigate(`/jobs/${job.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          navigate(`/jobs/${job.id}`);
+                        }
+                      }}
+                      className="cursor-pointer transition-colors hover:bg-[var(--surface-hover)] focus-visible:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-green)] focus-visible:ring-inset"
+                    >
+                      <td className="px-4 py-3 sm:px-6 align-middle">
+                        <div className="min-w-0 font-medium text-[var(--text-primary)]">
+                          Job #{String(job.job_number).padStart(4, '0')}
+                          {job.title ? (
+                            <span className="font-normal text-[var(--text-secondary)]"> — {job.title}</span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 align-middle text-[var(--text-secondary)]">
+                        {job.job_type || '—'}
+                      </td>
+                      <td className="px-3 py-3 align-middle">
+                        <Badge variant={getStatusBadgeVariant(job.status)}>{job.status}</Badge>
+                      </td>
+                      <td className="px-3 py-3 align-middle whitespace-nowrap text-[var(--text-secondary)]">
+                        {formatInVancouver(new Date(job.created_at), 'MMM d, yyyy')}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-[var(--text-primary)] sm:px-6 align-middle">
+                        {formatCurrency(job.total_price || 0)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }
