@@ -152,7 +152,11 @@ export default function InvoiceDetail() {
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const result = await mutations.createInvoice.mutateAsync({ ...createFormData });
+      const result = await mutations.createInvoice.mutateAsync({
+        ...createFormData,
+        template_design: createDesign,
+        custom_text: createCustomText,
+      });
       navigate(`/invoices/${result.invoice.id}`);
     } catch (err) {
       console.error('Failed to create invoice:', err);
@@ -323,6 +327,17 @@ export default function InvoiceDetail() {
         <div className="page-header">
           <h1 className="page-title">Create Invoice</h1>
         </div>
+
+        <NewInvoicePreviewCard
+          design={createDesign}
+          onDesignChange={setCreateDesign}
+          createFormData={createFormData}
+          customText={createCustomText}
+          onTitleChange={(v) => setCreateFormData({ ...createFormData, title: v })}
+          onPaymentTermsChange={(v) => setCreateFormData({ ...createFormData, payment_terms: v })}
+          onNotesChange={(v) => setCreateFormData({ ...createFormData, notes: v })}
+          onCustomTextChange={setCreateCustomText}
+        />
 
         <div className="mt-6 rounded-xl border border-border bg-card p-6 shadow-sm">
           <form onSubmit={handleCreateSubmit} className="space-y-5">
@@ -974,6 +989,83 @@ function InvoicePreviewCard({
       </div>
       <div className="mb-4">
         <QuoteDesignPicker value={design} onChange={handlePick} />
+      </div>
+      <InvoiceDesignPreview design={design} ctx={{ ...ctx, onFieldEdit: handleEdit }} />
+    </div>
+  );
+}
+
+/**
+ * Live preview card shown on the create-invoice flow. Mirrors what quotes get
+ * in CreateQuoteMode: pick a design, see the rendered invoice update as you
+ * fill the form. Click any text on the preview to edit it directly.
+ */
+function NewInvoicePreviewCard({
+  design,
+  onDesignChange,
+  createFormData,
+  customText,
+  onTitleChange,
+  onPaymentTermsChange,
+  onNotesChange,
+  onCustomTextChange,
+}: {
+  design: QuoteDesign;
+  onDesignChange: (next: QuoteDesign) => void;
+  createFormData: CreateFormData;
+  customText: Record<string, unknown>;
+  onTitleChange: (v: string) => void;
+  onPaymentTermsChange: (v: string) => void;
+  onNotesChange: (v: string) => void;
+  onCustomTextChange: (next: Record<string, unknown>) => void;
+}) {
+  const ctx = useMemo(
+    () =>
+      ctxFromInvoiceDraft({
+        title: createFormData.title || 'New invoice',
+        notes: createFormData.notes || null,
+        paymentTerms: createFormData.payment_terms || 'Net 30',
+        issueDate: createFormData.issue_date || null,
+        dueDate: createFormData.due_date || null,
+        account: null,
+        property: null,
+        lineItems: [],
+        taxRate: 0.05,
+        amountPaid: 0,
+        status: 'Draft',
+        sectionVisibility: {},
+        customText,
+      }),
+    [createFormData, customText]
+  );
+
+  const handleEdit = (field: string, value: string) => {
+    if (field === 'title') onTitleChange(value);
+    else if (field === 'paymentTerms') onPaymentTermsChange(value);
+    else if (field === 'contractDisclaimer' || field === 'notes') onNotesChange(value);
+    else if (
+      field === 'footer_quote' ||
+      field === 'accept_heading' ||
+      field === 'accept_body' ||
+      field === 'issued_by_heading' ||
+      field === 'issued_by_body'
+    ) {
+      onCustomTextChange({ ...customText, [field]: value || undefined });
+    }
+  };
+
+  return (
+    <div className="mt-6 rounded-xl border border-border bg-card p-6 shadow-sm">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h3 className="text-lg font-semibold">Live preview</h3>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {DESIGN_META.find((m) => m.id === design)?.label ?? design} — updates as you type. Click any text to edit.
+          </p>
+        </div>
+      </div>
+      <div className="mb-4">
+        <QuoteDesignPicker value={design} onChange={onDesignChange} />
       </div>
       <InvoiceDesignPreview design={design} ctx={{ ...ctx, onFieldEdit: handleEdit }} />
     </div>
