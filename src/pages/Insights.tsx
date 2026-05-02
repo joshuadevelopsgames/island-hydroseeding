@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react';
-import { BarChart3 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { BarChart3, Download } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { downloadXlsxWorkbook, type SheetSpec } from '@/lib/xlsxExport';
 import { useQuotes } from '@/hooks/useQuotes';
 import { useInvoices } from '@/hooks/useInvoices';
 import { useJobs } from '@/hooks/useJobs';
@@ -47,10 +50,23 @@ function inRange(iso: string | null | undefined, from: Date, to: Date): boolean 
   return t >= from.getTime() && t <= to.getTime();
 }
 
-function pct(curr: number, prev: number): number | null {
+/**
+ * Percent change from prior period to current. Returns null when the prior
+ * base is too small to draw a meaningful conclusion (avoids the misleading
+ * "↑ 100%" KPIs that pop up on a base of 1).
+ */
+function pct(curr: number, prev: number, opts: { minBase?: number } = {}): number | null {
+  const minBase = opts.minBase ?? 0;
   if (prev === 0 && curr === 0) return 0;
   if (prev === 0) return null;
+  if (Math.abs(prev) < minBase) return null;
   return ((curr - prev) / prev) * 100;
+}
+
+function fmtChange(c: number | null | undefined): string {
+  if (c == null) return '—';
+  const sign = c >= 0 ? '+' : '−';
+  return `${sign}${Math.abs(c).toFixed(0)}%`;
 }
 
 function avgDaysBetween(starts: (string | null | undefined)[], ends: (string | null | undefined)[]): number | null {
@@ -98,31 +114,80 @@ export default function Insights() {
     const paidCurr = newInvoicesCurr.reduce((s, i) => s + Number(i.amount_paid ?? 0), 0);
     const paidPrev = newInvoicesPrev.reduce((s, i) => s + Number(i.amount_paid ?? 0), 0);
 
+    // For count metrics, require ≥3 in the prior period before showing a %
+    // change. For dollar metrics, require ≥$100 prior. Below those thresholds
+    // the percent change is too noisy to be useful.
+    const COUNT_MIN = 3;
+    const MONEY_MIN = 100;
     return {
-      newQuotes: { curr: newQuotesCurr, change: pct(newQuotesCurr, newQuotesPrev) },
-      converted: { curr: convertedCurr, change: pct(convertedCurr, convertedPrev) },
-      newInvoices: { curr: newInvoicesCurr.length, change: pct(newInvoicesCurr.length, newInvoicesPrev.length) },
-      invoiced: { curr: invoicedCurr, change: pct(invoicedCurr, invoicedPrev) },
-      collected: { curr: paidCurr, change: pct(paidCurr, paidPrev) },
+      newQuotes: { curr: newQuotesCurr, change: pct(newQuotesCurr, newQuotesPrev, { minBase: COUNT_MIN }) },
+      converted: { curr: convertedCurr, change: pct(convertedCurr, convertedPrev, { minBase: COUNT_MIN }) },
+      newInvoices: {
+        curr: newInvoicesCurr.length,
+        change: pct(newInvoicesCurr.length, newInvoicesPrev.length, { minBase: COUNT_MIN }),
+      },
+      invoiced: { curr: invoicedCurr, change: pct(invoicedCurr, invoicedPrev, { minBase: MONEY_MIN }) },
+      collected: { curr: paidCurr, change: pct(paidCurr, paidPrev, { minBase: MONEY_MIN }) },
     };
   }, [quotes, invoices, from, to, prior.from, prior.to]);
 
-  // ─── Revenue YoY ──────────────────────────────────────────
+  // ─── Revenue: selected range vs same range one year ago ──
   const revenueYoY = useMemo(() => {
-    const now = new Date();
-    const thisYear = now.getFullYear();
-    const lastYear = thisYear - 1;
-    const monthly = (year: number) => {
-      const out = new Array(12).fill(0);
-      for (const inv of invoices) {
-        const d = new Date(inv.issue_date || inv.created_at);
-        if (d.getFullYear() !== year) continue;
-        out[d.getMonth()] += Number(inv.total ?? 0);
+    // Bucket monthly. The number of buckets covers the range — and the
+    // prior-year window is the same window shifted back 365 days, so the
+    // comparison is true like-for-like instead of always Jan–Dec.
+    const buildBuckets = (rFrom: Date, rTo: Date) => {
+      const out: { label: string; value: number; key: string }[] = [];
+      const cursor = new Date(rFrom.getFullYear(), rFrom.getMonth(), 1);
+      while (cursor <= rTo) {
+        const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+        out.push({
+          key,
+          label: cursor.toLocaleDateString('en-CA', { month: 'short', year: '2-digit' }),
+          value: 0,
+        });
+        cursor.setMonth(cursor.getMonth() + 1);
       }
       return out;
     };
-    return { thisYear, lastYear, current: monthly(thisYear), prev: monthly(lastYear) };
-  }, [invoices]);
+    const fillBuckets = (rFrom: Date, rTo: Date) => {
+      const buckets = buildBuckets(rFrom, rTo);
+      const idx = new Map(buckets.map((b, i) => [b.key, i]));
+      for (const inv of invoices) {
+        const d = new Date(inv.issue_date || inv.created_at);
+        if (d < rFrom || d > rTo) continue;
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const i = idx.get(key);
+        if (i != null) buckets[i].value += Number(inv.total ?? 0);
+      }
+      return buckets;
+    };
+
+    const priorFrom = new Date(from);
+    priorFrom.setFullYear(priorFrom.getFullYear() - 1);
+    const priorTo = new Date(to);
+    priorTo.setFullYear(priorTo.getFullYear() - 1);
+
+    const current = fillBuckets(from, to);
+    const prev = fillBuckets(priorFrom, priorTo);
+
+    // Pad whichever is shorter with zeros so the chart aligns side-by-side.
+    const len = Math.max(current.length, prev.length);
+    while (current.length < len) current.push({ key: `_${current.length}`, label: '', value: 0 });
+    while (prev.length < len) prev.push({ key: `_${prev.length}`, label: '', value: 0 });
+
+    const periodLabel = `${from.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })} – ${to.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    const priorLabel = `${priorFrom.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })} – ${priorTo.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+
+    return {
+      current,
+      prev,
+      periodLabel,
+      priorLabel,
+      thisTotal: current.reduce((s, b) => s + b.value, 0),
+      priorTotal: prev.reduce((s, b) => s + b.value, 0),
+    };
+  }, [invoices, from, to]);
 
   // ─── Cashflow ─────────────────────────────────────────────
   const cashflow = useMemo(() => {
@@ -140,19 +205,67 @@ export default function Insights() {
       .filter((q) => (q.status === 'Approved' || q.status === 'Converted') && !invoicedQuoteIds.has(q.id))
       .reduce((s, q) => s + Number(q.total ?? 0), 0);
 
-    // Top debtors — group unpaid balance by account
+    // Top debtors — group unpaid balance by account. Drop rows whose account
+    // can't be resolved (deleted account or missing link) and surface them
+    // separately so the user can audit instead of seeing "Unknown owes $X".
     const byAccount = new Map<string, number>();
+    let unattachedBalance = 0;
+    let unattachedCount = 0;
     for (const inv of unpaid) {
-      if (!inv.account_id) continue;
+      if (!inv.account_id) {
+        unattachedBalance += Number(inv.balance_due);
+        unattachedCount += 1;
+        continue;
+      }
       byAccount.set(inv.account_id, (byAccount.get(inv.account_id) ?? 0) + Number(inv.balance_due));
     }
-    const topDebtors = [...byAccount.entries()]
-      .map(([id, balance]) => ({ id, name: accountName(id), balance }))
-      .sort((a, b) => b.balance - a.balance)
-      .slice(0, 5);
+    const allRows = [...byAccount.entries()].map(([id, balance]) => ({ id, name: accountName(id), balance }));
+    const resolved = allRows.filter((r) => r.name !== 'Unknown');
+    const orphaned = allRows.filter((r) => r.name === 'Unknown');
+    for (const o of orphaned) {
+      unattachedBalance += o.balance;
+      unattachedCount += 1;
+    }
+    const topDebtors = resolved.sort((a, b) => b.balance - a.balance).slice(0, 5);
 
-    return { outstanding, avgDaysToPaid, projected, topDebtors, unpaidCount: unpaid.length };
-  }, [invoices, quotes, from, to, accountName]);
+    // Projected income split using the linked job's start_date when available.
+    const invoicedQuoteIds2 = invoicedQuoteIds; // alias for readability below
+    const acceptedNotInvoiced = quotes.filter(
+      (q) => (q.status === 'Approved' || q.status === 'Converted') && !invoicedQuoteIds2.has(q.id)
+    );
+    const jobStartByQuote = new Map<string, string>();
+    type J = { quote_id?: string | null; start_date?: string | null };
+    for (const j of jobs as J[]) {
+      if (j.quote_id && j.start_date) jobStartByQuote.set(j.quote_id, j.start_date);
+    }
+    const now = Date.now();
+    const day = 86400000;
+    const horizons = { today: 0, in7: 0, in30: 0, later: 0, unscheduled: 0 };
+    for (const q of acceptedNotInvoiced) {
+      const start = jobStartByQuote.get(q.id);
+      const total = Number(q.total ?? 0);
+      if (!start) {
+        horizons.unscheduled += total;
+        continue;
+      }
+      const diffDays = (new Date(start).getTime() - now) / day;
+      if (diffDays <= 1) horizons.today += total;
+      else if (diffDays <= 7) horizons.in7 += total;
+      else if (diffDays <= 30) horizons.in30 += total;
+      else horizons.later += total;
+    }
+
+    return {
+      outstanding,
+      avgDaysToPaid,
+      projected,
+      topDebtors,
+      unpaidCount: unpaid.length,
+      unattachedBalance,
+      unattachedCount,
+      horizons,
+    };
+  }, [invoices, quotes, jobs, from, to, accountName]);
 
   // ─── Lead conversion ──────────────────────────────────────
   const leadConv = useMemo(() => {
@@ -235,8 +348,11 @@ export default function Insights() {
     const total = inRangeJobs.length;
     const active = list.filter((j) => j.status && j.status !== 'Completed' && j.status !== 'Archived').length;
 
+    // Treat null/undefined is_recurring as Unknown so jobs created before
+    // migration 020 don't silently inflate the One-off bucket.
     const recurring = list.filter((j) => j.is_recurring === true).length;
-    const oneOff = list.filter((j) => j.is_recurring !== true).length;
+    const oneOff = list.filter((j) => j.is_recurring === false).length;
+    const unknownRecurrence = list.filter((j) => j.is_recurring == null).length;
 
     // Average job value: average of (linked quote's total) for jobs created in range
     const quoteTotalById = new Map<string, number>();
@@ -246,8 +362,88 @@ export default function Insights() {
       .filter((v): v is number => typeof v === 'number' && v > 0);
     const avgValue = valuedJobs.length === 0 ? null : valuedJobs.reduce((s, n) => s + n, 0) / valuedJobs.length;
 
-    return { total, active, recurring, oneOff, avgValue };
+    return { total, active, recurring, oneOff, unknownRecurrence, avgValue };
   }, [jobs, quotes, from, to]);
+
+  // ─── XLSX export — one sheet per dashboard section ──────────
+  const handleExport = () => {
+    const periodLabel = rangeLabel(range);
+    const sheets: SheetSpec[] = [
+      {
+        name: 'Overview',
+        headers: ['Metric', 'Value', 'Change vs prior'],
+        rows: [
+          ['Period', periodLabel, ''],
+          ['New quotes', overview.newQuotes.curr, fmtChange(overview.newQuotes.change)],
+          ['Converted quotes', overview.converted.curr, fmtChange(overview.converted.change)],
+          ['New invoices', overview.newInvoices.curr, fmtChange(overview.newInvoices.change)],
+          ['Invoiced ($)', overview.invoiced.curr, fmtChange(overview.invoiced.change)],
+          ['Collected ($)', overview.collected.curr, fmtChange(overview.collected.change)],
+        ],
+      },
+      {
+        name: 'Revenue',
+        headers: ['Month', `Current (${revenueYoY.periodLabel})`, `Prior (${revenueYoY.priorLabel})`],
+        rows: revenueYoY.current.map((c, i) => [c.label, c.value, revenueYoY.prev[i]?.value ?? 0]),
+      },
+      {
+        name: 'Lead conversion',
+        headers: ['Metric', 'Value'],
+        rows: [
+          ['Avg days request → quote', leadConv.reqToQuoteDays == null ? '—' : Number(leadConv.reqToQuoteDays.toFixed(2))],
+          ['Avg days quote → accepted', leadConv.quoteToApprovedDays == null ? '—' : Number(leadConv.quoteToApprovedDays.toFixed(2))],
+          ['Requests in period', leadConv.funnel.requests],
+          ['Quotes sent in period', leadConv.funnel.quotes],
+          ['Jobs created in period', leadConv.funnel.jobs],
+        ],
+      },
+      {
+        name: 'Cashflow',
+        headers: ['Metric', 'Value'],
+        rows: [
+          ['Outstanding ($)', cashflow.outstanding],
+          ['Unpaid invoice count', cashflow.unpaidCount],
+          ['Avg time to paid (days)', cashflow.avgDaysToPaid == null ? '—' : Number(cashflow.avgDaysToPaid.toFixed(2))],
+          ['Projected income ($)', cashflow.projected],
+        ],
+      },
+      {
+        name: 'Top open balances',
+        headers: ['Account', 'Balance ($)'],
+        rows: cashflow.topDebtors.map((d) => [d.name, d.balance]),
+      },
+      {
+        name: 'Quotes',
+        headers: ['Metric', 'Value'],
+        rows: [
+          ['Sent (count)', funnel.sent],
+          ['Sent ($)', funnel.sentValue],
+          ['Accepted (count)', funnel.approved],
+          ['Accepted ($)', funnel.approvedValue],
+          ['Invoiced (count)', funnel.converted],
+          ['Conversion rate (%)', Number(funnel.conversionRate.toFixed(2))],
+        ],
+      },
+      {
+        name: 'Quote value by week',
+        headers: ['Week starting', 'Sent ($)', 'Accepted ($)'],
+        rows: funnel.weeks.map((w) => [w.label, w.sent, w.approved]),
+      },
+      {
+        name: 'Jobs',
+        headers: ['Metric', 'Value'],
+        rows: [
+          ['New jobs in period', jobsSummary.total],
+          ['Active jobs (now)', jobsSummary.active],
+          ['Recurring (count)', jobsSummary.recurring],
+          ['One-off (count)', jobsSummary.oneOff],
+          ['Average job value ($)', jobsSummary.avgValue == null ? '—' : Number(jobsSummary.avgValue.toFixed(2))],
+        ],
+      },
+    ];
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadXlsxWorkbook(`insights-${periodLabel.toLowerCase().replace(/\s+/g, '-')}-${stamp}`, sheets);
+  };
 
   return (
     <div className="page">
@@ -261,7 +457,20 @@ export default function Insights() {
             How the business is moving. Numbers update from your requests, quotes, jobs, invoices, and payments.
           </p>
         </div>
-        <RangePicker value={range} onChange={setRange} />
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <RangePicker value={range} onChange={setRange} />
+          <Button type="button" variant="secondary" size="sm" onClick={handleExport}>
+            <Download className="mr-2 h-4 w-4" />
+            Export Excel
+          </Button>
+        </div>
+      </div>
+
+      {/* Sticky hero strip — three numbers the user looks at most. */}
+      <div className="ins-hero">
+        <HeroTile label="Outstanding A/R" value={CAD.format(cashflow.outstanding)} tone="warn" />
+        <HeroTile label="Conversion rate" value={`${funnel.conversionRate.toFixed(0)}%`} tone="ok" />
+        <HeroTile label={`Collected · ${rangeLabel(range)}`} value={CAD.format(overview.collected.curr)} tone="ok" />
       </div>
 
       <Section title="Overview" subtitle={rangeLabel(range)}>
@@ -274,17 +483,15 @@ export default function Insights() {
         </div>
       </Section>
 
-      <Section title="Revenue" subtitle="By month, this year vs last">
+      <Section title="Revenue" subtitle={`${revenueYoY.periodLabel} vs ${revenueYoY.priorLabel}`}>
         <div className="ins-yoy-totals">
           <div>
-            <div className="ins-yoy-num">{CAD.format(revenueYoY.current.reduce((s, n) => s + n, 0))}</div>
-            <div className="ins-yoy-lbl"><span className="ins-swatch ins-swatch--curr" /> {revenueYoY.thisYear}</div>
+            <div className="ins-yoy-num">{CAD.format(revenueYoY.thisTotal)}</div>
+            <div className="ins-yoy-lbl"><span className="ins-swatch ins-swatch--curr" /> {revenueYoY.periodLabel}</div>
           </div>
           <div>
-            <div className="ins-yoy-num ins-yoy-num--muted">
-              {CAD.format(revenueYoY.prev.reduce((s, n) => s + n, 0))}
-            </div>
-            <div className="ins-yoy-lbl"><span className="ins-swatch ins-swatch--prev" /> {revenueYoY.lastYear}</div>
+            <div className="ins-yoy-num ins-yoy-num--muted">{CAD.format(revenueYoY.priorTotal)}</div>
+            <div className="ins-yoy-lbl"><span className="ins-swatch ins-swatch--prev" /> {revenueYoY.priorLabel}</div>
           </div>
         </div>
         <YoYBars current={revenueYoY.current} prev={revenueYoY.prev} />
@@ -338,6 +545,22 @@ export default function Insights() {
           <KpiTile label="Projected income" value={CAD.format(cashflow.projected)} sub="Accepted quotes not yet invoiced" />
         </div>
 
+        {/* Projected income split by horizon (uses linked job's start_date) */}
+        {(cashflow.horizons.today + cashflow.horizons.in7 + cashflow.horizons.in30 + cashflow.horizons.later + cashflow.horizons.unscheduled) > 0 && (
+          <div className="ins-horizons">
+            <span className="ins-horizons-label">Projected timing</span>
+            <span className="ins-horizon"><b>{CAD.format(cashflow.horizons.today)}</b> due today</span>
+            <span className="ins-horizon"><b>{CAD.format(cashflow.horizons.in7)}</b> within 7 days</span>
+            <span className="ins-horizon"><b>{CAD.format(cashflow.horizons.in30)}</b> within 30 days</span>
+            <span className="ins-horizon"><b>{CAD.format(cashflow.horizons.later)}</b> later</span>
+            {cashflow.horizons.unscheduled > 0 && (
+              <span className="ins-horizon ins-horizon--muted">
+                <b>{CAD.format(cashflow.horizons.unscheduled)}</b> unscheduled
+              </span>
+            )}
+          </div>
+        )}
+
         {cashflow.topDebtors.length > 0 && (
           <div className="ins-debtors">
             <div className="ins-debtors-head">
@@ -345,11 +568,18 @@ export default function Insights() {
               <span>Balance</span>
             </div>
             {cashflow.topDebtors.map((d) => (
-              <div key={d.id} className="ins-debtor-row">
+              <Link key={d.id} to={`/crm/${d.id}`} className="ins-debtor-row ins-debtor-row--link">
                 <span className="ins-debtor-name">{d.name}</span>
                 <span className="ins-debtor-bal">{CAD.format(d.balance)}</span>
-              </div>
+              </Link>
             ))}
+            {cashflow.unattachedCount > 0 && (
+              <div className="ins-debtor-footnote">
+                {cashflow.unattachedCount === 1 ? '1 invoice' : `${cashflow.unattachedCount} invoices`}
+                {' '}
+                ({CAD.format(cashflow.unattachedBalance)}) hidden — fix the account link to include them.
+              </div>
+            )}
           </div>
         )}
       </Section>
@@ -405,6 +635,11 @@ export default function Insights() {
             <div className="ins-legend">
               <div><span className="ins-swatch ins-swatch--curr" /> Recurring · {jobsSummary.recurring}</div>
               <div><span className="ins-swatch ins-swatch--prev" /> One-off · {jobsSummary.oneOff}</div>
+              {jobsSummary.unknownRecurrence > 0 && (
+                <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  · {jobsSummary.unknownRecurrence} unclassified
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -448,6 +683,15 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
   );
 }
 
+function HeroTile({ label, value, tone }: { label: string; value: string; tone: 'ok' | 'warn' }) {
+  return (
+    <div className={`ins-hero-tile ins-hero-tile--${tone}`}>
+      <div className="ins-hero-label">{label}</div>
+      <div className="ins-hero-value">{value}</div>
+    </div>
+  );
+}
+
 function KpiTile({ label, value, change, sub }: { label: string; value: string; change?: number | null; sub?: string }) {
   const changeDisplay =
     change == null ? null : (
@@ -467,31 +711,51 @@ function KpiTile({ label, value, change, sub }: { label: string; value: string; 
   );
 }
 
-function YoYBars({ current, prev }: { current: number[]; prev: number[] }) {
-  const max = Math.max(1, ...current, ...prev);
-  const months = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+function YoYBars({
+  current,
+  prev,
+}: {
+  current: { label: string; value: number; key: string }[];
+  prev: { label: string; value: number; key: string }[];
+}) {
+  const len = Math.max(current.length, prev.length, 1);
+  const max = Math.max(1, ...current.map((c) => c.value), ...prev.map((p) => p.value));
   const W = 720;
   const H = 220;
   const padX = 28;
   const padY = 28;
   const innerW = W - padX * 2;
   const innerH = H - padY * 2;
-  const groupW = innerW / 12;
-  const barW = (groupW - 6) / 2;
+  const groupW = innerW / len;
+  const barW = Math.max(3, (groupW - 6) / 2);
+  // Skip every-other label when there are too many buckets to fit cleanly.
+  const labelEvery = len > 8 ? 2 : 1;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="ins-yoy-svg" role="img" aria-label="Monthly revenue, this year vs last">
+    <svg viewBox={`0 0 ${W} ${H}`} className="ins-yoy-svg" role="img" aria-label="Revenue, current period vs prior">
       <line x1={padX} y1={padY + innerH} x2={W - padX} y2={padY + innerH} stroke="var(--border-color)" />
       {current.map((c, i) => {
-        const p = prev[i] ?? 0;
+        const p = prev[i]?.value ?? 0;
         const x = padX + i * groupW + 3;
-        const cH = (c / max) * innerH;
+        const cH = (c.value / max) * innerH;
         const pH = (p / max) * innerH;
+        const showLabel = i % labelEvery === 0;
         return (
-          <g key={i}>
+          <g key={c.key || i}>
             <rect x={x} y={padY + innerH - pH} width={barW} height={pH} fill="var(--accent-soft, #d9e9dd)" rx="2" />
-            <rect x={x + barW + 2} y={padY + innerH - cH} width={barW} height={cH} fill="var(--primary-green, #2a7a3a)" rx="2" />
-            <text x={x + barW + 1} y={H - 8} textAnchor="middle" fontSize="10" fill="var(--text-muted)">{months[i]}</text>
+            <rect
+              x={x + barW + 2}
+              y={padY + innerH - cH}
+              width={barW}
+              height={cH}
+              fill="var(--primary-green, #2a7a3a)"
+              rx="2"
+            />
+            {showLabel && (
+              <text x={x + barW + 1} y={H - 8} textAnchor="middle" fontSize="10" fill="var(--text-muted)">
+                {c.label}
+              </text>
+            )}
           </g>
         );
       })}
@@ -586,6 +850,26 @@ const INSIGHTS_CSS = `
   .ins-range-btn.is-active { background: var(--primary-green); color: #fff; }
   .ins-range-btn:hover:not(.is-active) { background: var(--surface-hover); color: var(--text-primary); }
 
+  .ins-hero {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    padding: 14px;
+    margin-bottom: 16px;
+    background: linear-gradient(180deg, var(--surface-color) 0%, var(--bg-secondary, #fafafa) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    backdrop-filter: blur(8px);
+  }
+  .ins-hero-tile { padding: 6px 10px; border-left: 3px solid var(--border-color); }
+  .ins-hero-tile--ok { border-left-color: var(--primary-green, #2a7a3a); }
+  .ins-hero-tile--warn { border-left-color: #d97706; }
+  .ins-hero-label { font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); }
+  .ins-hero-value { font-size: 22px; font-weight: 700; color: var(--text-primary); margin-top: 2px; line-height: 1.2; }
+
   .ins-section { background: var(--surface-color); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px 22px; margin-bottom: 20px; }
   .ins-section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
   .ins-section-title { font-size: 18px; font-weight: 600; margin: 0; }
@@ -635,10 +919,20 @@ const INSIGHTS_CSS = `
 
   .ins-debtors { margin-top: 16px; padding: 12px 14px; background: var(--bg-secondary, #fafafa); border: 1px solid var(--border-color); border-radius: 8px; }
   .ins-debtors-head { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); padding-bottom: 8px; border-bottom: 1px solid var(--border-color); }
-  .ins-debtor-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px dashed var(--border-color); }
-  .ins-debtor-row:last-child { border-bottom: 0; }
+  .ins-debtor-row { display: flex; justify-content: space-between; padding: 10px 8px; font-size: 13px; border-bottom: 1px dashed var(--border-color); border-radius: 4px; }
+  .ins-debtor-row:last-of-type { border-bottom: 0; }
+  .ins-debtor-row--link { text-decoration: none; transition: background 0.12s; cursor: pointer; }
+  .ins-debtor-row--link:hover { background: rgba(42, 122, 58, 0.06); }
+  .ins-debtor-row--link::after { content: '›'; color: var(--text-muted); margin-left: 8px; }
   .ins-debtor-name { color: var(--text-primary); }
   .ins-debtor-bal { font-family: 'JetBrains Mono', ui-monospace, monospace; color: #b03337; font-weight: 600; }
+  .ins-debtor-footnote { padding-top: 10px; margin-top: 8px; border-top: 1px solid var(--border-color); font-size: 11px; color: var(--text-muted); font-style: italic; }
+
+  .ins-horizons { display: flex; flex-wrap: wrap; gap: 14px; align-items: baseline; padding: 10px 14px; margin-top: 12px; background: rgba(42, 122, 58, 0.04); border-left: 3px solid var(--primary-green, #2a7a3a); border-radius: 6px; font-size: 12px; }
+  .ins-horizons-label { font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); margin-right: 8px; }
+  .ins-horizon { color: var(--text-primary); }
+  .ins-horizon b { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  .ins-horizon--muted { color: var(--text-muted); }
 
   .ins-jobs-row { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 16px; align-items: stretch; }
   @media (max-width: 720px) { .ins-jobs-row { grid-template-columns: 1fr; } }

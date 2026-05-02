@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Download, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { fetchReportJson, rowsToCsv } from '@/lib/reportsApi';
+import { fetchReportJson } from '@/lib/reportsApi';
 import { formatInVancouver } from '@/lib/vancouverTime';
+import { downloadXlsx } from '@/lib/xlsxExport';
 
 const REPORTS = [
   { id: 'aged_receivables', label: 'Aged receivables' },
@@ -15,15 +16,7 @@ const REPORTS = [
 
 type ReportId = (typeof REPORTS)[number]['id'];
 
-function downloadCsv(filename: string, csv: string) {
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+const today = () => formatInVancouver(new Date(), 'yyyy-MM-dd');
 
 export default function Reports() {
   const [active, setActive] = useState<ReportId>('aged_receivables');
@@ -72,19 +65,63 @@ export default function Reports() {
     []
   );
 
-  const exportAged = () => {
-    const rows = aged.data?.rows ?? [];
-    const headers = [
-      'invoice_number',
-      'title',
-      'account_name',
-      'due_date',
-      'balance_due',
-      'aging_bucket',
-      'days_past_due',
-      'status',
-    ];
-    downloadCsv(`aged-receivables-${formatInVancouver(new Date(), 'yyyy-MM-dd')}.csv`, rowsToCsv(headers, rows));
+  /** Build [headers, rows] for the active report — used by the XLSX export. */
+  const exportTable = useMemo(() => {
+    if (active === 'aged_receivables') {
+      const data = aged.data?.rows ?? [];
+      return {
+        headers: ['Invoice #', 'Title', 'Account', 'Due', 'Balance', 'Bucket', 'Days late', 'Status'],
+        rows: data.map((r) => [
+          (r.invoice_number as string | number | null) ?? null,
+          (r.title as string | null) ?? null,
+          (r.account_name as string | null) ?? null,
+          (r.due_date as string | null) ?? null,
+          Number(r.balance_due ?? 0),
+          (r.aging_bucket as string | null) ?? null,
+          Number(r.days_past_due ?? 0),
+          (r.status as string | null) ?? null,
+        ]),
+        filename: `aged-receivables-${today()}`,
+      };
+    }
+    if (active === 'projected_income') {
+      const data = projected.data?.rows ?? [];
+      return {
+        headers: ['Due month', 'Open balance'],
+        rows: data.map((r) => [r.month, Number(r.amount)]),
+        filename: `projected-income-${today()}`,
+      };
+    }
+    if (active === 'lead_source_revenue') {
+      const data = leadSrc.data?.rows ?? [];
+      return {
+        headers: ['Lead source', 'Paid revenue'],
+        rows: data.map((r) => [r.name, Number(r.amount)]),
+        filename: `lead-source-revenue-${today()}`,
+      };
+    }
+    if (active === 'client_reengagement') {
+      const data = reengage.data?.rows ?? [];
+      return {
+        headers: ['Account'],
+        rows: data.map((r) => [r.name]),
+        filename: `client-reengagement-${today()}`,
+      };
+    }
+    if (active === 'products_services_usage') {
+      const data = products.data?.rows ?? [];
+      return {
+        headers: ['Product / service', 'Quantity', 'Revenue'],
+        rows: data.map((r) => [r.product_service_name, Number(r.quantity), Number(r.revenue)]),
+        filename: `products-usage-${today()}`,
+      };
+    }
+    return { headers: [], rows: [] as (string | number | null)[][], filename: 'report' };
+  }, [active, aged.data, projected.data, leadSrc.data, reengage.data, products.data]);
+
+  const handleExport = () => {
+    if (exportTable.rows.length === 0) return;
+    downloadXlsx(exportTable.filename, exportTable.headers, exportTable.rows);
   };
 
   return (
@@ -116,12 +153,16 @@ export default function Reports() {
           <h1 className="text-xl font-bold text-[var(--text-primary)]">
             {REPORTS.find((r) => r.id === active)?.label}
           </h1>
-          {active === 'aged_receivables' && (
-            <Button type="button" variant="secondary" size="sm" onClick={exportAged} disabled={!aged.data?.rows?.length}>
-              <Download className="mr-2 h-4 w-4" />
-              Export CSV
-            </Button>
-          )}
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={handleExport}
+            disabled={exportTable.rows.length === 0}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export Excel
+          </Button>
         </div>
 
         {active === 'aged_receivables' && (

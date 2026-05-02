@@ -41,15 +41,3 @@ export async function fetchReportJson<T>(action: string, params?: Record<string,
   return readJson<T>(r);
 }
 
-export function rowsToCsv(headers: string[], rows: Record<string, unknown>[]): string {
-  const esc = (v: unknown) => {
-    const s = String(v ?? '');
-    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
-  const lines = [headers.join(',')];
-  for (const row of rows) {
-    lines.push(headers.map((h) => esc(row[h])).join(','));
-  }
-  return lines.join('\n');
-}

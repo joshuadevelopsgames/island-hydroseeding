@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEventHandler } from 'rea
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowUpDown, Building2, Download, Loader2, Search } from 'lucide-react';
+import { downloadXlsx } from '@/lib/xlsxExport';
 import { MorphingPlusX } from '@/components/MorphingPlusX';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -55,63 +56,54 @@ function cad(n: number) {
   return new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(n);
 }
 
-function accountsToCsv(
-  accounts: {
-    name: string;
-    company: string | null;
-    account_type: string;
-    status: string;
-    account_lifecycle?: string;
-    lead_source_name?: string | null;
-    tags?: { name: string }[];
-    lifetime_value?: number;
-    current_balance?: number;
-    phone: string | null;
-    email: string | null;
-    address: string | null;
-    notes: string | null;
-  }[]
-) {
+type AccountForExport = {
+  name: string;
+  company: string | null;
+  account_type: string;
+  status: string;
+  account_lifecycle?: string;
+  lead_source_name?: string | null;
+  tags?: { name: string }[];
+  lifetime_value?: number;
+  current_balance?: number;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  notes: string | null;
+};
+
+function accountsToTable(accounts: AccountForExport[]): { headers: string[]; rows: (string | number | null)[][] } {
   const headers = [
-    'name',
-    'company',
-    'account_type',
-    'status',
-    'lifecycle',
-    'lead_source',
-    'tags',
-    'lifetime_value',
-    'current_balance',
-    'phone',
-    'email',
-    'address',
-    'notes',
+    'Name',
+    'Company',
+    'Type',
+    'Status',
+    'Lifecycle',
+    'Lead source',
+    'Tags',
+    'Lifetime value',
+    'Current balance',
+    'Phone',
+    'Email',
+    'Address',
+    'Notes',
   ];
-  const escape = (v: string | null | undefined) => {
-    const s = String(v ?? '');
-    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
-  const lines = [headers.join(',')];
-  for (const a of accounts) {
-    const row = {
-      name: a.name,
-      company: a.company,
-      account_type: a.account_type,
-      status: a.status,
-      lifecycle: a.account_lifecycle ?? '',
-      lead_source: a.lead_source_name ?? '',
-      tags: (a.tags ?? []).map((t) => t.name).join('; '),
-      lifetime_value: String(a.lifetime_value ?? ''),
-      current_balance: String(a.current_balance ?? ''),
-      phone: a.phone,
-      email: a.email,
-      address: a.address,
-      notes: a.notes,
-    };
-    lines.push(headers.map((h) => escape(row[h as keyof typeof row] as string | null)).join(','));
-  }
-  return lines.join('\n');
+  const rows = accounts.map((a) => [
+    a.name ?? null,
+    a.company ?? null,
+    a.account_type ?? null,
+    a.status ?? null,
+    a.account_lifecycle ?? null,
+    a.lead_source_name ?? null,
+    (a.tags ?? []).map((t) => t.name).join('; ') || null,
+    typeof a.lifetime_value === 'number' ? a.lifetime_value : null,
+    typeof a.current_balance === 'number' ? a.current_balance : null,
+    a.phone ?? null,
+    a.email ?? null,
+    a.address ?? null,
+    a.notes ?? null,
+  ] as (string | number | null)[]);
+  return { headers, rows };
 }
 
 /** Status column: pill + dot (reference: mint Active, sky Lead) */
@@ -284,14 +276,9 @@ export default function CRM() {
     return sortedAccounts(next, sortBy);
   }, [accounts, search, typeFilter, statusFilter, lifecycleFilter, leadSourceFilter, tagFilter, sortBy]);
 
-  const exportCsv = () => {
-    const blob = new Blob([accountsToCsv(filtered)], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `crm-accounts-${formatInVancouver(new Date(), 'yyyy-MM-dd')}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const exportXlsx = () => {
+    const { headers, rows } = accountsToTable(filtered);
+    downloadXlsx(`crm-accounts-${formatInVancouver(new Date(), 'yyyy-MM-dd')}`, headers, rows);
   };
 
   return (
@@ -310,7 +297,7 @@ export default function CRM() {
             type="button"
             className="btn btn-secondary"
             disabled={filtered.length === 0}
-            onClick={exportCsv}
+            onClick={exportXlsx}
           >
             <Download size={16} aria-hidden /> Export
           </button>
