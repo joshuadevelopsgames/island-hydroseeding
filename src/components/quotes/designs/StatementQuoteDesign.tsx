@@ -10,6 +10,8 @@ const STYLE = `
   .sq-side::before{content:'';position:absolute;top:0;right:0;bottom:0;width:1px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.2) 20%,rgba(255,255,255,.2) 80%,transparent);}
   .sq-side-mark{font-family:'Fraunces',serif;font-style:italic;font-size:52px;font-weight:400;letter-spacing:-.04em;line-height:.85;}
   .sq-side-mark::after{content:'';display:block;width:32px;height:2px;background:#fff;margin-top:12px;}
+  .sq-side-logo{display:block;max-width:140px;max-height:60px;width:auto;height:auto;margin-bottom:8px;filter:brightness(0) invert(1);}
+  .sq-side-logo + .sq-side-mark::after{margin-top:8px;}
   .sq-side-name{font-size:11px;letter-spacing:3px;text-transform:uppercase;font-weight:600;margin-top:14px;}
   .sq-side-name span{display:block;font-weight:400;opacity:.75;margin-top:2px;letter-spacing:2px;font-size:9px;}
   .sq-side-vert{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:4px;text-transform:uppercase;writing-mode:vertical-rl;transform:rotate(180deg);opacity:.8;margin:24px 0;}
@@ -115,6 +117,9 @@ export default function StatementQuoteDesign({ ctx }: { ctx: DesignContext }) {
 
       <aside className="sq-side">
         <div>
+          {ctx.tenant.logoUrl && (
+            <img className="sq-side-logo" src={ctx.tenant.logoUrl} alt={ctx.tenant.name} />
+          )}
           <div className="sq-side-mark">
             {tenantInitial}
             <span style={{ fontStyle: 'italic' }}>·</span>

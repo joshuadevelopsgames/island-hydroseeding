@@ -17,7 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { useQuoteDetail, useProducts, useTemplates, useQuotesMutations, useAccountProperties } from '@/hooks/useQuotes';
+import { useQuoteDetail, useProducts, useTemplates, useQuotesMutations, useAccountProperties, useQuotes } from '@/hooks/useQuotes';
 import { useCrmAccounts } from '@/hooks/useCrm';
 import { toast } from 'sonner';
 import { formatErrorForUi } from '@/lib/quotesApi';
@@ -59,7 +59,12 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
   const { data: accounts } = useCrmAccounts();
   const { data: products } = useProducts();
   const { data: templates } = useTemplates();
+  const { data: existingQuotes } = useQuotes();
   const { createQuote } = useQuotesMutations();
+  const nextQuoteNumber = useMemo(() => {
+    if (!existingQuotes || existingQuotes.length === 0) return 1;
+    return Math.max(...existingQuotes.map((q) => Number(q.quote_number) || 0)) + 1;
+  }, [existingQuotes]);
 
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const { data: properties } = useAccountProperties(selectedAccountId);
@@ -348,6 +353,7 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
               sectionVisibility={sectionVisibility}
               customText={customText}
               clientBranding={clientBranding}
+              quoteNumber={nextQuoteNumber}
             />
           </CardContent>
         )}
@@ -1408,12 +1414,14 @@ type NewQuotePreviewProps = {
   sectionVisibility: QuoteSectionVisibility;
   customText: QuoteCustomText;
   clientBranding: ReturnType<typeof resolveClientBranding>;
+  quoteNumber: number;
 };
 
 function NewQuotePreviewPane(props: NewQuotePreviewProps) {
   const ctx = useMemo(
     () =>
       ctxFromDraft({
+        quoteNumber: props.quoteNumber,
         title: props.title || 'New quote',
         introduction: props.introduction || null,
         contractDisclaimer: props.contractDisclaimer || null,
