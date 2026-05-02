@@ -354,6 +354,10 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
               customText={customText}
               clientBranding={clientBranding}
               quoteNumber={nextQuoteNumber}
+              onTitleChange={setTitle}
+              onIntroductionChange={setIntroduction}
+              onContractDisclaimerChange={setContractDisclaimer}
+              onCustomTextChange={setCustomTextOverride}
             />
           </CardContent>
         )}
@@ -1415,9 +1419,30 @@ type NewQuotePreviewProps = {
   customText: QuoteCustomText;
   clientBranding: ReturnType<typeof resolveClientBranding>;
   quoteNumber: number;
+  onTitleChange?: (v: string) => void;
+  onIntroductionChange?: (v: string) => void;
+  onContractDisclaimerChange?: (v: string) => void;
+  onCustomTextChange?: (next: QuoteCustomText) => void;
 };
 
 function NewQuotePreviewPane(props: NewQuotePreviewProps) {
+  const handleEdit = (field: string, value: string) => {
+    if (field === 'title') props.onTitleChange?.(value);
+    else if (field === 'introduction') props.onIntroductionChange?.(value);
+    else if (field === 'contractDisclaimer') props.onContractDisclaimerChange?.(value);
+    else if (
+      field === 'footer_quote' ||
+      field === 'accept_heading' ||
+      field === 'accept_body' ||
+      field === 'issued_by_heading' ||
+      field === 'issued_by_body'
+    ) {
+      const next = { ...(props.customText || {}) } as QuoteCustomText & Record<string, unknown>;
+      (next as Record<string, unknown>)[field] = value || undefined;
+      props.onCustomTextChange?.(next);
+    }
+  };
+
   const ctx = useMemo(
     () =>
       ctxFromDraft({
@@ -1441,7 +1466,7 @@ function NewQuotePreviewPane(props: NewQuotePreviewProps) {
       }),
     [props]
   );
-  return <QuoteDesignPreview design={props.templateDesign} ctx={ctx} />;
+  return <QuoteDesignPreview design={props.templateDesign} ctx={{ ...ctx, onFieldEdit: handleEdit }} />;
 }
 
 /** Live preview for an already-saved quote; used in ViewEditQuoteMode. */

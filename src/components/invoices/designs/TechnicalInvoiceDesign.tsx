@@ -1,4 +1,5 @@
 import { fmtNum, isVisible } from '@/components/quotes/designs/types';
+import EditableText from '@/components/quotes/designs/EditableText';
 import type { InvoiceDesignContext } from './types';
 
 const STYLE = `
@@ -163,8 +164,16 @@ export default function TechnicalInvoiceDesign({ ctx }: { ctx: InvoiceDesignCont
               <h3>§ 02 — Remittance</h3>
               {ctx.tenant.email && <div className="ti-pay-row"><span>E-transfer</span><span>{ctx.tenant.email}</span></div>}
               {ctx.tenant.phone && <div className="ti-pay-row"><span>Office</span><span>{ctx.tenant.phone}</span></div>}
-              {ctx.contractDisclaimer && (
-                <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--muted)', whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>{ctx.contractDisclaimer}</div>
+              {(ctx.contractDisclaimer || ctx.onFieldEdit) && (
+                <EditableText
+                  as="div"
+                  multiline
+                  field="contractDisclaimer"
+                  value={ctx.contractDisclaimer ?? ''}
+                  onEdit={ctx.onFieldEdit}
+                  placeholder="Add notes / terms…"
+                  style={{ marginTop: '12px', fontSize: '11px', color: 'var(--muted)', whiteSpace: 'pre-wrap', lineHeight: 1.55 }}
+                />
               )}
             </div>
           )}

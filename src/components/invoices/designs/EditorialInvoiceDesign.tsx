@@ -1,4 +1,5 @@
 import { fmtMoney, isVisible } from '@/components/quotes/designs/types';
+import EditableText from '@/components/quotes/designs/EditableText';
 import type { InvoiceDesignContext } from './types';
 
 const STYLE = `
@@ -104,7 +105,7 @@ export default function EditorialInvoiceDesign({ ctx }: { ctx: InvoiceDesignCont
       <div className="ei-title-row">
         <div>
           <h1 className="ei-title">Invoice <em>№ {ctx.invoiceNumber}</em></h1>
-          <div className="ei-title-sub">{ctx.title || 'Invoice for services rendered'}</div>
+          <EditableText as="div" field="title" value={ctx.title || ''} onEdit={ctx.onFieldEdit} placeholder="Invoice for services rendered" className="ei-title-sub" />
         </div>
         <div className="ei-due">
           <div className={'ei-due-pill ' + (ctx.isOverdue ? 'overdue' : '')}>
@@ -207,10 +208,16 @@ export default function EditorialInvoiceDesign({ ctx }: { ctx: InvoiceDesignCont
                 <div className="ei-pay-row"><span>Auto-deposit</span><span>enabled</span></div>
               </div>
             )}
-            {ctx.contractDisclaimer && (
-              <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                {ctx.contractDisclaimer}
-              </div>
+            {(ctx.contractDisclaimer || ctx.onFieldEdit) && (
+              <EditableText
+                as="div"
+                multiline
+                field="contractDisclaimer"
+                value={ctx.contractDisclaimer ?? ''}
+                onEdit={ctx.onFieldEdit}
+                placeholder="Add notes / terms…"
+                style={{ marginTop: '12px', fontSize: '11px', color: 'var(--muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}
+              />
             )}
           </div>
         )}
@@ -233,7 +240,16 @@ export default function EditorialInvoiceDesign({ ctx }: { ctx: InvoiceDesignCont
 
       {(isVisible(sv, 'footer_quote') || isVisible(sv, 'footer_meta')) && (
         <footer className="ei-foot">
-          {isVisible(sv, 'footer_quote') && ct.footer_quote && <div className="ei-foot-q">"{ct.footer_quote}"</div>}
+          {isVisible(sv, 'footer_quote') && (ct.footer_quote || ctx.onFieldEdit) && (
+            <EditableText
+              as="div"
+              field="footer_quote"
+              value={ct.footer_quote ?? ''}
+              onEdit={ctx.onFieldEdit}
+              placeholder="Add a thank-you note…"
+              className="ei-foot-q"
+            />
+          )}
           {isVisible(sv, 'footer_meta') && (
             <div className="ei-foot-meta" style={{ marginLeft: 'auto' }}>
               <b>{ctx.tenant.name}</b><br />

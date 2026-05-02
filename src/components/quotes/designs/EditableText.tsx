@@ -101,11 +101,27 @@ export default function EditableText({
         const text = e.clipboardData.getData('text/plain');
         document.execCommand('insertText', false, text);
       }}
-      className={className}
+      className={(className ? className + ' ' : '') + 'editable-text-slot'}
       style={{
         outline: 'none',
+        cursor: 'text',
+        borderRadius: '2px',
         ...style,
       }}
     />
   );
+}
+
+// Inject a single global rule so editable text fields show a subtle hover hint
+// across all designs without each design having to opt in to the styling.
+if (typeof document !== 'undefined' && !document.getElementById('editable-text-slot-styles')) {
+  const s = document.createElement('style');
+  s.id = 'editable-text-slot-styles';
+  s.textContent = `
+    .editable-text-slot:hover { box-shadow: inset 0 0 0 1px rgba(176, 51, 55, 0.25); }
+    .editable-text-slot:focus { box-shadow: inset 0 0 0 1px rgba(176, 51, 55, 0.55); background: rgba(176, 51, 55, 0.04); }
+    .editable-text-slot[data-empty]::before { content: attr(data-placeholder); color: rgba(0, 0, 0, 0.35); font-style: italic; pointer-events: none; }
+    .editable-text-slot[data-empty]:focus::before { display: none; }
+  `;
+  document.head.appendChild(s);
 }

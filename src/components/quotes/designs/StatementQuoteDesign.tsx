@@ -1,4 +1,5 @@
 import { fmtNum, isVisible, type DesignContext } from './types';
+import EditableText from './EditableText';
 
 const STYLE = `
   .sq-quote{--bg:#f5f1e8;--bg-2:#ebe4d3;--line:#d8cfb8;--line-2:#c2b797;--ink:#1a1612;--muted:#6b5d4a;--accent:#b03337;
@@ -301,10 +302,17 @@ export default function StatementQuoteDesign({ ctx }: { ctx: DesignContext }) {
               <h4>Terms &amp; conditions</h4>
               {ct.terms_paragraphs?.length ? (
                 ct.terms_paragraphs.map((p, i) => <p key={i}>{p}</p>)
-              ) : ctx.contractDisclaimer ? (
-                <p>{ctx.contractDisclaimer}</p>
               ) : (
-                <p style={{ color: 'var(--muted)' }}>No contract terms provided.</p>
+                <EditableText
+                  as="div"
+                  multiline
+                  field="contractDisclaimer"
+                  value={ctx.contractDisclaimer ?? ''}
+                  onEdit={ctx.onFieldEdit}
+                  placeholder="Add terms…"
+                  emptyFallback={<p style={{ color: 'var(--muted)' }}>No contract terms provided.</p>}
+                  style={{ whiteSpace: 'pre-wrap' }}
+                />
               )}
             </div>
           )}
@@ -355,7 +363,7 @@ export default function StatementQuoteDesign({ ctx }: { ctx: DesignContext }) {
                 )}
               </h3>
               <small>Sign to lock dates</small>
-              <p>{ct.accept_body || 'Sign & date below or simply reply "accepted". We\'ll send a deposit invoice and confirm a start window within 24 hours.'}</p>
+              <EditableText as="div" multiline field="accept_body" value={ct.accept_body || 'Sign & date below or simply reply "accepted". We\'ll send a deposit invoice and confirm a start window within 24 hours.'} onEdit={ctx.onFieldEdit} style={{ fontSize: '10.5px', color: 'var(--muted)', lineHeight: 1.55, marginTop: '14px' }} />
             </div>
             <div className="sq-accept-grid">
               <div className="sq-accept-cell">

@@ -1,4 +1,5 @@
 import { fmtMoney, isVisible } from '@/components/quotes/designs/types';
+import EditableText from '@/components/quotes/designs/EditableText';
 import type { InvoiceDesignContext } from './types';
 
 const STYLE = `
@@ -180,8 +181,12 @@ export default function FieldInvoiceDesign({ ctx }: { ctx: InvoiceDesignContext 
               {ctx.tenant.email && (
                 <p><b>E-transfer</b>{ctx.tenant.email}</p>
               )}
-              {ctx.contractDisclaimer && <p>{ctx.contractDisclaimer}</p>}
-              {ct.footer_quote && <p style={{ fontStyle: 'italic' }}>"{ct.footer_quote}"</p>}
+              {(ctx.contractDisclaimer || ctx.onFieldEdit) && (
+                <EditableText as="div" multiline field="contractDisclaimer" value={ctx.contractDisclaimer ?? ''} onEdit={ctx.onFieldEdit} placeholder="Add notes / terms…" style={{ fontFamily: "'Inter',sans-serif", fontSize: '11px', color: 'var(--ink)', margin: '0 0 10px', lineHeight: 1.55, whiteSpace: 'pre-wrap' }} />
+              )}
+              {(ct.footer_quote || ctx.onFieldEdit) && (
+                <EditableText as="div" field="footer_quote" value={ct.footer_quote ?? ''} onEdit={ctx.onFieldEdit} placeholder="Add a thank-you note…" style={{ fontStyle: 'italic', fontFamily: "'Inter',sans-serif", fontSize: '11px', color: 'var(--ink)' }} />
+              )}
             </div>
           )}
           {isVisible(sv, 'summary') && (

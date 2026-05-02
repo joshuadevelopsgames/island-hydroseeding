@@ -1,4 +1,5 @@
 import { fmtNum, isVisible } from '@/components/quotes/designs/types';
+import EditableText from '@/components/quotes/designs/EditableText';
 import type { InvoiceDesignContext } from './types';
 
 const STYLE = `
@@ -207,8 +208,18 @@ export default function StatementInvoiceDesign({ ctx }: { ctx: InvoiceDesignCont
               <div className="si-pay-grid">
                 {ctx.tenant.email && (<div><h5>E-transfer</h5><p>{ctx.tenant.email}</p></div>)}
                 <div><h5>Terms</h5><p>{ctx.paymentTerms || 'Net 30'} from issue.</p></div>
-                {ct.footer_quote && (<div style={{ gridColumn: '1 / -1' }}><h5>Note</h5><p style={{ fontStyle: 'italic' }}>"{ct.footer_quote}"</p></div>)}
-                {ctx.contractDisclaimer && (<div style={{ gridColumn: '1 / -1' }}><h5>Disclaimer</h5><p style={{ whiteSpace: 'pre-wrap' }}>{ctx.contractDisclaimer}</p></div>)}
+                {(ct.footer_quote || ctx.onFieldEdit) && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <h5>Note</h5>
+                    <EditableText as="div" field="footer_quote" value={ct.footer_quote ?? ''} onEdit={ctx.onFieldEdit} placeholder="Add a thank-you note…" style={{ fontStyle: 'italic', margin: 0 }} />
+                  </div>
+                )}
+                {(ctx.contractDisclaimer || ctx.onFieldEdit) && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <h5>Disclaimer</h5>
+                    <EditableText as="div" multiline field="contractDisclaimer" value={ctx.contractDisclaimer ?? ''} onEdit={ctx.onFieldEdit} placeholder="Add disclaimer…" style={{ whiteSpace: 'pre-wrap', margin: 0 }} />
+                  </div>
+                )}
               </div>
             </div>
           )}

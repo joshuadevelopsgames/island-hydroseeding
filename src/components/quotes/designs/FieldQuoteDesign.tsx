@@ -339,7 +339,7 @@ export default function FieldQuoteDesign({ ctx }: { ctx: DesignContext }) {
             </div>
             <div className="fq-accept-grid">
               <div>
-                <p>{ct.accept_body || 'Sign & date below, or simply reply "accepted". We\'ll send a deposit invoice and lock in your start window within 24 hours.'}</p>
+                <EditableText as="div" multiline field="accept_body" value={ct.accept_body || 'Sign & date below, or simply reply "accepted". We\'ll send a deposit invoice and lock in your start window within 24 hours.'} onEdit={ctx.onFieldEdit} style={{ fontFamily: "'Inter',sans-serif", fontSize: '11px', color: 'var(--ink-soft)', lineHeight: 1.5, margin: '0 0 12px' }} />
                 <div className="fq-sig">{ctx.acceptedSignatureName || ''}</div>
                 <div className="fq-sig-cap">
                   <span>Client signature</span>
@@ -347,7 +347,7 @@ export default function FieldQuoteDesign({ ctx }: { ctx: DesignContext }) {
                 </div>
               </div>
               <div>
-                <p>{ct.issued_by_body || `${ctx.tenant.ownerName ?? ctx.tenant.name} will be your point of contact through the job.`}</p>
+                <EditableText as="div" multiline field="issued_by_body" value={ct.issued_by_body || `${ctx.tenant.ownerName ?? ctx.tenant.name} will be your point of contact through the job.`} onEdit={ctx.onFieldEdit} style={{ fontFamily: "'Inter',sans-serif", fontSize: '11px', color: 'var(--ink-soft)', lineHeight: 1.5, margin: '0 0 12px' }} />
                 <div className="fq-sig">{ctx.tenant.ownerName || ctx.tenant.name}</div>
                 <div className="fq-sig-cap">
                   <span>{ct.issued_by_heading || ctx.tenant.name}</span>

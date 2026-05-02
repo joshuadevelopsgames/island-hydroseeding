@@ -937,20 +937,43 @@ function InvoicePreviewCard({
     if (next === design) return;
     void mutations.updateInvoice.mutateAsync({ id: bundle.invoice.id, template_design: next });
   };
+  // Inline edits on the preview persist directly to the invoice record so the
+  // change shows on the next public-pay-link load too. Saves on blur.
+  const handleEdit = (field: string, value: string) => {
+    if (field === 'title') {
+      void mutations.updateInvoice.mutateAsync({ id: bundle.invoice.id, title: value });
+    } else if (field === 'paymentTerms') {
+      void mutations.updateInvoice.mutateAsync({ id: bundle.invoice.id, payment_terms: value });
+    } else if (field === 'contractDisclaimer' || field === 'notes') {
+      void mutations.updateInvoice.mutateAsync({ id: bundle.invoice.id, notes: value });
+    } else if (
+      field === 'footer_quote' ||
+      field === 'accept_heading' ||
+      field === 'accept_body' ||
+      field === 'issued_by_heading' ||
+      field === 'issued_by_body'
+    ) {
+      const nextCustom = {
+        ...((bundle.invoice.custom_text as Record<string, unknown>) ?? {}),
+        [field]: value || undefined,
+      };
+      void mutations.updateInvoice.mutateAsync({ id: bundle.invoice.id, custom_text: nextCustom });
+    }
+  };
   return (
     <div className="mb-6 rounded-xl border border-border bg-card p-6 shadow-sm">
       <div className="flex items-start justify-between gap-4 mb-4">
         <div>
           <h3 className="text-lg font-semibold">Design preview</h3>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            {DESIGN_META.find((m) => m.id === design)?.label ?? design} — what the client sees on the public pay link.
+            {DESIGN_META.find((m) => m.id === design)?.label ?? design} — click any text to edit. Changes save on blur.
           </p>
         </div>
       </div>
       <div className="mb-4">
         <QuoteDesignPicker value={design} onChange={handlePick} />
       </div>
-      <InvoiceDesignPreview design={design} ctx={ctx} />
+      <InvoiceDesignPreview design={design} ctx={{ ...ctx, onFieldEdit: handleEdit }} />
     </div>
   );
 }

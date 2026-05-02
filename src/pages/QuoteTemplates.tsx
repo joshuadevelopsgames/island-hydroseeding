@@ -553,7 +553,29 @@ export default function QuoteTemplates() {
             <div style={{ fontSize: '11px', letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '12px' }}>
               Live preview · {DESIGN_META.find((m) => m.id === formData.template_design)?.label}
             </div>
-            <QuoteDesignPreview design={formData.template_design} ctx={previewCtx} />
+            <QuoteDesignPreview
+              design={formData.template_design}
+              ctx={{
+                ...previewCtx,
+                onFieldEdit: (field, value) => {
+                  if (field === 'introduction') setFormData({ ...formData, introduction_text: value });
+                  else if (field === 'contractDisclaimer') setFormData({ ...formData, contract_text: value });
+                  else if (field === 'title') setFormData({ ...formData, name: value });
+                  else if (
+                    field === 'footer_quote' ||
+                    field === 'accept_heading' ||
+                    field === 'accept_body' ||
+                    field === 'issued_by_heading' ||
+                    field === 'issued_by_body'
+                  ) {
+                    setFormData({
+                      ...formData,
+                      custom_text: { ...formData.custom_text, [field]: value || undefined },
+                    });
+                  }
+                },
+              }}
+            />
           </div>
         </div>
       </div>
