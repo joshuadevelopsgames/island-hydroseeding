@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from './_auth';
+import { resolveTenantId } from './_tenant';
 
 const WORKSPACE_ID = 'default';
 
@@ -17,10 +18,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireAuth(req, res);
   if (!auth) return;
 
+  const tenantId = resolveTenantId();
+
   if (req.method === 'GET') {
     const { data, error } = await supabase
       .from('app_workspace')
       .select('payload, updated_at')
+      .eq('tenant_id', tenantId)
       .eq('id', WORKSPACE_ID)
       .maybeSingle();
     if (error) {
@@ -45,8 +49,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const updated_at = new Date().toISOString();
     const { error } = await supabase.from('app_workspace').upsert(
-      { id: WORKSPACE_ID, payload, updated_at },
-      { onConflict: 'id' }
+      { tenant_id: tenantId, id: WORKSPACE_ID, payload, updated_at },
+      { onConflict: 'tenant_id,id' }
     );
     if (error) {
       res.status(500).json({ error: error.message });

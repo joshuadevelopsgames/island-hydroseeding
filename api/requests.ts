@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { randomUUID } from 'crypto';
 import { requireAuth } from './_auth';
+import { resolveTenantId } from './_tenant';
 
 function supabase(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL;
@@ -35,12 +36,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireAuth(req, res);
   if (!auth) return;
 
+  const tenantId = resolveTenantId();
+
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'GET') {
     const action = String(req.query.action ?? '');
     if (action === 'list') {
-      const { data, error } = await db.from('requests').select('*').order('requested_at', { ascending: false });
+      const { data, error } = await db
+        .from('requests')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('requested_at', { ascending: false });
       if (error) {
         res.status(500).json({ error: error.message });
         return;
@@ -54,7 +61,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ error: 'Missing id' });
         return;
       }
-      const { data, error } = await db.from('requests').select('*').eq('id', id).maybeSingle();
+      const { data, error } = await db
+        .from('requests')
+        .select('*')
+        .eq('id', id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
       if (error) {
         res.status(500).json({ error: error.message });
         return;
@@ -89,6 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (action === 'request.create') {
     const row = {
+      tenant_id: tenantId,
       account_id: body.account_id != null ? String(body.account_id) : null,
       property_id: body.property_id != null ? String(body.property_id) : null,
       title: body.title != null ? String(body.title) : null,
@@ -123,7 +136,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         else if (typeof v === 'string') patch[k] = v;
       }
     }
-    const { data, error } = await db.from('requests').update(patch).eq('id', id).select('*').single();
+    const { data, error } = await db
+      .from('requests')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
     if (await errTable(error)) return;
     if (!data) {
       res.status(404).json({ error: 'Request not found' });
@@ -139,7 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { error } = await db.from('requests').delete().eq('id', id);
+    const { error } = await db.from('requests').delete().eq('id', id).eq('tenant_id', tenantId);
     if (await errTable(error)) return;
     res.status(200).json({ ok: true });
     return;
@@ -153,7 +172,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Fetch the request
-    const { data: request, error: fetchError } = await db.from('requests').select('*').eq('id', requestId).maybeSingle();
+    const { data: request, error: fetchError } = await db
+      .from('requests')
+      .select('*')
+      .eq('id', requestId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
     if (await errTable(fetchError)) return;
     if (!request) {
       res.status(404).json({ error: 'Request not found' });
@@ -163,6 +187,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Create a new quote
     const approvalToken = randomUUID();
     const quoteRow = {
+      tenant_id: tenantId,
       account_id: request.account_id || null,
       property_id: request.property_id || null,
       title: request.title || 'New Quote',
@@ -179,7 +204,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       converted_at: NOW_ISO(),
       converted_quote_id: quote.id,
     };
-    const { error: updateError } = await db.from('requests').update(updatePatch).eq('id', requestId);
+    const { error: updateError } = await db
+      .from('requests')
+      .update(updatePatch)
+      .eq('id', requestId)
+      .eq('tenant_id', tenantId);
     if (await errTable(updateError)) return;
 
     res.status(200).json({ quote, request: { ...request, ...updatePatch } });

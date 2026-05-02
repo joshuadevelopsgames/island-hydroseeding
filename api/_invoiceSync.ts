@@ -7,11 +7,12 @@ const NOW_ISO = () => new Date().toISOString();
  * Recompute invoice subtotal / tax_amount / total from line items,
  * amount_paid from payment rows, balance_due, and adjust status when fully paid or reopened.
  */
-export async function syncInvoiceFinancials(db: SupabaseClient, invoiceId: string) {
+export async function syncInvoiceFinancials(db: SupabaseClient, invoiceId: string, tenantId: string) {
   const { data: lineItems, error: lineErr } = await db
     .from('invoice_line_items')
     .select('total')
-    .eq('invoice_id', invoiceId);
+    .eq('invoice_id', invoiceId)
+    .eq('tenant_id', tenantId);
 
   if (lineErr) throw lineErr;
 
@@ -21,6 +22,7 @@ export async function syncInvoiceFinancials(db: SupabaseClient, invoiceId: strin
     .from('invoices')
     .select('tax_rate, status')
     .eq('id', invoiceId)
+    .eq('tenant_id', tenantId)
     .single();
 
   if (invErr) throw invErr;
@@ -31,7 +33,8 @@ export async function syncInvoiceFinancials(db: SupabaseClient, invoiceId: strin
   const { data: payments, error: payErr } = await db
     .from('invoice_payments')
     .select('amount')
-    .eq('invoice_id', invoiceId);
+    .eq('invoice_id', invoiceId)
+    .eq('tenant_id', tenantId);
 
   if (payErr) throw payErr;
 
@@ -56,7 +59,8 @@ export async function syncInvoiceFinancials(db: SupabaseClient, invoiceId: strin
       status,
       updated_at: NOW_ISO(),
     })
-    .eq('id', invoiceId);
+    .eq('id', invoiceId)
+    .eq('tenant_id', tenantId);
 
   if (updateErr) throw updateErr;
 }

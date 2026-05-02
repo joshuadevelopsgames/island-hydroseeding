@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from './_auth';
+import { resolveTenantId } from './_tenant';
 
 function db() {
   const url = process.env.SUPABASE_URL;
@@ -32,6 +33,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireAuth(req, res);
   if (!auth) return;
 
+  const tenantId = resolveTenantId();
+
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'GET') {
@@ -41,6 +44,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data, error } = await supabase
         .from('ops_announcements')
         .select('*')
+        .eq('tenant_id', tenantId)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
       if (error) {
@@ -62,6 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data, error } = await supabase
         .from('ops_approval_requests')
         .select('*')
+        .eq('tenant_id', tenantId)
         .eq('status', status)
         .order('created_at', { ascending: false })
         .limit(100);
@@ -87,6 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
       const row = {
+        tenant_id: tenantId,
         title,
         body: annBody,
         starts_at: body.starts_at != null ? String(body.starts_at) : null,
@@ -110,6 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
       const row = {
+        tenant_id: tenantId,
         resource_type,
         resource_id,
         title,
@@ -137,6 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('ops_approval_requests')
         .update({ status, resolved_by, resolved_at: new Date().toISOString() })
         .eq('id', id)
+        .eq('tenant_id', tenantId)
         .select('*')
         .single();
       if (error) {

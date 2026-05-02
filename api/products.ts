@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from './_auth';
+import { resolveTenantId } from './_tenant';
 
 function supabase(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL;
@@ -34,6 +35,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireAuth(req, res);
   if (!auth) return;
 
+  const tenantId = resolveTenantId();
+
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'GET') {
@@ -43,6 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data, error } = await db
         .from('products_services')
         .select('*')
+        .eq('tenant_id', tenantId)
         .eq('is_active', true)
         .order('category', { ascending: true })
         .order('name', { ascending: true });
@@ -55,7 +59,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'templates') {
-      const { data, error } = await db.from('quote_templates').select('*').order('name', { ascending: true });
+      const { data, error } = await db
+        .from('quote_templates')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('name', { ascending: true });
       if (error) {
         res.status(500).json({ error: error.message });
         return;
@@ -92,6 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     const row = {
+      tenant_id: tenantId,
       name,
       description: body.description != null ? String(body.description) : null,
       default_unit_price: body.default_unit_price != null ? Number(body.default_unit_price) : null,
@@ -120,7 +129,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         patch[k] = v;
       }
     }
-    const { data, error } = await db.from('products_services').update(patch).eq('id', id).select('*').single();
+    const { data, error } = await db
+      .from('products_services')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
     if (await errTable(error)) return;
     if (!data) {
       res.status(404).json({ error: 'Product not found' });
@@ -136,7 +151,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { error } = await db.from('products_services').update({ is_active: false, updated_at: NOW_ISO() }).eq('id', id);
+    const { error } = await db
+      .from('products_services')
+      .update({ is_active: false, updated_at: NOW_ISO() })
+      .eq('id', id)
+      .eq('tenant_id', tenantId);
     if (await errTable(error)) return;
     res.status(200).json({ ok: true });
     return;
@@ -149,6 +168,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     const row = {
+      tenant_id: tenantId,
       name,
       introduction_text: body.introduction_text != null ? String(body.introduction_text) : null,
       contract_text: body.contract_text != null ? String(body.contract_text) : null,
@@ -175,7 +195,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         patch[k] = v;
       }
     }
-    const { data, error } = await db.from('quote_templates').update(patch).eq('id', id).select('*').single();
+    const { data, error } = await db
+      .from('quote_templates')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
     if (await errTable(error)) return;
     if (!data) {
       res.status(404).json({ error: 'Template not found' });
@@ -191,7 +217,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { error } = await db.from('quote_templates').delete().eq('id', id);
+    const { error } = await db.from('quote_templates').delete().eq('id', id).eq('tenant_id', tenantId);
     if (await errTable(error)) return;
     res.status(200).json({ ok: true });
     return;

@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { randomUUID } from 'crypto';
 import { requireAuth } from './_auth';
+import { resolveTenantId } from './_tenant';
 import { lineTotal, roundMoney, balancesMatch, MONEY_EPS } from './_documentPricing';
 import { syncInvoiceFinancials } from './_invoiceSync';
 
@@ -43,8 +44,17 @@ function errTable(table: string, error: unknown) {
   return e?.message || `${table} operation failed`;
 }
 
-async function assertInvoiceLineItemsEditable(db: SupabaseClient, invoiceId: string): Promise<string | null> {
-  const { data, error } = await db.from('invoices').select('status').eq('id', invoiceId).single();
+async function assertInvoiceLineItemsEditable(
+  db: SupabaseClient,
+  invoiceId: string,
+  tenantId: string
+): Promise<string | null> {
+  const { data, error } = await db
+    .from('invoices')
+    .select('status')
+    .eq('id', invoiceId)
+    .eq('tenant_id', tenantId)
+    .single();
   if (error) return error.message;
   const s = String(data?.status ?? '');
   if (s === 'Paid') return 'Cannot edit line items on a paid invoice';
@@ -52,22 +62,27 @@ async function assertInvoiceLineItemsEditable(db: SupabaseClient, invoiceId: str
   return null;
 }
 
-async function nextLineSortOrder(db: SupabaseClient, invoiceId: string): Promise<number> {
+async function nextLineSortOrder(db: SupabaseClient, invoiceId: string, tenantId: string): Promise<number> {
   const { data } = await db
     .from('invoice_line_items')
     .select('sort_order')
     .eq('invoice_id', invoiceId)
+    .eq('tenant_id', tenantId)
     .order('sort_order', { ascending: false })
     .limit(1)
     .maybeSingle();
   return Number(data?.sort_order ?? -1) + 1;
 }
 
-async function handleGet(req: VercelRequest, res: VercelResponse, db: SupabaseClient) {
+async function handleGet(req: VercelRequest, res: VercelResponse, db: SupabaseClient, tenantId: string) {
   const action = req.query.action as string;
 
   if (action === 'list') {
-    const { data, error } = await db.from('invoices').select('*').order('created_at', { ascending: false });
+    const { data, error } = await db
+      .from('invoices')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false });
 
     if (error) {
       return res.status(400).json({ error: errTable('invoices', error) });
@@ -82,7 +97,12 @@ async function handleGet(req: VercelRequest, res: VercelResponse, db: SupabaseCl
       return res.status(400).json({ error: 'Missing invoice id' });
     }
 
-    const { data: invoice, error: invErr } = await db.from('invoices').select('*').eq('id', invoiceId).single();
+    const { data: invoice, error: invErr } = await db
+      .from('invoices')
+      .select('*')
+      .eq('id', invoiceId)
+      .eq('tenant_id', tenantId)
+      .single();
 
     if (invErr) {
       return res.status(400).json({ error: errTable('invoices', invErr) });
@@ -92,6 +112,7 @@ async function handleGet(req: VercelRequest, res: VercelResponse, db: SupabaseCl
       .from('invoice_line_items')
       .select('*')
       .eq('invoice_id', invoiceId)
+      .eq('tenant_id', tenantId)
       .order('sort_order', { ascending: true });
 
     if (lineErr) {
@@ -102,6 +123,7 @@ async function handleGet(req: VercelRequest, res: VercelResponse, db: SupabaseCl
       .from('invoice_payments')
       .select('*')
       .eq('invoice_id', invoiceId)
+      .eq('tenant_id', tenantId)
       .order('payment_date', { ascending: false });
 
     if (payErr) {
@@ -114,6 +136,7 @@ async function handleGet(req: VercelRequest, res: VercelResponse, db: SupabaseCl
         .from('crm_accounts')
         .select('*')
         .eq('id', invoice.account_id as string)
+        .eq('tenant_id', tenantId)
         .single();
       if (accErr && accErr.code !== 'PGRST116') {
         return res.status(400).json({ error: errTable('crm_accounts', accErr) });
@@ -127,6 +150,7 @@ async function handleGet(req: VercelRequest, res: VercelResponse, db: SupabaseCl
         .from('crm_properties')
         .select('*')
         .eq('id', invoice.property_id as string)
+        .eq('tenant_id', tenantId)
         .single();
       if (propErr && propErr.code !== 'PGRST116') {
         return res.status(400).json({ error: errTable('crm_properties', propErr) });
@@ -160,7 +184,7 @@ const INVOICE_PATCH_KEYS = [
   'status',
 ] as const;
 
-async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseClient) {
+async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseClient, tenantId: string) {
   const body = parseBody(req);
   const action = body.action as string;
 
@@ -188,6 +212,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       .from('invoices')
       .insert({
         id,
+        tenant_id: tenantId,
         account_id,
         property_id,
         job_id,
@@ -230,15 +255,26 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       }
     }
 
-    const { data, error } = await db.from('invoices').update(updates).eq('id', id).select().single();
+    const { data, error } = await db
+      .from('invoices')
+      .update(updates)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select()
+      .single();
 
     if (error) {
       return res.status(400).json({ error: errTable('invoices', error) });
     }
 
     if ('tax_rate' in updates) {
-      await syncInvoiceFinancials(db, id as string);
-      const { data: refreshed } = await db.from('invoices').select('*').eq('id', id).single();
+      await syncInvoiceFinancials(db, id as string, tenantId);
+      const { data: refreshed } = await db
+        .from('invoices')
+        .select('*')
+        .eq('id', id)
+        .eq('tenant_id', tenantId)
+        .single();
       return res.status(200).json({ invoice: refreshed });
     }
 
@@ -251,7 +287,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       return res.status(400).json({ error: 'Missing invoice id' });
     }
 
-    const { error } = await db.from('invoices').delete().eq('id', id);
+    const { error } = await db.from('invoices').delete().eq('id', id).eq('tenant_id', tenantId);
 
     if (error) {
       return res.status(400).json({ error: errTable('invoices', error) });
@@ -273,6 +309,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
         updated_at: NOW_ISO(),
       })
       .eq('id', id)
+      .eq('tenant_id', tenantId)
       .select()
       .single();
 
@@ -293,6 +330,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       .from('invoices')
       .select('total, amount_paid, balance_due')
       .eq('id', id)
+      .eq('tenant_id', tenantId)
       .single();
 
     if (getErr) {
@@ -305,6 +343,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       const now = NOW_ISO();
       const { error: insErr } = await db.from('invoice_payments').insert({
         id: payId,
+        tenant_id: tenantId,
         invoice_id: id,
         amount: remaining,
         payment_method: 'manual',
@@ -318,8 +357,13 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       }
     }
 
-    await syncInvoiceFinancials(db, id as string);
-    const { data: finalInv } = await db.from('invoices').select('*').eq('id', id).single();
+    await syncInvoiceFinancials(db, id as string, tenantId);
+    const { data: finalInv } = await db
+      .from('invoices')
+      .select('*')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .single();
     return res.status(200).json({ invoice: finalInv });
   }
 
@@ -330,7 +374,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       return res.status(400).json({ error: 'Missing invoice_id' });
     }
 
-    const locked = await assertInvoiceLineItemsEditable(db, invoice_id as string);
+    const locked = await assertInvoiceLineItemsEditable(db, invoice_id as string, tenantId);
     if (locked) {
       return res.status(400).json({ error: locked });
     }
@@ -339,12 +383,13 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
     const price = Number(unit_price);
     const total = lineTotal(qty, price);
     const id = randomUUID();
-    const sort_order = await nextLineSortOrder(db, invoice_id as string);
+    const sort_order = await nextLineSortOrder(db, invoice_id as string, tenantId);
 
     const { data, error } = await db
       .from('invoice_line_items')
       .insert({
         id,
+        tenant_id: tenantId,
         invoice_id,
         product_service_name,
         description: description ?? null,
@@ -361,7 +406,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       return res.status(400).json({ error: errTable('invoice_line_items', error) });
     }
 
-    await syncInvoiceFinancials(db, invoice_id as string);
+    await syncInvoiceFinancials(db, invoice_id as string, tenantId);
 
     return res.status(201).json({ line_item: data });
   }
@@ -377,6 +422,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       .from('invoice_line_items')
       .select('invoice_id, quantity, unit_price')
       .eq('id', id)
+      .eq('tenant_id', tenantId)
       .single();
 
     if (exErr || !existing) {
@@ -384,7 +430,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
     }
 
     const invId = (invoice_id as string) || (existing.invoice_id as string);
-    const locked = await assertInvoiceLineItemsEditable(db, invId);
+    const locked = await assertInvoiceLineItemsEditable(db, invId, tenantId);
     if (locked) {
       return res.status(400).json({ error: locked });
     }
@@ -401,13 +447,19 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       patch.total = lineTotal(qty, price);
     }
 
-    const { data, error } = await db.from('invoice_line_items').update(patch).eq('id', id).select().single();
+    const { data, error } = await db
+      .from('invoice_line_items')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select()
+      .single();
 
     if (error) {
       return res.status(400).json({ error: errTable('invoice_line_items', error) });
     }
 
-    await syncInvoiceFinancials(db, invId);
+    await syncInvoiceFinancials(db, invId, tenantId);
 
     return res.status(200).json({ line_item: data });
   }
@@ -419,24 +471,29 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       return res.status(400).json({ error: 'Missing line_item id' });
     }
 
-    const { data: row } = await db.from('invoice_line_items').select('invoice_id').eq('id', id).maybeSingle();
+    const { data: row } = await db
+      .from('invoice_line_items')
+      .select('invoice_id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
 
     if (!row?.invoice_id) {
       return res.status(400).json({ error: 'Line item not found' });
     }
 
-    const locked = await assertInvoiceLineItemsEditable(db, row.invoice_id as string);
+    const locked = await assertInvoiceLineItemsEditable(db, row.invoice_id as string, tenantId);
     if (locked) {
       return res.status(400).json({ error: locked });
     }
 
-    const { error } = await db.from('invoice_line_items').delete().eq('id', id);
+    const { error } = await db.from('invoice_line_items').delete().eq('id', id).eq('tenant_id', tenantId);
 
     if (error) {
       return res.status(400).json({ error: errTable('invoice_line_items', error) });
     }
 
-    await syncInvoiceFinancials(db, row.invoice_id as string);
+    await syncInvoiceFinancials(db, row.invoice_id as string, tenantId);
 
     return res.status(200).json({ ok: true });
   }
@@ -452,6 +509,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       .from('invoices')
       .select('balance_due, status')
       .eq('id', invoice_id)
+      .eq('tenant_id', tenantId)
       .single();
 
     if (invErr) {
@@ -477,6 +535,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       .from('invoice_payments')
       .insert({
         id,
+        tenant_id: tenantId,
         invoice_id,
         amount: amt,
         payment_method: payment_method ?? null,
@@ -492,7 +551,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       return res.status(400).json({ error: errTable('invoice_payments', error) });
     }
 
-    await syncInvoiceFinancials(db, invoice_id as string);
+    await syncInvoiceFinancials(db, invoice_id as string, tenantId);
 
     return res.status(201).json({ payment: data });
   }
@@ -504,19 +563,24 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       return res.status(400).json({ error: 'Missing payment id' });
     }
 
-    const { data: row } = await db.from('invoice_payments').select('invoice_id').eq('id', id).maybeSingle();
+    const { data: row } = await db
+      .from('invoice_payments')
+      .select('invoice_id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
 
     if (!row?.invoice_id) {
       return res.status(400).json({ error: 'Payment not found' });
     }
 
-    const { error } = await db.from('invoice_payments').delete().eq('id', id);
+    const { error } = await db.from('invoice_payments').delete().eq('id', id).eq('tenant_id', tenantId);
 
     if (error) {
       return res.status(400).json({ error: errTable('invoice_payments', error) });
     }
 
-    await syncInvoiceFinancials(db, row.invoice_id as string);
+    await syncInvoiceFinancials(db, row.invoice_id as string, tenantId);
 
     return res.status(200).json({ ok: true });
   }
@@ -525,6 +589,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
     const { data: payments, error } = await db
       .from('invoice_payments')
       .select('*')
+      .eq('tenant_id', tenantId)
       .order('payment_date', { ascending: false });
 
     if (error) {
@@ -535,7 +600,11 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
 
     const invoiceIds = [...new Set(list.map((p: { invoice_id: string }) => p.invoice_id).filter(Boolean))];
     const { data: invoices } = invoiceIds.length
-      ? await db.from('invoices').select('id, invoice_number, account_id, due_date, title, issue_date').in('id', invoiceIds)
+      ? await db
+          .from('invoices')
+          .select('id, invoice_number, account_id, due_date, title, issue_date')
+          .eq('tenant_id', tenantId)
+          .in('id', invoiceIds)
       : { data: [] as { id: string; invoice_number: number; account_id: string | null; due_date: string; title: string | null; issue_date: string }[] };
 
     const invoiceMap: Record<string, (typeof invoices)[0]> = {};
@@ -545,7 +614,11 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
 
     const accountIds = [...new Set((invoices || []).map((inv) => inv.account_id).filter(Boolean))] as string[];
     const { data: accounts } = accountIds.length
-      ? await db.from('crm_accounts').select('id, name, account_type').in('id', accountIds)
+      ? await db
+          .from('crm_accounts')
+          .select('id, name, account_type')
+          .eq('tenant_id', tenantId)
+          .in('id', accountIds)
       : { data: [] as { id: string; name: string; account_type: string }[] };
 
     const accountMap: Record<string, (typeof accounts)[0]> = {};
@@ -631,6 +704,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       .from('jobs')
       .select('id, account_id, property_id, title')
       .eq('id', job_id)
+      .eq('tenant_id', tenantId)
       .single();
 
     if (jobErr) {
@@ -641,6 +715,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       .from('job_line_items')
       .select('*')
       .eq('job_id', job_id)
+      .eq('tenant_id', tenantId)
       .order('sort_order', { ascending: true });
 
     if (lineErr) {
@@ -655,6 +730,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       .from('invoices')
       .insert({
         id: invoiceId,
+        tenant_id: tenantId,
         account_id: job?.account_id,
         property_id: job?.property_id,
         job_id,
@@ -681,6 +757,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
     if (jobLineItems && jobLineItems.length > 0) {
       const itemsToInsert = jobLineItems.map((item: Record<string, unknown>, idx: number) => ({
         id: randomUUID(),
+        tenant_id: tenantId,
         invoice_id: invoiceId,
         product_service_name: item.product_service_name,
         description: item.description ?? null,
@@ -698,9 +775,14 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       }
     }
 
-    await syncInvoiceFinancials(db, invoiceId);
+    await syncInvoiceFinancials(db, invoiceId, tenantId);
 
-    const { data: finalInvoice } = await db.from('invoices').select('*').eq('id', invoiceId).single();
+    const { data: finalInvoice } = await db
+      .from('invoices')
+      .select('*')
+      .eq('id', invoiceId)
+      .eq('tenant_id', tenantId)
+      .single();
 
     return res.status(201).json({ invoice: finalInvoice });
   }
@@ -717,12 +799,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireAuth(req, res);
   if (!auth) return;
 
+  const tenantId = resolveTenantId();
+
   if (req.method === 'GET') {
-    return handleGet(req, res, db);
+    return handleGet(req, res, db, tenantId);
   }
 
   if (req.method === 'POST') {
-    return handlePost(req, res, db);
+    return handlePost(req, res, db, tenantId);
   }
 
   return res.status(405).json({ error: 'Method not allowed' });

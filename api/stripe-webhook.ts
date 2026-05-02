@@ -77,11 +77,19 @@ async function handlePaymentSucceeded(pi: Stripe.PaymentIntent) {
 
   const { data: invoice } = await db
     .from('invoices')
-    .select('id, status')
+    .select('id, tenant_id, status')
     .eq('id', invoiceId)
     .single();
 
   if (!invoice || invoice.status === 'Paid') return;
+
+  const metaTenant = pi.metadata?.tenant_id;
+  if (metaTenant && metaTenant !== invoice.tenant_id) {
+    console.error('[stripe-webhook] tenant_id mismatch for invoice', invoiceId);
+    return;
+  }
+
+  const tenantId = invoice.tenant_id as string;
 
   const amountPaid = pi.amount_received / 100;
   const now        = new Date().toISOString();
@@ -89,6 +97,7 @@ async function handlePaymentSucceeded(pi: Stripe.PaymentIntent) {
   // Record payment row
   await db.from('invoice_payments').insert({
     id:               randomUUID(),
+    tenant_id:        tenantId,
     invoice_id:       invoiceId,
     amount:           amountPaid,
     payment_method:   'stripe',
@@ -98,7 +107,7 @@ async function handlePaymentSucceeded(pi: Stripe.PaymentIntent) {
     created_at:       now,
   });
 
-  await syncInvoiceFinancials(db, invoiceId);
+  await syncInvoiceFinancials(db, invoiceId, tenantId);
 
   console.log(`[stripe-webhook] Invoice ${invoiceId} synced after PI ${pi.id}`);
 }

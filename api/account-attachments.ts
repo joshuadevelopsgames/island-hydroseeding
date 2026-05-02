@@ -17,6 +17,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from './_auth';
+import { resolveTenantId } from './_tenant';
 
 export const config = {
   api: {
@@ -98,6 +99,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireAuth(req, res);
   if (!auth) return;
 
+  const tenantId = resolveTenantId();
+
   res.setHeader('Content-Type', 'application/json');
 
   // ── List ────────────────────────────────────────────────────────────────
@@ -111,6 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('crm_account_attachments')
       .select('*')
       .eq('account_id', accountId)
+      .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false });
     if (error) {
       res.status(500).json({ error: error.message });
@@ -142,6 +146,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('crm_account_attachments')
       .select('id, storage_path')
       .eq('id', id)
+      .eq('tenant_id', tenantId)
       .maybeSingle();
     if (lookupErr) {
       res.status(500).json({ error: lookupErr.message });
@@ -156,7 +161,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Log and continue — the row should still be deleted so the UI stays consistent.
       console.error('storage remove failed', removeErr);
     }
-    const { error: dbErr } = await db.from('crm_account_attachments').delete().eq('id', id);
+    const { error: dbErr } = await db
+      .from('crm_account_attachments')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', tenantId);
     if (dbErr) {
       res.status(500).json({ error: dbErr.message });
       return;
@@ -187,6 +196,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from('crm_accounts')
     .select('id')
     .eq('id', accountId)
+    .eq('tenant_id', tenantId)
     .maybeSingle();
   if (accountErr) {
     res.status(500).json({ error: accountErr.message });
@@ -214,6 +224,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: row, error: insertErr } = await db
     .from('crm_account_attachments')
     .insert({
+      tenant_id: tenantId,
       account_id: accountId,
       uploaded_by_user_id: auth.userId,
       uploaded_by_email: auth.email || null,

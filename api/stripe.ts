@@ -72,24 +72,39 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
 
     const { data: invoice, error } = await db
       .from('invoices')
-      .select('id, invoice_number, title, status, issue_date, due_date, subtotal, tax_rate, tax_amount, total, amount_paid, balance_due, payment_terms, notes, account_id, property_id')
+      .select(
+        'id, tenant_id, invoice_number, title, status, issue_date, due_date, subtotal, tax_rate, tax_amount, total, amount_paid, balance_due, payment_terms, notes, account_id, property_id'
+      )
       .eq('pay_token', token)
       .single();
 
     if (error || !invoice) return res.status(404).json({ error: 'Invoice not found' });
 
+    const tid = invoice.tenant_id as string;
+
     const { data: lineItems } = await db
       .from('invoice_line_items')
       .select('*')
       .eq('invoice_id', invoice.id)
+      .eq('tenant_id', tid)
       .order('sort_order');
 
     const { data: account } = invoice.account_id
-      ? await db.from('crm_accounts').select('name, company, email, phone').eq('id', invoice.account_id).single()
+      ? await db
+          .from('crm_accounts')
+          .select('name, company, email, phone')
+          .eq('id', invoice.account_id)
+          .eq('tenant_id', tid)
+          .single()
       : { data: null };
 
     const { data: property } = invoice.property_id
-      ? await db.from('crm_properties').select('address, city, province, postal_code').eq('id', invoice.property_id).single()
+      ? await db
+          .from('crm_properties')
+          .select('address, city, province, postal_code')
+          .eq('id', invoice.property_id)
+          .eq('tenant_id', tid)
+          .single()
       : { data: null };
 
     return res.status(200).json({ invoice, line_items: lineItems ?? [], account, property });
@@ -121,11 +136,15 @@ async function createPaymentIntent(body: Record<string, unknown>, res: VercelRes
 
   const { data: invoice, error } = await db
     .from('invoices')
-    .select('id, invoice_number, title, total, balance_due, status, stripe_payment_intent_id, account_id')
+    .select(
+      'id, tenant_id, invoice_number, title, total, balance_due, status, stripe_payment_intent_id, account_id'
+    )
     .eq('id', invoice_id)
     .single();
 
   if (error || !invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+  const tid = invoice.tenant_id as string;
   if (invoice.status === 'Paid') return res.status(400).json({ error: 'Invoice is already paid' });
   if ((invoice.balance_due ?? 0) <= 0) return res.status(400).json({ error: 'No balance due' });
 
@@ -142,7 +161,12 @@ async function createPaymentIntent(body: Record<string, unknown>, res: VercelRes
   }
 
   const { data: account } = invoice.account_id
-    ? await db.from('crm_accounts').select('name, email').eq('id', invoice.account_id).single()
+    ? await db
+        .from('crm_accounts')
+        .select('name, email')
+        .eq('id', invoice.account_id)
+        .eq('tenant_id', tid)
+        .single()
     : { data: null };
 
   const amountCents = Math.round((invoice.balance_due ?? invoice.total ?? 0) * 100);
@@ -153,6 +177,7 @@ async function createPaymentIntent(body: Record<string, unknown>, res: VercelRes
     automatic_payment_methods: { enabled: true },
     metadata: {
       invoice_id:     invoice.id,
+      tenant_id:      tid,
       invoice_number: String(invoice.invoice_number),
       client_name:    account?.name ?? '',
     },
@@ -163,7 +188,8 @@ async function createPaymentIntent(body: Record<string, unknown>, res: VercelRes
   await db
     .from('invoices')
     .update({ stripe_payment_intent_id: pi.id, updated_at: new Date().toISOString() })
-    .eq('id', invoice_id);
+    .eq('id', invoice_id)
+    .eq('tenant_id', tid);
 
   return res.status(200).json({ clientSecret: pi.client_secret });
 }
@@ -178,11 +204,13 @@ async function getPaymentLink(body: Record<string, unknown>, req: VercelRequest,
 
   const { data: invoice, error } = await db
     .from('invoices')
-    .select('id, pay_token, status')
+    .select('id, tenant_id, pay_token, status')
     .eq('id', invoice_id)
     .single();
 
   if (error || !invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+  const tid = invoice.tenant_id as string;
 
   let token = invoice.pay_token as string | null;
 
@@ -191,7 +219,8 @@ async function getPaymentLink(body: Record<string, unknown>, req: VercelRequest,
     await db
       .from('invoices')
       .update({ pay_token: token, updated_at: new Date().toISOString() })
-      .eq('id', invoice_id);
+      .eq('id', invoice_id)
+      .eq('tenant_id', tid);
   }
 
   const proto = req.headers['x-forwarded-proto'] ?? 'https';

@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { randomUUID } from 'crypto';
 import { requireAuth } from './_auth';
+import { resolveTenantId } from './_tenant';
 import { documentTotalsFromSubtotal, lineTotal, roundMoney, MONEY_EPS } from './_documentPricing';
 import { syncInvoiceFinancials } from './_invoiceSync';
 
@@ -39,8 +40,17 @@ function defaultDueDate(): string {
 
 const QUOTE_LINE_STATUSES_LOCKED = new Set(['Sent', 'Approved', 'Converted']);
 
-async function assertQuoteLinesEditable(db: SupabaseClient, quoteId: string): Promise<string | null> {
-  const { data, error } = await db.from('quotes').select('status').eq('id', quoteId).single();
+async function assertQuoteLinesEditable(
+  db: SupabaseClient,
+  quoteId: string,
+  tenantId: string
+): Promise<string | null> {
+  const { data, error } = await db
+    .from('quotes')
+    .select('status')
+    .eq('id', quoteId)
+    .eq('tenant_id', tenantId)
+    .single();
   if (error) return error.message;
   if (QUOTE_LINE_STATUSES_LOCKED.has(String(data?.status ?? ''))) {
     return 'Cannot edit line items while quote is Sent, Approved, or Converted';
@@ -48,13 +58,26 @@ async function assertQuoteLinesEditable(db: SupabaseClient, quoteId: string): Pr
   return null;
 }
 
-async function recalculateQuote(db: SupabaseClient, quoteId: string) {
-  const { data: items } = await db.from('quote_line_items').select('total').eq('quote_id', quoteId);
+async function recalculateQuote(db: SupabaseClient, quoteId: string, tenantId: string) {
+  const { data: items } = await db
+    .from('quote_line_items')
+    .select('total')
+    .eq('quote_id', quoteId)
+    .eq('tenant_id', tenantId);
   const subtotalRaw = (items ?? []).reduce((sum, i) => sum + Number(i.total), 0);
-  const { data: q } = await db.from('quotes').select('tax_rate').eq('id', quoteId).single();
+  const { data: q } = await db
+    .from('quotes')
+    .select('tax_rate')
+    .eq('id', quoteId)
+    .eq('tenant_id', tenantId)
+    .single();
   const taxRate = Number(q?.tax_rate ?? 0.05);
   const { subtotal, tax_amount, total } = documentTotalsFromSubtotal(subtotalRaw, taxRate);
-  await db.from('quotes').update({ subtotal, tax_amount, total, updated_at: NOW_ISO() }).eq('id', quoteId);
+  await db
+    .from('quotes')
+    .update({ subtotal, tax_amount, total, updated_at: NOW_ISO() })
+    .eq('id', quoteId)
+    .eq('tenant_id', tenantId);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -67,13 +90,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireAuth(req, res);
   if (!auth) return;
 
+  const tenantId = resolveTenantId();
+
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'GET') {
     const action = String(req.query.action ?? '');
 
     if (action === 'list') {
-      const { data, error } = await db.from('quotes').select('*').order('created_at', { ascending: false });
+      const { data, error } = await db
+        .from('quotes')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false });
       if (error) {
         res.status(500).json({ error: error.message });
         return;
@@ -88,18 +117,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ error: 'Missing id' });
         return;
       }
-      const [quote, line_items, account, property] = await Promise.all([
-        db.from('quotes').select('*').eq('id', id).maybeSingle(),
-        db.from('quote_line_items').select('*').eq('quote_id', id).order('created_at', { ascending: true }),
-        db.from('crm_accounts').select('id, name, company, phone, email').eq('id', '').maybeSingle(),
-        db.from('crm_properties').select('*').eq('id', '').maybeSingle(),
-      ]);
+      const quote = await db.from('quotes').select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
       if (quote.error) {
         res.status(500).json({ error: quote.error.message });
         return;
       }
       if (!quote.data) {
         res.status(404).json({ error: 'Quote not found' });
+        return;
+      }
+      const line_items = await db
+        .from('quote_line_items')
+        .select('*')
+        .eq('quote_id', id)
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: true });
+      if (line_items.error) {
+        res.status(500).json({ error: line_items.error.message });
         return;
       }
       let accountData = null;
@@ -109,11 +143,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .from('crm_accounts')
           .select('id, name, company, phone, email')
           .eq('id', quote.data.account_id as string)
+          .eq('tenant_id', tenantId)
           .maybeSingle();
         accountData = acc;
       }
       if (quote.data.property_id) {
-        const { data: prop } = await db.from('crm_properties').select('*').eq('id', quote.data.property_id as string).maybeSingle();
+        const { data: prop } = await db
+          .from('crm_properties')
+          .select('*')
+          .eq('id', quote.data.property_id as string)
+          .eq('tenant_id', tenantId)
+          .maybeSingle();
         propertyData = prop;
       }
       res.status(200).json({
@@ -131,7 +171,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ error: 'Missing account_id' });
         return;
       }
-      const { data, error } = await db.from('crm_properties').select('*').eq('account_id', account_id).order('created_at', { ascending: false });
+      const { data, error } = await db
+        .from('crm_properties')
+        .select('*')
+        .eq('account_id', account_id)
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false });
       if (error) {
         res.status(500).json({ error: error.message });
         return;
@@ -170,6 +215,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const approval_token = randomUUID();
     const row = {
+      tenant_id: tenantId,
       account_id,
       title,
       property_id: body.property_id != null ? String(body.property_id) : null,
@@ -212,7 +258,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await db
         .from('quotes')
         .update({ tax_rate: Number(taxRatePatch), updated_at: NOW_ISO() })
-        .eq('id', id);
+        .eq('id', id)
+        .eq('tenant_id', tenantId);
       delete patch.tax_rate;
     }
     if (
@@ -221,13 +268,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       body.recalc ||
       taxRatePatch !== undefined
     ) {
-      await recalculateQuote(db, id);
+      await recalculateQuote(db, id, tenantId);
     }
     if ('deposit_required' in patch || 'deposit_amount' in patch) {
       const { data: q } = await db
         .from('quotes')
         .select('total, deposit_required, deposit_amount')
         .eq('id', id)
+        .eq('tenant_id', tenantId)
         .maybeSingle();
       const depReq =
         patch.deposit_required !== undefined ? Boolean(patch.deposit_required) : Boolean(q?.deposit_required);
@@ -238,15 +286,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
     }
-    const { data, error } = await db.from('quotes').update(patch).eq('id', id).select('*').single();
+    const { data, error } = await db
+      .from('quotes')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
     if (await errTable(error)) return;
     if (!data) {
       res.status(404).json({ error: 'Quote not found' });
       return;
     }
     if (Boolean(body.recalc)) {
-      await recalculateQuote(db, id);
-      const { data: updated } = await db.from('quotes').select('*').eq('id', id).single();
+      await recalculateQuote(db, id, tenantId);
+      const { data: updated } = await db
+        .from('quotes')
+        .select('*')
+        .eq('id', id)
+        .eq('tenant_id', tenantId)
+        .single();
       res.status(200).json({ quote: updated });
       return;
     }
@@ -260,7 +319,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { error } = await db.from('quotes').delete().eq('id', id);
+    const { error } = await db.from('quotes').delete().eq('id', id).eq('tenant_id', tenantId);
     if (await errTable(error)) return;
     res.status(200).json({ ok: true });
     return;
@@ -272,8 +331,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'quote_id is required' });
       return;
     }
-    await recalculateQuote(db, quote_id);
-    const { data, error } = await db.from('quotes').select('*').eq('id', quote_id).single();
+    await recalculateQuote(db, quote_id, tenantId);
+    const { data, error } = await db
+      .from('quotes')
+      .select('*')
+      .eq('id', quote_id)
+      .eq('tenant_id', tenantId)
+      .single();
     if (await errTable(error)) return;
     res.status(200).json({ quote: data });
     return;
@@ -288,13 +352,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'quote_id, product_service_name, quantity, and unit_price are required' });
       return;
     }
-    const locked = await assertQuoteLinesEditable(db, quote_id);
+    const locked = await assertQuoteLinesEditable(db, quote_id, tenantId);
     if (locked) {
       res.status(400).json({ error: locked });
       return;
     }
     const total = lineTotal(quantity, unit_price);
     const row = {
+      tenant_id: tenantId,
       quote_id,
       product_service_name,
       quantity,
@@ -303,7 +368,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
     const { data, error } = await db.from('quote_line_items').insert(row).select('*').single();
     if (await errTable(error)) return;
-    await recalculateQuote(db, quote_id);
+    await recalculateQuote(db, quote_id, tenantId);
     res.status(200).json({ line_item: data });
     return;
   }
@@ -318,12 +383,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('quote_line_items')
       .select('quote_id, quantity, unit_price')
       .eq('id', id)
+      .eq('tenant_id', tenantId)
       .single();
     if (!existing) {
       res.status(404).json({ error: 'Line item not found' });
       return;
     }
-    const locked = await assertQuoteLinesEditable(db, existing.quote_id as string);
+    const locked = await assertQuoteLinesEditable(db, existing.quote_id as string, tenantId);
     if (locked) {
       res.status(400).json({ error: locked });
       return;
@@ -340,9 +406,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const up = Number(patch.unit_price ?? existing.unit_price);
       patch.total = lineTotal(q, up);
     }
-    const { data, error } = await db.from('quote_line_items').update(patch).eq('id', id).select('*').single();
+    const { data, error } = await db
+      .from('quote_line_items')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
     if (await errTable(error)) return;
-    await recalculateQuote(db, existing.quote_id as string);
+    await recalculateQuote(db, existing.quote_id as string, tenantId);
     res.status(200).json({ line_item: data });
     return;
   }
@@ -353,19 +425,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { data: existing } = await db.from('quote_line_items').select('quote_id').eq('id', id).single();
+    const { data: existing } = await db
+      .from('quote_line_items')
+      .select('quote_id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .single();
     if (!existing) {
       res.status(404).json({ error: 'Line item not found' });
       return;
     }
-    const locked = await assertQuoteLinesEditable(db, existing.quote_id as string);
+    const locked = await assertQuoteLinesEditable(db, existing.quote_id as string, tenantId);
     if (locked) {
       res.status(400).json({ error: locked });
       return;
     }
-    const { error } = await db.from('quote_line_items').delete().eq('id', id);
+    const { error } = await db.from('quote_line_items').delete().eq('id', id).eq('tenant_id', tenantId);
     if (await errTable(error)) return;
-    await recalculateQuote(db, existing.quote_id as string);
+    await recalculateQuote(db, existing.quote_id as string, tenantId);
     res.status(200).json({ ok: true });
     return;
   }
@@ -377,13 +454,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'quote_id and items array are required' });
       return;
     }
-    const locked = await assertQuoteLinesEditable(db, quote_id);
+    const locked = await assertQuoteLinesEditable(db, quote_id, tenantId);
     if (locked) {
       res.status(400).json({ error: locked });
       return;
     }
-    await db.from('quote_line_items').delete().eq('quote_id', quote_id);
+    await db.from('quote_line_items').delete().eq('quote_id', quote_id).eq('tenant_id', tenantId);
     const toInsert = items.map((item: Record<string, unknown>, idx: number) => ({
+      tenant_id: tenantId,
       quote_id,
       product_service_name: String(item.product_service_name ?? '').trim(),
       quantity: Number(item.quantity ?? 0),
@@ -393,7 +471,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }));
     const { data, error } = await db.from('quote_line_items').insert(toInsert).select('*');
     if (await errTable(error)) return;
-    await recalculateQuote(db, quote_id);
+    await recalculateQuote(db, quote_id, tenantId);
     res.status(200).json({ line_items: data ?? [] });
     return;
   }
@@ -406,6 +484,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     const row = {
+      tenant_id: tenantId,
       account_id,
       address,
       city: body.city != null ? String(body.city).trim() || null : null,
@@ -434,7 +513,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         patch[k] = v === null ? null : String(v);
       }
     }
-    const { data, error } = await db.from('crm_properties').update(patch).eq('id', id).select('*').single();
+    const { data, error } = await db
+      .from('crm_properties')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
     if (await errTable(error)) return;
     if (!data) {
       res.status(404).json({ error: 'Property not found' });
@@ -450,7 +535,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { error } = await db.from('crm_properties').delete().eq('id', id);
+    const { error } = await db.from('crm_properties').delete().eq('id', id).eq('tenant_id', tenantId);
     if (await errTable(error)) return;
     res.status(200).json({ ok: true });
     return;
@@ -462,7 +547,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { data, error } = await db.from('quotes').update({ status: 'Sent', sent_at: NOW_ISO(), updated_at: NOW_ISO() }).eq('id', id).select('*').single();
+    const { data, error } = await db
+      .from('quotes')
+      .update({ status: 'Sent', sent_at: NOW_ISO(), updated_at: NOW_ISO() })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
     if (await errTable(error)) return;
     if (!data) {
       res.status(404).json({ error: 'Quote not found' });
@@ -478,7 +569,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { data, error } = await db.from('quotes').update({ status: 'Approved', approved_at: NOW_ISO(), updated_at: NOW_ISO() }).eq('id', id).select('*').single();
+    const { data, error } = await db
+      .from('quotes')
+      .update({ status: 'Approved', approved_at: NOW_ISO(), updated_at: NOW_ISO() })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
     if (await errTable(error)) return;
     if (!data) {
       res.status(404).json({ error: 'Quote not found' });
@@ -494,7 +591,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { data, error } = await db.from('quotes').update({ status: 'Converted', converted_at: NOW_ISO(), updated_at: NOW_ISO() }).eq('id', id).select('*').single();
+    const { data, error } = await db
+      .from('quotes')
+      .update({ status: 'Converted', converted_at: NOW_ISO(), updated_at: NOW_ISO() })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
     if (await errTable(error)) return;
     if (!data) {
       res.status(404).json({ error: 'Quote not found' });
@@ -510,7 +613,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'quote_id is required' });
       return;
     }
-    const { data: quote, error: qe } = await db.from('quotes').select('*').eq('id', quote_id).single();
+    const { data: quote, error: qe } = await db
+      .from('quotes')
+      .select('*')
+      .eq('id', quote_id)
+      .eq('tenant_id', tenantId)
+      .single();
     if (await errTable(qe)) return;
     if (!quote) {
       res.status(404).json({ error: 'Quote not found' });
@@ -520,12 +628,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('quote_line_items')
       .select('*')
       .eq('quote_id', quote_id)
+      .eq('tenant_id', tenantId)
       .order('sort_order', { ascending: true });
     const invoiceId = randomUUID();
     const { data: invoice, error: ie } = await db
       .from('invoices')
       .insert({
         id: invoiceId,
+        tenant_id: tenantId,
         account_id: quote.account_id,
         property_id: quote.property_id,
         quote_id,
@@ -551,6 +661,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (lines && lines.length > 0) {
       const rows = lines.map((li: Record<string, unknown>, idx: number) => ({
         id: randomUUID(),
+        tenant_id: tenantId,
         invoice_id: invoiceId,
         product_service_name: li.product_service_name,
         description: li.description ?? null,
@@ -563,8 +674,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { error: le } = await db.from('invoice_line_items').insert(rows);
       if (await errTable(le)) return;
     }
-    await syncInvoiceFinancials(db, invoiceId);
-    const { data: finv, error: fe } = await db.from('invoices').select('*').eq('id', invoiceId).single();
+    await syncInvoiceFinancials(db, invoiceId, tenantId);
+    const { data: finv, error: fe } = await db
+      .from('invoices')
+      .select('*')
+      .eq('id', invoiceId)
+      .eq('tenant_id', tenantId)
+      .single();
     if (await errTable(fe)) return;
     res.status(201).json({ invoice: finv });
     return;

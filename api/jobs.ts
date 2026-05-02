@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from './_auth';
+import { resolveTenantId } from './_tenant';
 
 function supabase(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL;
@@ -24,10 +25,18 @@ function parseBody(req: VercelRequest): Record<string, unknown> {
 
 const NOW_ISO = () => new Date().toISOString();
 
-async function recalculateJob(db: SupabaseClient, jobId: string) {
-  const { data: items } = await db.from('job_line_items').select('total').eq('job_id', jobId);
+async function recalculateJob(db: SupabaseClient, jobId: string, tenantId: string) {
+  const { data: items } = await db
+    .from('job_line_items')
+    .select('total')
+    .eq('job_id', jobId)
+    .eq('tenant_id', tenantId);
   const totalPrice = (items ?? []).reduce((sum, i) => sum + Number(i.total), 0);
-  await db.from('jobs').update({ total_price: totalPrice, updated_at: NOW_ISO() }).eq('id', jobId);
+  await db
+    .from('jobs')
+    .update({ total_price: totalPrice, updated_at: NOW_ISO() })
+    .eq('id', jobId)
+    .eq('tenant_id', tenantId);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -40,12 +49,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireAuth(req, res);
   if (!auth) return;
 
+  const tenantId = resolveTenantId();
+
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'GET') {
     const action = String(req.query.action ?? '');
     if (action === 'list') {
-      const { data, error } = await db.from('jobs').select('*').order('created_at', { ascending: false });
+      const { data, error } = await db
+        .from('jobs')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false });
       if (error) {
         res.status(500).json({ error: error.message });
         return;
@@ -59,25 +74,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ error: 'Missing id' });
         return;
       }
-      const [job, lineItems, visits, expenses, timeEntries, account, property] = await Promise.all([
-        db.from('jobs').select('*').eq('id', id).maybeSingle(),
-        db.from('job_line_items').select('*').eq('job_id', id).order('created_at', { ascending: true }),
-        db.from('job_visits').select('*').eq('job_id', id).order('scheduled_at', { ascending: false }),
-        db.from('job_expenses').select('*').eq('job_id', id).order('created_at', { ascending: false }),
-        db.from('job_time_entries').select('*').eq('job_id', id).order('started_at', { ascending: false }),
-        db.from('crm_accounts').select('*').eq('id', (job as any)?.data?.account_id).maybeSingle(),
-        db.from('properties').select('*').eq('id', (job as any)?.data?.property_id).maybeSingle(),
-      ]);
-      if (job.error) {
-        res.status(500).json({ error: job.error.message });
+      const jobRes = await db.from('jobs').select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (jobRes.error) {
+        res.status(500).json({ error: jobRes.error.message });
         return;
       }
-      if (!job.data) {
+      if (!jobRes.data) {
         res.status(404).json({ error: 'Job not found' });
         return;
       }
+      const jobRow = jobRes.data as Record<string, unknown>;
+      const accountId = jobRow.account_id != null ? String(jobRow.account_id) : '';
+      const propertyId = jobRow.property_id != null ? String(jobRow.property_id) : '';
+
+      const [lineItems, visits, expenses, timeEntries, account, property] = await Promise.all([
+        db
+          .from('job_line_items')
+          .select('*')
+          .eq('job_id', id)
+          .eq('tenant_id', tenantId)
+          .order('created_at', { ascending: true }),
+        db
+          .from('job_visits')
+          .select('*')
+          .eq('job_id', id)
+          .eq('tenant_id', tenantId)
+          .order('scheduled_at', { ascending: false }),
+        db
+          .from('job_expenses')
+          .select('*')
+          .eq('job_id', id)
+          .eq('tenant_id', tenantId)
+          .order('created_at', { ascending: false }),
+        db
+          .from('job_time_entries')
+          .select('*')
+          .eq('job_id', id)
+          .eq('tenant_id', tenantId)
+          .order('started_at', { ascending: false }),
+        accountId
+          ? db.from('crm_accounts').select('*').eq('id', accountId).eq('tenant_id', tenantId).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        propertyId
+          ? db.from('crm_properties').select('*').eq('id', propertyId).eq('tenant_id', tenantId).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+      ]);
       res.status(200).json({
-        job: job.data,
+        job: jobRes.data,
         line_items: lineItems.data ?? [],
         visits: visits.data ?? [],
         expenses: expenses.data ?? [],
@@ -116,6 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     const row = {
+      tenant_id: tenantId,
       account_id: accountId,
       property_id: body.property_id != null ? String(body.property_id) : null,
       quote_id: body.quote_id != null ? String(body.quote_id) : null,
@@ -144,8 +188,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     const [quoteRes, lineItemsRes] = await Promise.all([
-      db.from('quotes').select('*').eq('id', quoteId).maybeSingle(),
-      db.from('quote_line_items').select('*').eq('quote_id', quoteId),
+      db.from('quotes').select('*').eq('id', quoteId).eq('tenant_id', tenantId).maybeSingle(),
+      db.from('quote_line_items').select('*').eq('quote_id', quoteId).eq('tenant_id', tenantId),
     ]);
     if (quoteRes.error) {
       res.status(500).json({ error: quoteRes.error.message });
@@ -157,6 +201,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const quote = quoteRes.data as Record<string, unknown>;
     const jobRow = {
+      tenant_id: tenantId,
       account_id: String(quote.account_id ?? ''),
       property_id: quote.property_id != null ? String(quote.property_id) : null,
       quote_id: quoteId,
@@ -174,6 +219,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const quoteLineItems = lineItemsRes.data ?? [];
     if (quoteLineItems.length > 0) {
       const lineItemsToInsert = quoteLineItems.map((item: Record<string, unknown>) => ({
+        tenant_id: tenantId,
         job_id: jobId,
         product_service_name: String(item.product_service_name ?? item.description ?? ''),
         quantity: Number(item.quantity ?? 1),
@@ -183,7 +229,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }));
       await db.from('job_line_items').insert(lineItemsToInsert);
     }
-    await db.from('quotes').update({ status: 'Converted', converted_at: NOW_ISO() }).eq('id', quoteId);
+    await db
+      .from('quotes')
+      .update({ status: 'Converted', converted_at: NOW_ISO() })
+      .eq('id', quoteId)
+      .eq('tenant_id', tenantId);
     res.status(200).json({ job: createdJob });
     return;
   }
@@ -221,7 +271,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (Object.prototype.hasOwnProperty.call(body, 'automatic_payments')) {
       patch.automatic_payments = Boolean(body.automatic_payments);
     }
-    const { data, error } = await db.from('jobs').update(patch).eq('id', id).select('*').single();
+    const { data, error } = await db
+      .from('jobs')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
     if (await errTable(error)) return;
     if (!data) {
       res.status(404).json({ error: 'Job not found' });
@@ -237,7 +293,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { error } = await db.from('jobs').delete().eq('id', id);
+    const { error } = await db.from('jobs').delete().eq('id', id).eq('tenant_id', tenantId);
     if (await errTable(error)) return;
     res.status(200).json({ ok: true });
     return;
@@ -249,8 +305,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'job_id is required' });
       return;
     }
-    await recalculateJob(db, jobId);
-    const { data, error } = await db.from('jobs').select('*').eq('id', jobId).maybeSingle();
+    await recalculateJob(db, jobId, tenantId);
+    const { data, error } = await db
+      .from('jobs')
+      .select('*')
+      .eq('id', jobId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
     if (await errTable(error)) return;
     if (!data) {
       res.status(404).json({ error: 'Job not found' });
@@ -271,6 +332,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const total = quantity * unitPrice;
     const row = {
+      tenant_id: tenantId,
       job_id: jobId,
       product_service_name: productServiceName,
       quantity,
@@ -280,7 +342,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
     const { data, error } = await db.from('job_line_items').insert(row).select('*').single();
     if (await errTable(error)) return;
-    await recalculateJob(db, jobId);
+    await recalculateJob(db, jobId, tenantId);
     res.status(200).json({ line_item: data });
     return;
   }
@@ -291,7 +353,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const getRes = await db.from('job_line_items').select('*').eq('id', id).maybeSingle();
+    const getRes = await db.from('job_line_items').select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
     if (getRes.error) {
       res.status(500).json({ error: getRes.error.message });
       return;
@@ -315,13 +377,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const newQuantity = Object.prototype.hasOwnProperty.call(patch, 'quantity') ? Number(patch.quantity) : Number(existing.quantity ?? 1);
     const newUnitPrice = Object.prototype.hasOwnProperty.call(patch, 'unit_price') ? Number(patch.unit_price) : Number(existing.unit_price ?? 0);
     patch.total = newQuantity * newUnitPrice;
-    const { data, error } = await db.from('job_line_items').update(patch).eq('id', id).select('*').single();
+    const { data, error } = await db
+      .from('job_line_items')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
     if (await errTable(error)) return;
     if (!data) {
       res.status(404).json({ error: 'Line item not found' });
       return;
     }
-    await recalculateJob(db, jobId);
+    await recalculateJob(db, jobId, tenantId);
     res.status(200).json({ line_item: data });
     return;
   }
@@ -332,16 +400,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const getRes = await db.from('job_line_items').select('job_id').eq('id', id).maybeSingle();
+    const getRes = await db
+      .from('job_line_items')
+      .select('job_id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
     if (getRes.error) {
       res.status(500).json({ error: getRes.error.message });
       return;
     }
     const jobId = getRes.data ? String(getRes.data.job_id ?? '') : '';
-    const { error } = await db.from('job_line_items').delete().eq('id', id);
+    const { error } = await db.from('job_line_items').delete().eq('id', id).eq('tenant_id', tenantId);
     if (await errTable(error)) return;
     if (jobId) {
-      await recalculateJob(db, jobId);
+      await recalculateJob(db, jobId, tenantId);
     }
     res.status(200).json({ ok: true });
     return;
@@ -355,6 +428,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     const row = {
+      tenant_id: tenantId,
       job_id: jobId,
       scheduled_at: scheduledAt,
       assigned_to: body.assigned_to != null ? String(body.assigned_to) : null,
@@ -381,7 +455,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         patch[k] = v === null ? null : String(v);
       }
     }
-    const { data, error } = await db.from('job_visits').update(patch).eq('id', id).select('*').single();
+    const { data, error } = await db
+      .from('job_visits')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
     if (await errTable(error)) return;
     if (!data) {
       res.status(404).json({ error: 'Visit not found' });
@@ -401,6 +481,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('job_visits')
       .update({ status: 'Completed', completed_at: NOW_ISO(), updated_at: NOW_ISO() })
       .eq('id', id)
+      .eq('tenant_id', tenantId)
       .select('*')
       .single();
     if (await errTable(error)) return;
@@ -421,6 +502,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     const row = {
+      tenant_id: tenantId,
       job_id: jobId,
       description,
       amount,
@@ -440,7 +522,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { error } = await db.from('job_expenses').delete().eq('id', id);
+    const { error } = await db.from('job_expenses').delete().eq('id', id).eq('tenant_id', tenantId);
     if (await errTable(error)) return;
     res.status(200).json({ ok: true });
     return;
@@ -462,6 +544,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       durationMinutes = Number(body.duration_minutes);
     }
     const row = {
+      tenant_id: tenantId,
       job_id: jobId,
       started_at: startedAt,
       ended_at: body.ended_at != null ? String(body.ended_at) : null,
@@ -482,7 +565,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { error } = await db.from('job_time_entries').delete().eq('id', id);
+    const { error } = await db.from('job_time_entries').delete().eq('id', id).eq('tenant_id', tenantId);
     if (await errTable(error)) return;
     res.status(200).json({ ok: true });
     return;
