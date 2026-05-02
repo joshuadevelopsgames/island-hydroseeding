@@ -55,6 +55,7 @@ const primaryNavItems: { name: string; path: string; icon: typeof LayoutDashboar
   { name: 'Jobs', path: '/jobs', icon: Briefcase },
   { name: 'Invoices', path: '/invoices', icon: Receipt },
   { name: 'Payments', path: '/payments', icon: CreditCard },
+  { name: 'Reports', path: '/reports', icon: BarChart3 },
   { name: 'Schedule', path: '/schedule', icon: Calendar },
   { name: 'Time Tracking', path: '/time', icon: Clock },
   { name: 'Pre-trips', path: '/pre-trips', icon: ClipboardCheck },
@@ -69,7 +70,6 @@ const secondaryNavItems: { name: string; path: string; icon: typeof LayoutDashbo
   { name: 'Fuel & road', path: '/fuel', icon: Fuel },
   { name: 'Maintenance', path: '/equipment', icon: Wrench },
   { name: 'Inventory', path: '/inventory', icon: Package },
-  { name: 'Reports', path: '/reports', icon: BarChart3 },
   { name: 'Team & access', path: '/team', icon: UserCog },
 ];
 
