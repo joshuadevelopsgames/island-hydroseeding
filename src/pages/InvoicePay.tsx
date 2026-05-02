@@ -763,7 +763,6 @@ export default function InvoicePay() {
                 stripe={stripePromise}
                 options={{
                   clientSecret,
-                  business: { name: COMPANY_NAME },
                   appearance: {
                     theme: 'stripe',
                     variables: {
