@@ -256,6 +256,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'end_date',
       'salesperson_id',
       'total_price',
+      'automatic_payments',
       'notes',
     ] as const;
     for (const k of keys) {
@@ -266,9 +267,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         else if (k === 'automatic_payments') patch[k] = Boolean(v);
         else patch[k] = String(v);
       }
-    }
-    if (Object.prototype.hasOwnProperty.call(body, 'automatic_payments')) {
-      patch.automatic_payments = Boolean(body.automatic_payments);
     }
     const { data, error } = await db
       .from('jobs')
