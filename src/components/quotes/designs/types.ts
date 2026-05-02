@@ -52,6 +52,14 @@ export type DesignContext = {
   // Per-template overrides
   sectionVisibility: QuoteSectionVisibility;
   customText: QuoteCustomText;
+
+  /**
+   * When provided, designs render text fields as click-to-edit. Parents
+   * (QuoteDetail.CreateQuoteMode and template editor) wire this to update
+   * their form state, giving two-way binding between the inputs and preview.
+   * Omit on read-only / public views.
+   */
+  onFieldEdit?: (field: import('./EditableText').EditableField, value: string) => void;
 };
 
 export type DesignLineItem = {

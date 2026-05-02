@@ -7,6 +7,11 @@ import type {
 } from '@/lib/quotesTypes';
 import { apiFetch } from './apiClient';
 import { dedupeCatalogProducts } from './dedupeCatalogProducts';
+import {
+  enqueueOfflinePost,
+  OfflineQueuedError,
+  shouldQueueOffline,
+} from './offlineMutationQueue';
 
 const QUOTES = '/api/quotes';
 const PRODUCTS = '/api/products';
@@ -82,6 +87,10 @@ export async function fetchQuoteBundle(quoteId: string): Promise<QuoteBundle> {
 }
 
 export async function quotesPost<T>(body: Record<string, unknown>): Promise<T> {
+  if (shouldQueueOffline()) {
+    enqueueOfflinePost(QUOTES, body);
+    throw new OfflineQueuedError();
+  }
   const r = await apiFetch(QUOTES, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -117,6 +126,10 @@ export async function fetchTemplates(): Promise<QuoteTemplate[]> {
 }
 
 export async function productsPost<T>(body: Record<string, unknown>): Promise<T> {
+  if (shouldQueueOffline()) {
+    enqueueOfflinePost(PRODUCTS, body);
+    throw new OfflineQueuedError();
+  }
   const r = await apiFetch(PRODUCTS, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

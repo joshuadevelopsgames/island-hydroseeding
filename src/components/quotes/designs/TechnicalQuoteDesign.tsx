@@ -1,4 +1,5 @@
 import { fmtNum, isVisible, type DesignContext } from './types';
+import EditableText from './EditableText';
 
 const STYLE = `
   .tq-quote{--bg:#f6f5f2;--grid:#e3e0d8;--ink:#14130f;--muted:#6f6a5e;--accent:#b03337;--accent-soft:#f5dada;
@@ -280,10 +281,17 @@ export default function TechnicalQuoteDesign({ ctx }: { ctx: DesignContext }) {
                     <li key={i}>{p}</li>
                   ))}
                 </ol>
-              ) : ctx.contractDisclaimer ? (
-                <p>{ctx.contractDisclaimer}</p>
               ) : (
-                <p style={{ color: 'var(--muted)' }}>No contract terms provided.</p>
+                <EditableText
+                  as="div"
+                  multiline
+                  field="contractDisclaimer"
+                  value={ctx.contractDisclaimer ?? ''}
+                  onEdit={ctx.onFieldEdit}
+                  placeholder="Add terms & conditions…"
+                  emptyFallback={<p style={{ color: 'var(--muted)' }}>No contract terms provided.</p>}
+                  style={{ whiteSpace: 'pre-wrap' }}
+                />
               )}
             </div>
           )}
@@ -321,8 +329,8 @@ export default function TechnicalQuoteDesign({ ctx }: { ctx: DesignContext }) {
         {isVisible(sv, 'accept_block') && (
           <section className="tq-accept">
             <div>
-              <h3>{ct.accept_heading || 'To accept · client'}</h3>
-              <p>{ct.accept_body || "Sign & date below. We'll invoice the deposit and confirm a start window within 24 hrs."}</p>
+              <EditableText as="div" field="accept_heading" value={ct.accept_heading || 'To accept · client'} onEdit={ctx.onFieldEdit} style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: '14px', margin: '0 0 8px', color: 'var(--accent-soft)' }} />
+              <EditableText as="div" multiline field="accept_body" value={ct.accept_body || "Sign & date below. We'll invoice the deposit and confirm a start window within 24 hrs."} onEdit={ctx.onFieldEdit} style={{ fontSize: '10px', color: 'rgba(246,245,242,.6)', marginBottom: '12px', lineHeight: 1.5 }} />
               <div className="tq-accept-line">{ctx.acceptedSignatureName || ''}</div>
               <div className="tq-accept-cap">
                 <span>Signature</span>
@@ -330,8 +338,8 @@ export default function TechnicalQuoteDesign({ ctx }: { ctx: DesignContext }) {
               </div>
             </div>
             <div>
-              <h3>{ct.issued_by_heading || `Issued by · ${ctx.tenant.name}`}</h3>
-              <p>{ct.issued_by_body || `${ctx.tenant.ownerName ?? ctx.tenant.name} — reply with questions before signing.`}</p>
+              <EditableText as="div" field="issued_by_heading" value={ct.issued_by_heading || `Issued by · ${ctx.tenant.name}`} onEdit={ctx.onFieldEdit} style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: '14px', margin: '0 0 8px', color: 'var(--accent-soft)' }} />
+              <EditableText as="div" multiline field="issued_by_body" value={ct.issued_by_body || `${ctx.tenant.ownerName ?? ctx.tenant.name} — reply with questions before signing.`} onEdit={ctx.onFieldEdit} style={{ fontSize: '10px', color: 'rgba(246,245,242,.6)', marginBottom: '12px', lineHeight: 1.5 }} />
               <div className="tq-accept-line">{ctx.tenant.ownerName || ctx.tenant.name}</div>
               <div className="tq-accept-cap">
                 <span>Authorized</span>

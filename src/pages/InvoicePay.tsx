@@ -30,6 +30,7 @@ import {
   INVOICE_LOGO_URL_FALLBACK,
   type TenantBrandingApi,
 } from '@/lib/tenantBranding';
+import InvoicePayDesignBlock from '@/components/invoices/InvoicePayDesignBlock';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,10 @@ interface PublicInvoice {
   balance_due: number;
   payment_terms: string | null;
   notes: string | null;
+  /** Snapshot of the design at create time; falls back to 'editorial'. */
+  template_design?: string | null;
+  section_visibility?: Record<string, boolean> | null;
+  custom_text?: Record<string, unknown> | null;
 }
 
 interface PublicLineItem {
@@ -561,9 +566,49 @@ export default function InvoicePay() {
 
       <div className="invoice-pay-grid mx-auto grid max-w-6xl gap-8 px-4 py-8 lg:grid-cols-[1fr_380px] lg:items-start lg:gap-10 lg:px-8">
         <article
-          className="invoice-pay-document order-2 space-y-6 rounded-2xl border border-[var(--border-strong)] bg-[var(--surface-color)] p-6 shadow-[var(--shadow-sm)] sm:p-8 lg:order-1"
+          className="invoice-pay-document order-2 space-y-6 rounded-2xl border border-[var(--border-strong)] bg-[var(--surface-color)] p-4 shadow-[var(--shadow-sm)] sm:p-6 lg:order-1 overflow-hidden"
           aria-label="Invoice details"
         >
+          <InvoicePayDesignBlock
+            invoice={invoice}
+            lineItems={line_items}
+            account={account}
+            property={property}
+            branding={br}
+            isOverdue={isPastDue(invoice.due_date, balanceDue)}
+          />
+
+          <footer className="invoice-pay-no-print mt-6 border-t border-[var(--border-color)] pt-6 text-center text-sm text-[var(--text-muted)]">
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-raised)] px-4 py-2.5 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+              onClick={() => window.print()}
+            >
+              <Printer className="h-4 w-4 shrink-0" aria-hidden />
+              Print invoice
+            </button>
+            {br.etransfer ? (
+              <p className="mt-4 leading-relaxed">
+                To pay by <strong className="text-[var(--text-secondary)]">e-Transfer</strong>, send to{' '}
+                <a href={`mailto:${br.etransfer}`} className="font-semibold text-[var(--primary-green)] hover:underline">
+                  {br.etransfer}
+                </a>
+                . Please include invoice #{String(invoice.invoice_number).padStart(4, '0')} in the message.
+              </p>
+            ) : contactEmail ? (
+              <p className="mt-4 leading-relaxed">
+                Questions or e-Transfer? Email{' '}
+                <a href={`mailto:${contactEmail}`} className="font-semibold text-[var(--primary-green)] hover:underline">
+                  {contactEmail}
+                </a>{' '}
+                and reference this invoice number.
+              </p>
+            ) : null}
+          </footer>
+        </article>
+
+        {/* legacy detailed render below — hidden, kept for reference until shipping */}
+        <article aria-hidden style={{ display: 'none' }}>
           <div className="flex items-start gap-3 border-b border-[var(--border-color)] pb-6">
             <div
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"

@@ -77,7 +77,7 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
     const { data: invoice, error } = await db
       .from('invoices')
       .select(
-        'id, tenant_id, invoice_number, title, status, issue_date, due_date, subtotal, tax_rate, tax_amount, total, amount_paid, balance_due, payment_terms, notes, account_id, property_id'
+        'id, tenant_id, invoice_number, title, status, issue_date, due_date, subtotal, tax_rate, tax_amount, total, amount_paid, balance_due, payment_terms, notes, account_id, property_id, template_design, section_visibility, custom_text'
       )
       .eq('pay_token', token)
       .single();

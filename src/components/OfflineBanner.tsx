@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { WifiOff } from 'lucide-react';
 
 /**
- * Shown when the browser reports offline. Workspace + fleet use local queues until reconnected.
+ * Shown when the browser reports offline. Workspace, fleet, and quote/product POSTs queue locally until reconnected.
  */
 export default function OfflineBanner() {
   const [offline, setOffline] = useState(
@@ -29,9 +29,8 @@ export default function OfflineBanner() {
     >
       <WifiOff size={18} className="shrink-0 opacity-80" aria-hidden />
       <span>
-        You&apos;re offline. Schedule, tasks, time logs, pre-trips, FLHAs, and fleet data are saved on this
-        device and will sync when you&apos;re back online. Quotes and CRM still need a connection to save
-        changes.
+        You&apos;re offline. The line below shows what still works on this page and whether anything is waiting
+        to sync.
       </span>
     </div>
   );

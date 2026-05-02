@@ -1,4 +1,5 @@
 import { fmtMoney, isVisible, type DesignContext } from './types';
+import EditableText from './EditableText';
 
 const STYLE = `
   .eq-quote {
@@ -152,7 +153,15 @@ export default function EditorialQuoteDesign({ ctx }: { ctx: DesignContext }) {
           <h1 className="eq-title">
             Quote <em>№ Q-{ctx.quoteNumber}</em>
           </h1>
-          <div className="eq-title-sub">{ctx.title || 'Estimate for hydroseeding services — pre-job'}</div>
+          <EditableText
+            as="div"
+            field="title"
+            value={ctx.title}
+            onEdit={ctx.onFieldEdit}
+            placeholder="Estimate for hydroseeding services — pre-job"
+            className="eq-title-sub"
+          />
+
         </div>
         <div className="eq-validity">
           <div className="eq-valid-pill">Valid {ctx.validityDays} days</div>
@@ -233,8 +242,14 @@ export default function EditorialQuoteDesign({ ctx }: { ctx: DesignContext }) {
             </span>
           </div>
 
-          {ctx.introduction && (
-            <p
+          {(ctx.introduction || ctx.onFieldEdit) && (
+            <EditableText
+              as="div"
+              multiline
+              field="introduction"
+              value={ctx.introduction ?? ''}
+              onEdit={ctx.onFieldEdit}
+              placeholder="Add an introduction…"
               style={{
                 fontFamily: 'Inter,sans-serif',
                 fontSize: '12.5px',
@@ -244,9 +259,7 @@ export default function EditorialQuoteDesign({ ctx }: { ctx: DesignContext }) {
                 lineHeight: 1.55,
                 whiteSpace: 'pre-wrap',
               }}
-            >
-              {ctx.introduction}
-            </p>
+            />
           )}
 
           <table className="eq-table">
@@ -303,12 +316,17 @@ export default function EditorialQuoteDesign({ ctx }: { ctx: DesignContext }) {
             <h4>Terms &amp; conditions</h4>
             {ct.terms_paragraphs?.length ? (
               ct.terms_paragraphs.map((p, i) => <p key={i}>{p}</p>)
-            ) : ctx.contractDisclaimer ? (
-              <p>{ctx.contractDisclaimer}</p>
             ) : (
-              <p>
-                <span>No contract terms provided.</span>
-              </p>
+              <EditableText
+                as="div"
+                multiline
+                field="contractDisclaimer"
+                value={ctx.contractDisclaimer ?? ''}
+                onEdit={ctx.onFieldEdit}
+                placeholder="Add terms & conditions…"
+                emptyFallback={<p><span>No contract terms provided.</span></p>}
+                style={{ whiteSpace: 'pre-wrap' }}
+              />
             )}
           </div>
         )}
@@ -351,11 +369,21 @@ export default function EditorialQuoteDesign({ ctx }: { ctx: DesignContext }) {
       {isVisible(sv, 'accept_block') && (
         <section className="eq-accept">
           <div>
-            <h3>{ct.accept_heading || 'To accept this estimate'}</h3>
-            <p>
-              {ct.accept_body ||
-                'Sign & date below, or reply to this email with "accepted". We’ll send a deposit invoice and lock in your scheduling window.'}
-            </p>
+            <EditableText
+              as="div"
+              field="accept_heading"
+              value={ct.accept_heading || 'To accept this estimate'}
+              onEdit={ctx.onFieldEdit}
+              style={{ fontFamily: "'Fraunces',serif", fontStyle: 'italic', fontWeight: 400, fontSize: '24px', margin: '0 0 8px' }}
+            />
+            <EditableText
+              as="div"
+              multiline
+              field="accept_body"
+              value={ct.accept_body || 'Sign & date below, or reply to this email with "accepted". We\'ll send a deposit invoice and lock in your scheduling window.'}
+              onEdit={ctx.onFieldEdit}
+              style={{ fontFamily: "'Inter',sans-serif", fontSize: '11.5px', color: 'var(--muted)', marginBottom: '14px', lineHeight: 1.5 }}
+            />
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px' }}>
               <div>
                 <div className="eq-sig-line">{ctx.acceptedSignatureName || ''}</div>
@@ -373,8 +401,21 @@ export default function EditorialQuoteDesign({ ctx }: { ctx: DesignContext }) {
             </div>
           </div>
           <div>
-            <h3>{ct.issued_by_heading || 'Issued by'}</h3>
-            <p>{ct.issued_by_body || `${ctx.tenant.ownerName ?? ctx.tenant.name} will be your point of contact.`}</p>
+            <EditableText
+              as="div"
+              field="issued_by_heading"
+              value={ct.issued_by_heading || 'Issued by'}
+              onEdit={ctx.onFieldEdit}
+              style={{ fontFamily: "'Fraunces',serif", fontStyle: 'italic', fontWeight: 400, fontSize: '24px', margin: '0 0 8px' }}
+            />
+            <EditableText
+              as="div"
+              multiline
+              field="issued_by_body"
+              value={ct.issued_by_body || `${ctx.tenant.ownerName ?? ctx.tenant.name} will be your point of contact.`}
+              onEdit={ctx.onFieldEdit}
+              style={{ fontFamily: "'Inter',sans-serif", fontSize: '11.5px', color: 'var(--muted)', marginBottom: '14px', lineHeight: 1.5 }}
+            />
             <div
               className="eq-sig-line"
               style={{ color: 'var(--accent)', fontFamily: "'Fraunces',serif", fontStyle: 'italic', fontSize: '26px' }}
@@ -391,8 +432,15 @@ export default function EditorialQuoteDesign({ ctx }: { ctx: DesignContext }) {
 
       {(isVisible(sv, 'footer_quote') || isVisible(sv, 'footer_meta')) && (
         <footer className="eq-foot">
-          {isVisible(sv, 'footer_quote') && ct.footer_quote && (
-            <div className="eq-foot-q">"{ct.footer_quote}"</div>
+          {isVisible(sv, 'footer_quote') && (ct.footer_quote || ctx.onFieldEdit) && (
+            <EditableText
+              as="div"
+              field="footer_quote"
+              value={ct.footer_quote ?? ''}
+              onEdit={ctx.onFieldEdit}
+              placeholder='Add a footer note…'
+              className="eq-foot-q"
+            />
           )}
           {isVisible(sv, 'footer_meta') && (
             <div className="eq-foot-meta" style={{ marginLeft: 'auto' }}>

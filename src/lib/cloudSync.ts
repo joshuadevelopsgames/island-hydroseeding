@@ -60,12 +60,26 @@ function applyServerPayload(payload: Record<string, unknown> | null | undefined)
   }
 }
 
+function notifyWorkspacePendingChanged() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('workspace-sync-pending-updated'));
+}
+
+export function hasWorkspacePushPending(): boolean {
+  try {
+    return localStorage.getItem(PENDING_PUSH_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 function markWorkspacePushPending() {
   try {
     localStorage.setItem(PENDING_PUSH_KEY, '1');
   } catch {
     /* ignore */
   }
+  notifyWorkspacePendingChanged();
 }
 
 function clearWorkspacePushPending() {
@@ -74,6 +88,7 @@ function clearWorkspacePushPending() {
   } catch {
     /* ignore */
   }
+  notifyWorkspacePendingChanged();
 }
 
 function canReachNetwork(): boolean {
@@ -133,7 +148,7 @@ async function pushToServer() {
   }
 }
 
-async function pullFromServer(): Promise<{ merge: boolean; updated_at: string | null }> {
+async function pullFromServerImpl(): Promise<{ merge: boolean; updated_at: string | null }> {
   if (isMisconfigured) return { merge: false, updated_at: null };
   try {
     const {
@@ -149,9 +164,10 @@ async function pullFromServer(): Promise<{ merge: boolean; updated_at: string | 
       updated_at?: string | null;
     };
     const updated_at = data.updated_at ?? null;
-    const localAt = localStorage.getItem(META_SERVER_AT);
     if (!updated_at) return { merge: false, updated_at: null };
 
+    // Re-read after network: another serialized pull may have updated META while we awaited.
+    const localAt = localStorage.getItem(META_SERVER_AT);
     if (localAt === updated_at) return { merge: false, updated_at };
 
     const serverKeys = data.payload && typeof data.payload === 'object' ? Object.keys(data.payload) : [];
@@ -169,6 +185,29 @@ async function pullFromServer(): Promise<{ merge: boolean; updated_at: string | 
   }
 }
 
+/** Serialize pulls so concurrent callers (visibility + bootstrap + online) cannot all merge+reload. */
+let pullQueue: Promise<unknown> = Promise.resolve();
+
+function pullFromServer(): Promise<{ merge: boolean; updated_at: string | null }> {
+  const next = pullQueue.then(() => pullFromServerImpl());
+  pullQueue = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+}
+
+let mergeReloadCoalesced = false;
+
+/** One full reload after merging server workspace into localStorage (coalesces parallel triggers). */
+export function reloadAfterWorkspaceMerge() {
+  if (mergeReloadCoalesced) return;
+  mergeReloadCoalesced = true;
+  queueMicrotask(() => {
+    window.location.reload();
+  });
+}
+
 let bootstrapOnce: Promise<'reload' | 'ready'> | null = null;
 
 export function runAppBootstrap(): Promise<'reload' | 'ready'> {
@@ -179,7 +218,7 @@ export function runAppBootstrap(): Promise<'reload' | 'ready'> {
       window.addEventListener('online', () => {
         void pullFromServer().then(({ merge }) => {
           if (merge) {
-            window.location.reload();
+            reloadAfterWorkspaceMerge();
             return;
           }
           void pushToServer();
@@ -218,7 +257,7 @@ export async function syncWorkspaceOnAuth(): Promise<void> {
   if (!session) return;
   const { merge } = await pullFromServer();
   if (merge) {
-    window.location.reload();
+    reloadAfterWorkspaceMerge();
     return;
   }
   await pushToServer();
@@ -239,7 +278,7 @@ function installVisibilitySync() {
       if (merge) {
         // Most stores read localStorage once on mount, so a reload is the
         // simplest way to guarantee every component picks up fresh data.
-        window.location.reload();
+        reloadAfterWorkspaceMerge();
       }
     });
   });

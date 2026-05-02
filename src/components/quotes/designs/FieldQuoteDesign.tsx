@@ -1,4 +1,5 @@
 import { fmtMoney, isVisible, type DesignContext } from './types';
+import EditableText from './EditableText';
 
 const STYLE = `
   .fq-quote{--paper:#f7f1e1;--paper-edge:#ebe2cc;--ink:#2b2418;--ink-soft:#5b4f3a;--accent:#b03337;--moss:#5a6b3a;
@@ -156,7 +157,7 @@ export default function FieldQuoteDesign({ ctx }: { ctx: DesignContext }) {
             <div className="fq-doc-num-big">
               № <em>Q · {ctx.quoteNumber}</em>
             </div>
-            <div className="fq-doc-num-sub">{ctx.title || 'Pre-job estimate'}</div>
+            <EditableText as="div" field="title" value={ctx.title || ''} onEdit={ctx.onFieldEdit} placeholder="Pre-job estimate" className="fq-doc-num-sub" />
           </div>
           <div className="fq-validity">
             <div className="pill">Valid {ctx.validityDays} days</div>
@@ -284,10 +285,17 @@ export default function FieldQuoteDesign({ ctx }: { ctx: DesignContext }) {
               <h4>Terms</h4>
               {ct.terms_paragraphs?.length ? (
                 ct.terms_paragraphs.map((p, i) => <p key={i}>{p}</p>)
-              ) : ctx.contractDisclaimer ? (
-                <p>{ctx.contractDisclaimer}</p>
               ) : (
-                <p style={{ color: 'var(--ink-soft)' }}>No contract terms provided.</p>
+                <EditableText
+                  as="div"
+                  multiline
+                  field="contractDisclaimer"
+                  value={ctx.contractDisclaimer ?? ''}
+                  onEdit={ctx.onFieldEdit}
+                  placeholder="Add terms…"
+                  emptyFallback={<p style={{ color: 'var(--ink-soft)' }}>No contract terms provided.</p>}
+                  style={{ whiteSpace: 'pre-wrap' }}
+                />
               )}
             </div>
           )}
@@ -324,7 +332,7 @@ export default function FieldQuoteDesign({ ctx }: { ctx: DesignContext }) {
         {isVisible(sv, 'accept_block') && (
           <section className="fq-accept">
             <div className="fq-accept-head">
-              <h3>{ct.accept_heading || 'Accept this estimate'}</h3>
+              <EditableText as="div" field="accept_heading" value={ct.accept_heading || 'Accept this estimate'} onEdit={ctx.onFieldEdit} style={{ fontFamily: "'Fraunces',serif", fontStyle: 'italic', fontSize: '22px', fontWeight: 400, margin: 0 }} />
               <small>
                 Sign to schedule · {ctx.validityDays}-day validity
               </small>

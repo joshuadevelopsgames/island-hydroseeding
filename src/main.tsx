@@ -4,7 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import App from './App.tsx';
 import { AuthProvider } from './context/AuthContext';
 import PwaPrompts from './components/PwaPrompts';
-import { runAppBootstrap } from './lib/cloudSync';
+import { runAppBootstrap, reloadAfterWorkspaceMerge } from './lib/cloudSync';
 import { initConsoleCapture } from './lib/consoleCapture';
 import { initTheme } from './lib/theme';
 import { queryClient } from './lib/queryClient';
@@ -24,7 +24,7 @@ function Root() {
     void runAppBootstrap().then((outcome) => {
       if (cancelled) return;
       if (outcome === 'reload') {
-        window.location.reload();
+        reloadAfterWorkspaceMerge();
         return;
       }
       setReady(true);

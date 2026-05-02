@@ -35,7 +35,9 @@ import FeedbackFab from './FeedbackFab';
 import AnnouncementBanner from './AnnouncementBanner';
 import ThemeToggle from './ThemeToggle';
 import FleetSyncBootstrap from './FleetSyncBootstrap';
+import OfflineApiQueueBootstrap from './OfflineApiQueueBootstrap';
 import OfflineBanner from './OfflineBanner';
+import PageConnectionStrip from './PageConnectionStrip';
 
 function sidebarUserInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -332,7 +334,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <main className="main-content">
         <div className="main-content__inner">
           <FleetSyncBootstrap />
+          <OfflineApiQueueBootstrap />
           <OfflineBanner />
+          <PageConnectionStrip />
           <AnnouncementBanner />
           {children}
         </div>

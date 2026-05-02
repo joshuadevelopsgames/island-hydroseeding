@@ -69,12 +69,18 @@ function applyRemoteBundle(bundle: FleetBundle) {
   });
 }
 
+function notifyFleetPendingChanged() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('fleet-sync-pending-updated'));
+}
+
 function markPending() {
   try {
     localStorage.setItem(PENDING_KEY, '1');
   } catch {
     /* ignore */
   }
+  notifyFleetPendingChanged();
 }
 
 function clearPending() {
@@ -83,6 +89,7 @@ function clearPending() {
   } catch {
     /* ignore */
   }
+  notifyFleetPendingChanged();
 }
 
 export function hasPendingFleetPush(): boolean {

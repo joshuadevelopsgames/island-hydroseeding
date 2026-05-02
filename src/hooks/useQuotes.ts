@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   fetchQuotes,
   fetchQuoteBundle,
@@ -8,9 +9,19 @@ import {
   fetchAccountProperties,
   productsPost,
 } from '@/lib/quotesApi';
+import { isOfflineQueuedError } from '@/lib/offlineMutationQueue';
 import type { Quote, QuoteTemplate } from '@/lib/quotesTypes';
 import type { Invoice } from '@/lib/invoicesTypes';
 import { invoicesKeys } from '@/hooks/useInvoices';
+
+function offlineQueuedSettled(invalidate: () => void) {
+  return (_data: unknown, error: unknown) => {
+    if (error && isOfflineQueuedError(error)) {
+      toast.success('Saved offline — will sync when you reconnect');
+      invalidate();
+    }
+  };
+}
 
 export const quotesKeys = {
   all: ['quotes'] as const,
@@ -68,55 +79,66 @@ export function useQuotesMutations() {
     mutationFn: (payload: Record<string, unknown>) =>
       quotesPost<{ quote: Quote }>({ action: 'quote.create', ...payload }),
     onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
   });
 
   const updateQuote = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       quotesPost<{ quote: Quote }>({ action: 'quote.update', ...payload }),
     onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
   });
 
   const deleteQuote = useMutation({
     mutationFn: (id: string) => quotesPost({ action: 'quote.delete', id }),
     onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
   });
 
   const createLineItem = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       quotesPost({ action: 'line_item.create', ...payload }),
     onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
   });
 
   const updateLineItem = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       quotesPost({ action: 'line_item.update', ...payload }),
     onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
   });
 
   const deleteLineItem = useMutation({
     mutationFn: (id: string) => quotesPost({ action: 'line_item.delete', id }),
     onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
   });
 
   const sendQuote = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       quotesPost<{ quote: Quote }>({ action: 'quote.send', ...payload }),
     onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
   });
 
   const convertQuote = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       quotesPost<{ quote: Quote }>({ action: 'quote.convert_to_job', ...payload }),
     onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
   });
+
+  const invalidateQuotesAndInvoices = () => {
+    invalidate();
+    void qc.invalidateQueries({ queryKey: invoicesKeys.all });
+  };
 
   const convertQuoteToInvoice = useMutation({
     mutationFn: (quoteId: string) =>
       quotesPost<{ invoice: Invoice }>({ action: 'quote.convert_to_invoice', quote_id: quoteId }),
-    onSuccess: () => {
-      invalidate();
-      void qc.invalidateQueries({ queryKey: invoicesKeys.all });
-    },
+    onSuccess: invalidateQuotesAndInvoices,
+    onSettled: offlineQueuedSettled(invalidateQuotesAndInvoices),
   });
 
   return {
@@ -142,24 +164,28 @@ export function useTemplateMutations() {
     mutationFn: (payload: Record<string, unknown>) =>
       productsPost<{ template: QuoteTemplate }>({ action: 'template.create', ...payload }),
     onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
   });
 
   const updateTemplate = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       productsPost<{ template: QuoteTemplate }>({ action: 'template.update', ...payload }),
     onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
   });
 
   const deleteTemplate = useMutation({
     mutationFn: (id: string) =>
       productsPost({ action: 'template.delete', id }),
     onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
   });
 
   const setDefaultTemplate = useMutation({
     mutationFn: (id: string) =>
       productsPost<{ template: QuoteTemplate }>({ action: 'template.set_default', id }),
     onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
   });
 
   return { createTemplate, updateTemplate, deleteTemplate, setDefaultTemplate };

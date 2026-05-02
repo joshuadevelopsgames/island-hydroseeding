@@ -37,6 +37,8 @@ export type InvoiceDesignContext = {
 
   sectionVisibility: QuoteSectionVisibility;
   customText: QuoteCustomText;
+
+  onFieldEdit?: (field: import('@/components/quotes/designs/EditableText').EditableField, value: string) => void;
 };
 
 export type InvoiceDraftInput = {
