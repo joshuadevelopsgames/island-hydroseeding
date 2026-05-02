@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentType } from 'react';
 import EditorialQuoteDesign from './designs/EditorialQuoteDesign';
 import TechnicalQuoteDesign from './designs/TechnicalQuoteDesign';
 import FieldQuoteDesign from './designs/FieldQuoteDesign';
@@ -16,7 +16,7 @@ type Props = {
   autoFit?: boolean;
 };
 
-const renderers: Record<QuoteDesign, (props: { ctx: DesignContext }) => JSX.Element> = {
+const renderers: Record<QuoteDesign, ComponentType<{ ctx: DesignContext }>> = {
   editorial: EditorialQuoteDesign,
   technical: TechnicalQuoteDesign,
   field: FieldQuoteDesign,

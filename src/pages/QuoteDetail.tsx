@@ -21,12 +21,13 @@ import { useQuoteDetail, useProducts, useTemplates, useQuotesMutations, useAccou
 import { useCrmAccounts } from '@/hooks/useCrm';
 import { toast } from 'sonner';
 import { formatErrorForUi } from '@/lib/quotesApi';
-import { QUOTE_STATUS_OPTIONS, type Quote, type QuoteBundle, type QuoteLineItem, type ProductService, type QuoteStatus } from '@/lib/quotesTypes';
+import { QUOTE_STATUS_OPTIONS, type Quote, type QuoteBundle, type QuoteLineItem, type ProductService, type QuoteStatus, type CrmProperty } from '@/lib/quotesTypes';
 import { apiFetch } from '@/lib/apiClient';
 import { resolveClientBranding, type TenantBrandingApi } from '@/lib/tenantBranding';
 import { TenantBrandPreview } from '@/components/TenantBrandPreview';
 import QuoteDesignPreview from '@/components/quotes/QuoteDesignPreview';
-import QuoteDesignPicker, { DESIGN_META } from '@/components/quotes/QuoteDesignPicker';
+import QuoteDesignPicker from '@/components/quotes/QuoteDesignPicker';
+import { DESIGN_META } from '@/components/quotes/quoteDesignsMeta';
 import { ctxFromBundle, ctxFromDraft } from '@/components/quotes/buildDesignContext';
 import {
   QUOTE_DESIGNS,
@@ -68,6 +69,11 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
   const [introduction, setIntroduction] = useState<string>('');
   const [contractDisclaimer, setContractDisclaimer] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
+  // null while we wait for templates to load — fall back to the company default's design then.
+  const [templateDesignOverride, setTemplateDesignOverride] = useState<QuoteDesign | null>(null);
+  const [sectionVisibilityOverride, setSectionVisibilityOverride] = useState<QuoteSectionVisibility | null>(null);
+  const [customTextOverride, setCustomTextOverride] = useState<QuoteCustomText | null>(null);
+  const [showPreview, setShowPreview] = useState<boolean>(true);
   const [discountType, setDiscountType] = useState<'none' | 'amount' | 'percent'>('none');
   const [discountValue, setDiscountValue] = useState<number>(0);
   const [depositRequired, setDepositRequired] = useState<boolean>(false);
@@ -117,8 +123,24 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
       if (t.line_items_json && t.line_items_json.length > 0) {
         setLineItems(t.line_items_json);
       }
+      setTemplateDesignOverride(t.template_design ?? 'editorial');
+      setSectionVisibilityOverride(t.section_visibility ?? {});
+      setCustomTextOverride(t.custom_text ?? {});
+    } else {
+      // Cleared the template — fall back to the company default at render time.
+      setTemplateDesignOverride(null);
+      setSectionVisibilityOverride(null);
+      setCustomTextOverride(null);
     }
   };
+
+  // Resolve the active design / visibility / custom text by precedence:
+  // explicit override (template selected, or design picker used) → company default → 'editorial'.
+  const defaultTpl = templates?.find((t) => t.is_default);
+  const templateDesign = templateDesignOverride ?? defaultTpl?.template_design ?? 'editorial';
+  const sectionVisibility = sectionVisibilityOverride ?? defaultTpl?.section_visibility ?? {};
+  const customText = customTextOverride ?? defaultTpl?.custom_text ?? {};
+  const setTemplateDesign = (d: QuoteDesign) => setTemplateDesignOverride(d);
 
   const handleAddLineItem = () => {
     setCurrentLineItem({
@@ -209,6 +231,10 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
         discount_value: discountValue,
         deposit_required: depositRequired,
         deposit_amount: depositAmount,
+        template_id: selectedTemplateId || null,
+        template_design: templateDesign,
+        section_visibility: sectionVisibility,
+        custom_text: customText,
       } as Record<string, unknown>);
 
       const newQuote = (response as { quote?: Quote })?.quote;
@@ -247,6 +273,10 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
         discount_value: discountValue,
         deposit_required: depositRequired,
         deposit_amount: depositAmount,
+        template_id: selectedTemplateId || null,
+        template_design: templateDesign,
+        section_visibility: sectionVisibility,
+        custom_text: customText,
       } as Record<string, unknown>);
 
       const newQuote = (response as { quote?: Quote })?.quote;
@@ -276,6 +306,52 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
         products={products ?? []}
         onSave={handleSaveLineItem}
       />
+
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+          <div>
+            <CardTitle className="text-lg">Live preview</CardTitle>
+            <CardDescription>
+              Updates as you fill out the form · {DESIGN_META.find((m) => m.id === templateDesign)?.label}
+            </CardDescription>
+          </div>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setShowPreview(!showPreview)}>
+            {showPreview ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            {showPreview ? 'Hide preview' : 'Show preview'}
+          </Button>
+        </CardHeader>
+        {showPreview && (
+          <CardContent className="space-y-4">
+            <div>
+              <Label className="text-xs uppercase tracking-wider text-[var(--text-muted)]">
+                Design
+              </Label>
+              <div className="mt-2">
+                <QuoteDesignPicker
+                  value={templateDesign}
+                  onChange={setTemplateDesign}
+                  defaultDesign={templates?.find((t) => t.is_default)?.template_design}
+                />
+              </div>
+            </div>
+            <NewQuotePreviewPane
+              templateDesign={templateDesign}
+              title={title}
+              selectedProperty={selectedProperty}
+              introduction={introduction}
+              contractDisclaimer={contractDisclaimer}
+              notes={notes}
+              selectedAccount={selectedAccount ?? null}
+              lineItems={lineItems}
+              depositRequired={depositRequired}
+              depositAmount={depositAmount}
+              sectionVisibility={sectionVisibility}
+              customText={customText}
+              clientBranding={clientBranding}
+            />
+          </CardContent>
+        )}
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
@@ -879,6 +955,18 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
         </div>
       </div>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">
+            Preview · {DESIGN_META.find((m) => m.id === (quote.template_design as QuoteDesign))?.label || 'Editorial'}
+          </CardTitle>
+          <CardDescription>This is what the client sees on the public quote link.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SavedQuotePreviewPane bundle={bundle as QuoteBundle} branding={clientBranding} />
+        </CardContent>
+      </Card>
+
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           {account && (
@@ -1294,4 +1382,70 @@ function LineItemDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Live preview pane wrappers — each builds a DesignContext from local state.
+// ──────────────────────────────────────────────────────────────────────────
+type NewQuotePreviewProps = {
+  templateDesign: QuoteDesign;
+  title: string;
+  selectedProperty: CrmProperty | null | undefined;
+  introduction: string;
+  contractDisclaimer: string;
+  notes: string;
+  selectedAccount: { id: string; name: string; company: string | null; phone: string | null; email: string | null } | null;
+  lineItems: Array<{
+    product_service_name: string;
+    description: string | null;
+    quantity: number;
+    unit_price: number;
+    sort_order: number;
+    is_optional?: boolean;
+  }>;
+  depositRequired: boolean;
+  depositAmount: number;
+  sectionVisibility: QuoteSectionVisibility;
+  customText: QuoteCustomText;
+  clientBranding: ReturnType<typeof resolveClientBranding>;
+};
+
+function NewQuotePreviewPane(props: NewQuotePreviewProps) {
+  const ctx = useMemo(
+    () =>
+      ctxFromDraft({
+        title: props.title || 'New quote',
+        introduction: props.introduction || null,
+        contractDisclaimer: props.contractDisclaimer || null,
+        notes: props.notes || null,
+        account: props.selectedAccount,
+        property: props.selectedProperty ?? null,
+        lineItems: props.lineItems.map((it) => ({
+          ...it,
+          total: it.quantity * it.unit_price,
+        })),
+        taxRate: 0.05,
+        depositRequired: props.depositRequired,
+        depositAmount: props.depositAmount,
+        sectionVisibility: props.sectionVisibility,
+        customText: props.customText,
+        branding: props.clientBranding,
+      }),
+    [props]
+  );
+  return <QuoteDesignPreview design={props.templateDesign} ctx={ctx} />;
+}
+
+/** Live preview for an already-saved quote; used in ViewEditQuoteMode. */
+export function SavedQuotePreviewPane({
+  bundle,
+  branding,
+}: {
+  bundle: QuoteBundle;
+  branding: ReturnType<typeof resolveClientBranding>;
+}) {
+  const ctx = useMemo(() => ctxFromBundle(bundle, undefined, branding), [bundle, branding]);
+  const design = (bundle.quote.template_design || 'editorial') as QuoteDesign;
+  if (!QUOTE_DESIGNS.includes(design)) return <QuoteDesignPreview design="editorial" ctx={ctx} />;
+  return <QuoteDesignPreview design={design} ctx={ctx} />;
 }

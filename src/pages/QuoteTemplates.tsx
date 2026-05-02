@@ -12,7 +12,8 @@ import {
   type QuoteSectionVisibility,
   type QuoteCustomText,
 } from '@/lib/quotesTypes';
-import QuoteDesignPicker, { DESIGN_META } from '@/components/quotes/QuoteDesignPicker';
+import QuoteDesignPicker from '@/components/quotes/QuoteDesignPicker';
+import { DESIGN_META } from '@/components/quotes/quoteDesignsMeta';
 import QuoteDesignPreview from '@/components/quotes/QuoteDesignPreview';
 import { ctxFromDraft } from '@/components/quotes/buildDesignContext';
 import { apiFetch } from '@/lib/apiClient';
