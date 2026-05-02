@@ -196,8 +196,8 @@ export default function Invoices() {
               {isLoading ? 'Loading…' : `${filtered.length} shown · ${invoices.length} total`}
             </p>
           </div>
-          <div className="flex flex-col gap-3 w-full sm:w-auto sm:flex-row sm:items-center">
-            <div className="relative w-full sm:max-w-xs">
+          <div className="flex w-full min-w-0 flex-row flex-wrap items-center gap-3 sm:w-auto sm:max-w-[min(100%,42rem)] sm:justify-end">
+            <div className="relative min-w-0 flex-1 max-w-md">
               <Search
                 size={18}
                 aria-hidden
@@ -213,7 +213,7 @@ export default function Invoices() {
               />
             </div>
             <select
-              className="flex h-10 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
+              className="h-10 w-44 shrink-0 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm sm:w-48"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               aria-label="Filter by status"

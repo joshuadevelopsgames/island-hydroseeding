@@ -250,9 +250,8 @@ export default function Quotes() {
             </span>
           </p>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            {/* Pill filters */}
-            <div className="flex flex-wrap gap-2">
+          <div className="flex w-full min-w-0 flex-row flex-wrap items-center gap-3">
+            <div className="flex min-w-0 flex-1 flex-wrap gap-2">
               {['All', 'Draft', 'Sent', 'Awaiting Response', 'Approved', 'Converted'].map((s) => (
                 <button
                   key={s}
@@ -267,9 +266,7 @@ export default function Quotes() {
                 </button>
               ))}
             </div>
-
-            {/* Search */}
-            <div className="relative w-full sm:w-64">
+            <div className="relative min-w-[12rem] w-64 max-w-sm shrink-0">
               <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
               <input
                 type="search"

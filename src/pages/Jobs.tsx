@@ -201,8 +201,8 @@ export default function Jobs() {
       </div>
 
       <Card className="mb-4 min-w-0 p-4">
-        <div className="flex w-full min-w-0 flex-wrap items-end gap-3">
-          <div className="relative min-w-0 w-full basis-full sm:basis-[min(100%,18rem)] sm:max-w-md sm:grow">
+        <div className="flex w-full min-w-0 flex-row flex-wrap items-center gap-3">
+          <div className="relative min-w-0 flex-1 max-w-md">
             <Search
               size={18}
               aria-hidden
@@ -217,7 +217,7 @@ export default function Jobs() {
               aria-label="Search jobs"
             />
           </div>
-          <div className="w-full min-w-0 sm:w-44 sm:max-w-none sm:shrink-0">
+          <div className="w-44 shrink-0 min-w-0 sm:w-48">
             <select
               className={FILTER_SELECT_CLASS}
               value={statusFilter}

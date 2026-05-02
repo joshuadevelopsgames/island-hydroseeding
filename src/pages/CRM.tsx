@@ -273,8 +273,8 @@ export default function CRM() {
       </div>
 
       <Card className="mb-4 min-w-0 p-4">
-        <div className="flex w-full min-w-0 flex-wrap items-end gap-3">
-          <div className="relative min-w-0 w-full basis-full sm:basis-[min(100%,18rem)] sm:max-w-md sm:grow">
+        <div className="flex w-full min-w-0 flex-row flex-wrap items-center gap-3">
+          <div className="relative min-w-0 flex-1 max-w-md">
             <Search
               size={18}
               aria-hidden
@@ -289,7 +289,7 @@ export default function CRM() {
               aria-label="Search accounts"
             />
           </div>
-          <div className="w-[calc(50%-0.375rem)] min-w-0 max-w-[11rem] sm:w-40 sm:max-w-none">
+          <div className="w-36 shrink-0 min-w-0 sm:w-40">
             <select
               className={FILTER_SELECT_CLASS}
               value={typeFilter}
@@ -304,7 +304,7 @@ export default function CRM() {
               ))}
             </select>
           </div>
-          <div className="w-[calc(50%-0.375rem)] min-w-0 max-w-[11rem] sm:w-44 sm:max-w-none">
+          <div className="w-40 shrink-0 min-w-0 sm:w-44">
             <select
               className={FILTER_SELECT_CLASS}
               value={statusFilter}
@@ -319,7 +319,7 @@ export default function CRM() {
               ))}
             </select>
           </div>
-          <div className="flex min-w-0 w-full basis-full items-center gap-2 sm:w-[min(100%,17rem)] sm:max-w-[17rem] sm:basis-auto sm:shrink-0">
+          <div className="flex w-56 min-w-0 shrink-0 items-center gap-2 sm:w-60">
             <ArrowUpDown size={16} aria-hidden className="shrink-0 text-[var(--text-muted)]" />
             <select
               className={FILTER_SELECT_CLASS}
