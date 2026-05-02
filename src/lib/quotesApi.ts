@@ -35,6 +35,17 @@ async function readJson<T>(r: Response): Promise<T> {
   }
 }
 
+export async function fetchQuotesForAccount(accountId: string): Promise<Quote[]> {
+  const r = await apiFetch(`${QUOTES}?action=list&account_id=${encodeURIComponent(accountId)}`);
+  if (r.status === 404 || r.status === 503) return [];
+  if (!r.ok) {
+    const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
+    throw new Error(j.error || `Quotes ${r.status}`);
+  }
+  const data = await readJson<{ quotes: Quote[] }>(r);
+  return data.quotes ?? [];
+}
+
 export async function fetchQuotes(): Promise<Quote[]> {
   const r = await apiFetch(`${QUOTES}?action=list`);
   if (r.status === 404 || r.status === 503) return [];
@@ -52,7 +63,22 @@ export async function fetchQuoteBundle(quoteId: string): Promise<QuoteBundle> {
     const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
     throw new Error(j.error || `Quote ${r.status}`);
   }
-  return readJson(r);
+  const raw = await readJson<QuoteBundle>(r);
+  const q = raw.quote as Record<string, unknown>;
+  return {
+    ...raw,
+    tax_lines: raw.tax_lines ?? [],
+    quote_notes: raw.quote_notes ?? [],
+    quote_attachments: raw.quote_attachments ?? [],
+    quote: {
+      ...raw.quote,
+      require_payment_method_on_file: Boolean(q.require_payment_method_on_file),
+      metadata:
+        q.metadata && typeof q.metadata === 'object' && !Array.isArray(q.metadata)
+          ? (q.metadata as Record<string, unknown>)
+          : {},
+    },
+  };
 }
 
 export async function quotesPost<T>(body: Record<string, unknown>): Promise<T> {

@@ -78,11 +78,10 @@ async function handleGet(req: VercelRequest, res: VercelResponse, db: SupabaseCl
   const action = req.query.action as string;
 
   if (action === 'list') {
-    const { data, error } = await db
-      .from('invoices')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false });
+    const accountId = String(req.query.account_id ?? '').trim();
+    let q = db.from('invoices').select('*').eq('tenant_id', tenantId);
+    if (accountId) q = q.eq('account_id', accountId);
+    const { data, error } = await q.order('created_at', { ascending: false });
 
     if (error) {
       return res.status(400).json({ error: errTable('invoices', error) });

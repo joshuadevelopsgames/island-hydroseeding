@@ -21,7 +21,7 @@ import { useQuoteDetail, useProducts, useTemplates, useQuotesMutations, useAccou
 import { useCrmAccounts } from '@/hooks/useCrm';
 import { toast } from 'sonner';
 import { formatErrorForUi } from '@/lib/quotesApi';
-import type { Quote, QuoteLineItem, QuoteBundle, ProductService } from '@/lib/quotesTypes';
+import { QUOTE_STATUS_OPTIONS, type Quote, type QuoteBundle, type QuoteLineItem, type ProductService, type QuoteStatus } from '@/lib/quotesTypes';
 import { apiFetch } from '@/lib/apiClient';
 import { resolveClientBranding, type TenantBrandingApi } from '@/lib/tenantBranding';
 import { TenantBrandPreview } from '@/components/TenantBrandPreview';
@@ -609,6 +609,7 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
     sendQuote,
     convertQuote,
     convertQuoteToInvoice,
+    updateQuote,
     updateLineItem,
     deleteLineItem,
   } = useQuotesMutations();
@@ -683,6 +684,17 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
     }
   };
 
+  const handleStatusChange = async (next: QuoteStatus) => {
+    if (next === quote.status) return;
+    try {
+      await updateQuote.mutateAsync({ id: quote.id, status: next });
+      toast.success('Status updated');
+      await refetch();
+    } catch (err) {
+      toast.error(formatErrorForUi(err));
+    }
+  };
+
   const handleConvertToJob = async () => {
     try {
       await convertQuote.mutateAsync({ id: quote.id });
@@ -740,6 +752,8 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
       case 'Draft':
         return 'secondary';
       case 'Sent':
+      case 'Awaiting Response':
+      case 'Changes Requested':
         return 'outline';
       case 'Approved':
         return 'default';
@@ -999,11 +1013,24 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
                   <p className="font-semibold">{quote.quote_number}</p>
                 </div>
               )}
-              <div>
-                <p className="text-[var(--text-muted)]">Status</p>
-                <Badge variant={getStatusColor(quote.status) as any} className="mt-1">
-                  {quote.status}
-                </Badge>
+              <div className="space-y-2">
+                <Label htmlFor="quote-status">Status</Label>
+                <select
+                  id="quote-status"
+                  value={quote.status}
+                  disabled={updateQuote.isPending}
+                  onChange={(e) => void handleStatusChange(e.target.value as QuoteStatus)}
+                  className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--input-bg)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--primary-green)] focus:ring-opacity-50 disabled:opacity-60"
+                >
+                  {!QUOTE_STATUS_OPTIONS.includes(quote.status as QuoteStatus) && (
+                    <option value={quote.status}>{quote.status}</option>
+                  )}
+                  {QUOTE_STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
               </div>
               {quote.salesperson_id && (
                 <div>

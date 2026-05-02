@@ -1,5 +1,14 @@
 export type QuoteStatus = 'Draft' | 'Sent' | 'Awaiting Response' | 'Changes Requested' | 'Approved' | 'Converted';
 
+export const QUOTE_STATUS_OPTIONS: readonly QuoteStatus[] = [
+  'Draft',
+  'Sent',
+  'Awaiting Response',
+  'Changes Requested',
+  'Approved',
+  'Converted',
+];
+
 export type ProductService = {
   id: string;
   name: string;
@@ -25,6 +34,8 @@ export type QuoteTemplate = {
 export type QuoteLineItemDraft = {
   product_service_name: string;
   description: string | null;
+  /** Groups consecutive lines under a section heading (Jobber-style). */
+  section_title?: string | null;
   quantity: number;
   unit_price: number;
   total: number;
@@ -65,6 +76,10 @@ export type Quote = {
   total: number;
   deposit_required: boolean;
   deposit_amount: number | null;
+  /** Policy flag only; enforce with Stripe — never store card numbers here. */
+  require_payment_method_on_file: boolean;
+  /** Non-secret quote-level JSON (import hints, UI, etc.). */
+  metadata: Record<string, unknown>;
   approval_token: string | null;
   notes: string | null;
   created_at: string;
@@ -74,9 +89,47 @@ export type Quote = {
   converted_at: string | null;
 };
 
+export type QuoteTaxLine = {
+  id: string;
+  quote_id: string;
+  label: string;
+  registration_number: string | null;
+  rate: number;
+  amount: number;
+  sort_order: number;
+  created_at: string;
+};
+
+export type QuoteNote = {
+  id: string;
+  quote_id: string;
+  body: string;
+  kind: string;
+  extra: Record<string, unknown>;
+  created_by_user_id: string | null;
+  created_by_email: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type QuoteAttachment = {
+  id: string;
+  quote_id: string;
+  file_name: string;
+  file_size: number | null;
+  file_type: string | null;
+  storage_path: string;
+  attachment_kind: string;
+  created_at: string;
+  signed_url?: string | null;
+};
+
 export type QuoteBundle = {
   quote: Quote;
   line_items: QuoteLineItem[];
+  tax_lines: QuoteTaxLine[];
+  quote_notes: QuoteNote[];
+  quote_attachments: QuoteAttachment[];
   account: { id: string; name: string; company: string | null; phone: string | null; email: string | null } | null;
   property: CrmProperty | null;
 };

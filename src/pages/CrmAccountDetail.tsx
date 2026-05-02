@@ -1,7 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useQueries } from '@tanstack/react-query';
 import { formatInVancouver } from '@/lib/vancouverTime';
-import { ArrowLeft, Download, FileText, Loader2, Trash2, Upload } from 'lucide-react';
+import {
+  Activity,
+  ArrowLeft,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  FileText,
+  Loader2,
+  Pencil,
+  Plus,
+  StickyNote,
+  Trash2,
+  Upload,
+} from 'lucide-react';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,6 +47,11 @@ import {
   type AccountAttachment,
 } from '@/lib/accountAttachments';
 import { toast } from 'sonner';
+import { fetchJobsForAccount } from '@/lib/jobsApi';
+import type { Job } from '@/lib/jobsTypes';
+import { fetchQuotesForAccount } from '@/lib/quotesApi';
+import type { Quote } from '@/lib/quotesTypes';
+import { cn } from '@/lib/utils';
 
 const INTERACTION_KINDS = [
   { value: 'call', label: 'Call' },
@@ -43,6 +63,55 @@ const INTERACTION_KINDS = [
   { value: 'other', label: 'Other' },
 ] as const;
 
+function relativeShort(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const d = Math.floor(diff / 86400000);
+  if (d <= 0) return 'Today';
+  if (d === 1) return 'Yesterday';
+  if (d < 7) return `${d} days ago`;
+  if (d < 30) return `${Math.floor(d / 7)} weeks ago`;
+  return formatInVancouver(iso, 'MMM d, yyyy');
+}
+
+function interactionsHistogram(interactions: { occurred_at: string }[], numWeeks = 12) {
+  const now = Date.now();
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const oldest = now - numWeeks * weekMs;
+  const buckets = Array.from({ length: numWeeks }, () => 0);
+  for (const it of interactions) {
+    const t = new Date(it.occurred_at).getTime();
+    if (t < oldest || t > now) continue;
+    const idx = Math.floor((t - oldest) / weekMs);
+    if (idx >= 0 && idx < numWeeks) buckets[idx]!++;
+  }
+  const total = buckets.reduce((a, b) => a + b, 0);
+  const last4 = buckets.slice(-4).reduce((a, b) => a + b, 0);
+  const prior8 = buckets.slice(0, 8).reduce((a, b) => a + b, 0);
+  const avgPrior = prior8 / 8;
+  const avgLast = last4 / 4;
+  const pctChange =
+    avgPrior === 0 ? (last4 > 0 ? 100 : 0) : Math.round(((avgLast - avgPrior) / avgPrior) * 100);
+  return { buckets, total, last4, prior8, pctChange };
+}
+
+function accountInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+  return name.slice(0, 2).toUpperCase() || '?';
+}
+
+function parseNotesLines(notes: string | null): string[] {
+  if (!notes?.trim()) return [];
+  return notes
+    .split(/\n+/)
+    .map((s) => s.replace(/^\s*[-•*]\s*/, '').trim())
+    .filter(Boolean);
+}
+
+function money(n: number): string {
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(n);
+}
+
 export default function CrmAccountDetail() {
   const { accountId } = useParams<{ accountId: string }>();
   const navigate = useNavigate();
@@ -51,13 +120,43 @@ export default function CrmAccountDetail() {
   const m = useCrmMutations();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [tab, setTab] = useState('info');
+  const [metricsYear, setMetricsYear] = useState(() => new Date().getFullYear());
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
 
   const account = data?.account;
+
+  const [quotesQuery, jobsQuery] = useQueries({
+    queries: [
+      {
+        queryKey: ['quotes', 'list', 'account', accountId] as const,
+        queryFn: () => fetchQuotesForAccount(accountId!),
+        enabled: Boolean(accountId),
+        staleTime: 60_000,
+      },
+      {
+        queryKey: ['jobs', 'list', 'account', accountId] as const,
+        queryFn: () => fetchJobsForAccount(accountId!),
+        staleTime: 60_000,
+        enabled: Boolean(accountId),
+      },
+    ],
+  });
+
+  const accountQuotes = quotesQuery.data ?? [];
+  const accountJobs = jobsQuery.data ?? [];
 
   const sortedInteractions = useMemo(
     () => [...(data?.interactions ?? [])].sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1)),
     [data?.interactions]
   );
+
+  const yearOptions = useMemo(() => {
+    const y = new Date().getFullYear();
+    return [y, y - 1, y - 2, y - 3, y - 4];
+  }, []);
+
+  const hist = useMemo(() => interactionsHistogram(sortedInteractions), [sortedInteractions]);
 
   if (isLoading) {
     return (
@@ -105,26 +204,67 @@ export default function CrmAccountDetail() {
         onCancel={() => setDeleteOpen(false)}
       />
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <Link to="/crm" className="mb-2 inline-flex items-center gap-2 text-sm font-semibold text-[var(--primary-green)]">
-            <ArrowLeft className="h-4 w-4" /> Accounts
-          </Link>
-          <h1 className="mb-1">{account.name}</h1>
-          <div className="flex flex-wrap items-center gap-2">
-            {account.company && <span className="text-sm text-[var(--text-muted)]">{account.company}</span>}
-            <Badge variant="outline">{account.account_type}</Badge>
-            <Badge variant="secondary">{account.status}</Badge>
+      <div>
+        <Link to="/crm" className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-[var(--primary-green)]">
+          <ArrowLeft className="h-4 w-4" /> Accounts
+        </Link>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 flex-1 gap-4">
+            <div
+              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-green)] text-lg font-bold text-white"
+              aria-hidden
+            >
+              {accountInitials(account.name)}
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">{account.name}</h1>
+              {account.company && <p className="mt-0.5 text-sm text-[var(--text-muted)]">{account.company}</p>}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {crmStatusPill(account.status)}
+                {crmTypeBadge(account.account_type)}
+                <span className="font-mono text-xs text-[var(--text-muted)]">ID: {account.id}</span>
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="secondary" size="sm" onClick={() => setEditOpen(true)}>
-            Edit account
-          </Button>
-          <Button type="button" variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
-            <Trash2 className="h-4 w-4" />
-            Delete
-          </Button>
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <label className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
+              <Calendar className="h-4 w-4 shrink-0" />
+              <select
+                className="h-9 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-2 text-sm"
+                value={metricsYear}
+                onChange={(e) => setMetricsYear(Number(e.target.value))}
+              >
+                {yearOptions.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={() => setEditOpen(true)}>
+              <Pencil className="mr-1.5 h-3.5 w-3.5" />
+              Edit
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="rounded-full"
+              onClick={() => {
+                setTab('timeline');
+                requestAnimationFrame(() =>
+                  document.getElementById('log-interaction-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                );
+              }}
+            >
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Log interaction
+            </Button>
+            <Button type="button" variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -135,20 +275,75 @@ export default function CrmAccountDetail() {
         onSave={(patch) => m.updateAccount.mutateAsync({ id: account.id, ...patch })}
       />
 
-      <Tabs defaultValue="overview">
-        <TabsList className="w-full flex-wrap justify-start sm:w-auto">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="contacts">Contacts</TabsTrigger>
-          <TabsTrigger value="timeline">Timeline</TabsTrigger>
-          <TabsTrigger value="research">Research</TabsTrigger>
-          <TabsTrigger value="files">Files</TabsTrigger>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="h-auto w-full flex-wrap justify-start gap-1 bg-transparent p-0 sm:w-auto">
+          <TabsTrigger
+            value="info"
+            className="rounded-none border-b-2 border-transparent px-3 py-2 data-[state=active]:border-[var(--primary-green)] data-[state=active]:bg-transparent"
+          >
+            Info
+          </TabsTrigger>
+          <TabsTrigger
+            value="contacts"
+            className="rounded-none border-b-2 border-transparent px-3 py-2 data-[state=active]:border-[var(--primary-green)] data-[state=active]:bg-transparent"
+          >
+            Contacts
+          </TabsTrigger>
+          <TabsTrigger
+            value="quotes"
+            className="rounded-none border-b-2 border-transparent px-3 py-2 data-[state=active]:border-[var(--primary-green)] data-[state=active]:bg-transparent"
+          >
+            Quotes
+          </TabsTrigger>
+          <TabsTrigger
+            value="jobs"
+            className="rounded-none border-b-2 border-transparent px-3 py-2 data-[state=active]:border-[var(--primary-green)] data-[state=active]:bg-transparent"
+          >
+            Jobs
+          </TabsTrigger>
+          <TabsTrigger
+            value="timeline"
+            className="rounded-none border-b-2 border-transparent px-3 py-2 data-[state=active]:border-[var(--primary-green)] data-[state=active]:bg-transparent"
+          >
+            Timeline
+          </TabsTrigger>
+          <TabsTrigger
+            value="research"
+            className="rounded-none border-b-2 border-transparent px-3 py-2 data-[state=active]:border-[var(--primary-green)] data-[state=active]:bg-transparent"
+          >
+            Research
+          </TabsTrigger>
+          <TabsTrigger
+            value="files"
+            className="rounded-none border-b-2 border-transparent px-3 py-2 data-[state=active]:border-[var(--primary-green)] data-[state=active]:bg-transparent"
+          >
+            Files
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview">
-          <OverviewCard account={account} />
+        <TabsContent value="info" className="mt-6 space-y-6">
+          <InfoDashboard
+            account={account}
+            metricsYear={metricsYear}
+            quotes={accountQuotes}
+            jobs={accountJobs}
+            quotesLoading={quotesQuery.isPending}
+            jobsLoading={jobsQuery.isPending}
+            interactions={sortedInteractions}
+            hist={hist}
+            breakdownOpen={breakdownOpen}
+            onToggleBreakdown={() => setBreakdownOpen((v) => !v)}
+            onEditNotes={() => setEditOpen(true)}
+          />
         </TabsContent>
         <TabsContent value="contacts">
           <ContactsTab accountId={account.id} contacts={data?.contacts ?? []} m={m} />
+        </TabsContent>
+        <TabsContent value="quotes">
+          <AccountQuotesTab quotes={accountQuotes} loading={quotesQuery.isPending} />
+        </TabsContent>
+        <TabsContent value="jobs">
+          <AccountJobsTab jobs={accountJobs} loading={jobsQuery.isPending} />
         </TabsContent>
         <TabsContent value="timeline">
           <TimelineTab
@@ -169,35 +364,475 @@ export default function CrmAccountDetail() {
   );
 }
 
-function OverviewCard({ account }: { account: NonNullable<ReturnType<typeof useCrmAccountDetail>['data']>['account'] }) {
+function crmStatusPill(status: string) {
+  const s = status as CrmAccountStatus | 'Active';
+  const pill = cn(
+    'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium',
+    s === 'Active' && 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-100',
+    s === 'New Lead' && 'bg-sky-50 text-blue-950 dark:bg-sky-950/45 dark:text-sky-100',
+    s === 'Contacted' && 'bg-amber-50 text-amber-900 dark:bg-amber-950/45 dark:text-amber-100',
+    s === 'Estimate Sent' && 'bg-violet-50 text-violet-900 dark:bg-violet-950/45 dark:text-violet-100',
+    s === 'Won / Closed' && 'bg-emerald-100 text-emerald-950 dark:bg-emerald-950/55 dark:text-emerald-100',
+    s === 'Lost' && 'bg-slate-100 text-slate-700 dark:bg-slate-800/80 dark:text-slate-200',
+    ![
+      'Active',
+      'New Lead',
+      'Contacted',
+      'Estimate Sent',
+      'Won / Closed',
+      'Lost',
+    ].includes(status) &&
+      'border border-[var(--border-color)] bg-[var(--surface-raised)] text-[var(--text-secondary)]'
+  );
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Account details</CardTitle>
-        <CardDescription>Read-only summary — use Edit account to change fields.</CardDescription>
+    <span className={pill}>
+      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current opacity-90" />
+      {status}
+    </span>
+  );
+}
+
+function crmTypeBadge(type: string) {
+  const t = type as CrmAccountType;
+  const variantClass: Partial<Record<CrmAccountType, string>> = {
+    Residential:
+      'border-emerald-200/90 bg-emerald-50 text-emerald-800 dark:border-emerald-600/35 dark:bg-emerald-950/40 dark:text-emerald-100',
+    Commercial:
+      'border-sky-200/90 bg-sky-50 text-sky-800 dark:border-sky-600/35 dark:bg-sky-950/40 dark:text-sky-100',
+    Municipal:
+      'border-violet-200/90 bg-violet-50 text-violet-800 dark:border-violet-600/35 dark:bg-violet-950/40 dark:text-violet-100',
+  };
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        'whitespace-nowrap text-xs font-medium',
+        variantClass[t] ?? 'border-[var(--border-color)] bg-[var(--surface-raised)] text-[var(--text-secondary)]'
+      )}
+    >
+      {type}
+    </Badge>
+  );
+}
+
+function InfoDashboard({
+  account,
+  metricsYear,
+  quotes,
+  jobs,
+  quotesLoading,
+  jobsLoading,
+  interactions,
+  hist,
+  breakdownOpen,
+  onToggleBreakdown,
+  onEditNotes,
+}: {
+  account: NonNullable<ReturnType<typeof useCrmAccountDetail>['data']>['account'];
+  metricsYear: number;
+  quotes: Quote[];
+  jobs: Job[];
+  quotesLoading: boolean;
+  jobsLoading: boolean;
+  interactions: NonNullable<ReturnType<typeof useCrmAccountDetail>['data']>['interactions'];
+  hist: ReturnType<typeof interactionsHistogram>;
+  breakdownOpen: boolean;
+  onToggleBreakdown: () => void;
+  onEditNotes: () => void;
+}) {
+  const metrics = useMemo(() => {
+    const y = metricsYear;
+    const inYear = (iso: string) => new Date(iso).getFullYear() === y;
+    const quotesY = quotes.filter((q) => inYear(q.created_at));
+    const nonDraft = (q: Quote) => q.status !== 'Draft';
+    const wonQ = (q: Quote) => q.status === 'Approved' || q.status === 'Converted';
+    const decided = quotes.filter(nonDraft);
+    const wonAll = decided.filter(wonQ);
+    const winRate = decided.length ? Math.round((wonAll.length / decided.length) * 1000) / 10 : 0;
+    const estValueY = quotesY.reduce((s, q) => s + q.total, 0);
+    const jobsY = jobs.filter((j) => inYear(j.created_at));
+    const wonJobValueY = jobsY.filter((j) => j.status === 'Completed').reduce((s, j) => s + j.total_price, 0);
+    return {
+      quotesYCount: quotesY.length,
+      quotesTotalCount: quotes.length,
+      winRate,
+      estValueY,
+      wonJobValueY,
+      decidedCount: decided.length,
+      wonQuoteCount: wonAll.length,
+      jobsYCompleted: jobsY.filter((j) => j.status === 'Completed').length,
+      jobsYTotal: jobsY.length,
+    };
+  }, [quotes, jobs, metricsYear]);
+
+  const lastContact = interactions[0]?.occurred_at;
+  const maxBar = Math.max(1, ...hist.buckets);
+  const momentumLabel =
+    hist.pctChange > 0 ? `Heating up +${hist.pctChange}%` : hist.pctChange < 0 ? `Cooling ${hist.pctChange}%` : 'Steady';
+
+  return (
+    <>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              Key dates
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="flex justify-between gap-2">
+              <span className="text-[var(--text-muted)]">Last contact</span>
+              <span className="font-medium text-[var(--text-primary)]">
+                {lastContact ? relativeShort(lastContact) : '—'}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-[var(--text-muted)]">Date created</span>
+              <span className="font-medium text-[var(--text-primary)]">
+                {formatInVancouver(account.created_at, 'MMM d, yyyy')}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-[var(--text-muted)]">Created by</span>
+              <span className="text-[var(--text-secondary)]">—</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              Quotes
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {quotesLoading ? (
+              <div className="flex items-center gap-2 py-4 text-sm text-[var(--text-muted)]">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+              </div>
+            ) : (
+              <>
+                <p className="text-3xl font-bold tabular-nums text-[var(--text-primary)]">{metrics.quotesYCount}</p>
+                <p className="text-xs text-[var(--text-muted)]">
+                  in {metricsYear} · {metrics.quotesTotalCount} all time
+                </p>
+                <p className="mt-3 text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                  Win rate {metrics.winRate}%
+                  <span className="ml-1 font-normal text-[var(--text-muted)]">
+                    ({metrics.wonQuoteCount} won / {metrics.decidedCount} sent+)
+                  </span>
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              Work value
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {quotesLoading || jobsLoading ? (
+              <div className="flex items-center gap-2 py-4 text-sm text-[var(--text-muted)]">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+              </div>
+            ) : (
+              <>
+                <div>
+                  <p className="text-xs text-[var(--text-muted)]">Quote total ({metricsYear})</p>
+                  <p className="text-2xl font-bold tabular-nums">{money(metrics.estValueY)}</p>
+                  <p className="text-xs text-[var(--text-muted)]">{metrics.quotesYCount} quotes</p>
+                </div>
+                <div className="mt-4 border-t border-[var(--border-color)] pt-4">
+                  <p className="text-xs text-[var(--text-muted)]">Completed jobs ({metricsYear})</p>
+                  <p className="text-2xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                    {money(metrics.wonJobValueY)}
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {metrics.jobsYCompleted} completed / {metrics.jobsYTotal} jobs
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onToggleBreakdown}
+                  className="mt-3 flex items-center gap-1 text-xs font-semibold text-[var(--primary-green)]"
+                >
+                  {breakdownOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  {breakdownOpen ? 'Hide' : 'Show'} calculation breakdown
+                </button>
+                {breakdownOpen && (
+                  <ul className="mt-2 space-y-1 rounded-[var(--radius-sm)] bg-[var(--surface-raised)] p-3 text-xs text-[var(--text-secondary)]">
+                    <li>
+                      <strong className="text-[var(--text-primary)]">Quote total</strong> sums <code>quote.total</code>{' '}
+                      for quotes created in {metricsYear}.
+                    </li>
+                    <li>
+                      <strong className="text-[var(--text-primary)]">Win rate</strong> is won quotes (Approved or
+                      Converted) ÷ non-draft quotes.
+                    </li>
+                    <li>
+                      <strong className="text-[var(--text-primary)]">Completed jobs</strong> sums{' '}
+                      <code>job.total_price</code> for jobs with status Completed in {metricsYear}.
+                    </li>
+                  </ul>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="shadow-sm">
+        <CardHeader className="flex flex-row items-center gap-2 pb-2">
+          <Activity className="h-4 w-4 text-[var(--primary-green)]" />
+          <CardTitle className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            Account momentum
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end">
+            <div className="flex h-[100px] flex-1 items-end gap-1 border-b border-[var(--border-color)] pb-1">
+              {hist.buckets.map((n, i) => {
+                const barPx = Math.max(4, Math.round((n / maxBar) * 88));
+                const isRecent = i >= hist.buckets.length - 4;
+                return (
+                  <div
+                    key={i}
+                    className="flex min-w-0 flex-1 flex-col justify-end"
+                    title={`Week ${i + 1}: ${n} interaction(s)`}
+                  >
+                    <div
+                      className={cn(
+                        'w-full rounded-t transition-colors',
+                        isRecent ? 'bg-sky-600 dark:bg-sky-500' : 'bg-sky-200 dark:bg-sky-800/80'
+                      )}
+                      style={{ height: `${barPx}px` }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex shrink-0 flex-col gap-2 text-sm lg:w-52">
+              <div className="flex justify-between gap-4">
+                <span className="text-[var(--text-muted)]">Total (12w)</span>
+                <span className="font-semibold tabular-nums">{hist.total}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-[var(--text-muted)]">Last 4w</span>
+                <span className="font-semibold tabular-nums">{hist.last4}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-[var(--text-muted)]">Prior 8w</span>
+                <span className="font-semibold tabular-nums">{hist.prior8}</span>
+              </div>
+              <span
+                className={cn(
+                  'inline-flex w-fit items-center rounded-full px-2.5 py-1 text-xs font-semibold',
+                  hist.pctChange >= 0
+                    ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-100'
+                    : 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200'
+                )}
+              >
+                {momentumLabel}
+              </span>
+            </div>
+          </div>
+          <p className="mt-4 text-xs text-[var(--text-muted)]">
+            Based on logged interactions (calls, emails, meetings, notes, etc.) in the last 12 weeks.
+          </p>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <AccountNotesCard notes={account.notes} onEdit={onEditNotes} />
+        <GeneralInfoCard account={account} />
+      </div>
+    </>
+  );
+}
+
+function AccountNotesCard({ notes, onEdit }: { notes: string | null; onEdit: () => void }) {
+  const lines = parseNotesLines(notes);
+  return (
+    <Card className="shadow-sm">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="flex items-center gap-2 text-base font-semibold">
+          <StickyNote className="h-4 w-4 text-[var(--text-muted)]" />
+          Account notes
+        </CardTitle>
+        <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={onEdit}>
+          <Pencil className="mr-1.5 h-3.5 w-3.5" />
+          Edit
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div
+          className="flex gap-3 rounded-[var(--radius-sm)] border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-100"
+          role="status"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-200/80 text-amber-900 dark:bg-amber-900/80 dark:text-amber-100">
+            !
+          </span>
+          <p className="pt-0.5 font-medium">Don&apos;t be creepy! Use notes for helpful context only.</p>
+        </div>
+        {lines.length > 0 ? (
+          <ul className="list-disc space-y-2 pl-5 text-sm text-[var(--text-secondary)]">
+            {lines.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-[var(--text-muted)]">No notes yet. Click Edit to add context for your team.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function GeneralInfoCard({
+  account,
+}: {
+  account: NonNullable<ReturnType<typeof useCrmAccountDetail>['data']>['account'];
+}) {
+  return (
+    <Card className="shadow-sm">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base font-semibold">General information</CardTitle>
+        <CardDescription>Contact and marketing fields — use Edit to update.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <p>
-          <span className="font-semibold text-[var(--text-primary)]">Phone:</span>{' '}
+          <span className="font-semibold text-[var(--text-primary)]">Phone</span>
+          <br />
           <span className="text-[var(--text-secondary)]">{formatPhone(account.phone) || '—'}</span>
         </p>
         <p>
-          <span className="font-semibold text-[var(--text-primary)]">Email:</span>{' '}
+          <span className="font-semibold text-[var(--text-primary)]">Email</span>
+          <br />
           <span className="text-[var(--text-secondary)]">{account.email ?? '—'}</span>
         </p>
         <p>
-          <span className="font-semibold text-[var(--text-primary)]">Address:</span>{' '}
+          <span className="font-semibold text-[var(--text-primary)]">Address</span>
+          <br />
           <span className="text-[var(--text-secondary)]">{account.address ?? '—'}</span>
         </p>
         <p>
-          <span className="font-semibold text-[var(--text-primary)]">Marketing:</span>{' '}
+          <span className="font-semibold text-[var(--text-primary)]">Marketing source</span>
+          <br />
           <span className="text-[var(--text-secondary)]">{account.marketing_source ?? '—'}</span>
         </p>
-        {account.notes && (
-          <p className="whitespace-pre-wrap text-[var(--text-secondary)]">
-            <span className="font-semibold text-[var(--text-primary)]">Notes:</span> {account.notes}
-          </p>
-        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AccountQuotesTab({ quotes, loading }: { quotes: Quote[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center gap-2 py-12 text-sm text-[var(--text-muted)]">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading quotes…
+        </CardContent>
+      </Card>
+    );
+  }
+  if (quotes.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-sm text-[var(--text-muted)]">No quotes for this account yet.</CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Quotes</CardTitle>
+        <CardDescription>Estimates linked to this account.</CardDescription>
+      </CardHeader>
+      <CardContent className="overflow-x-auto">
+        <table className="w-full min-w-[480px] text-left text-sm">
+          <thead>
+            <tr className="border-b border-[var(--border-color)] text-[var(--text-muted)]">
+              <th className="pb-2 pr-3 font-medium">#</th>
+              <th className="pb-2 pr-3 font-medium">Title</th>
+              <th className="pb-2 pr-3 font-medium">Status</th>
+              <th className="pb-2 pr-3 font-medium">Total</th>
+              <th className="pb-2 font-medium">Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {quotes.map((q) => (
+              <tr key={q.id} className="border-b border-[var(--border-color)]/60">
+                <td className="py-2 pr-3 font-mono text-xs">{q.quote_number}</td>
+                <td className="py-2 pr-3">
+                  <Link className="font-medium text-[var(--primary-green)] hover:underline" to={`/quotes/${q.id}`}>
+                    {q.title || 'Untitled'}
+                  </Link>
+                </td>
+                <td className="py-2 pr-3">{q.status}</td>
+                <td className="py-2 pr-3 tabular-nums">{money(q.total)}</td>
+                <td className="py-2 text-[var(--text-muted)]">{formatInVancouver(q.created_at, 'MMM d, yyyy')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AccountJobsTab({ jobs, loading }: { jobs: Job[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center gap-2 py-12 text-sm text-[var(--text-muted)]">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading jobs…
+        </CardContent>
+      </Card>
+    );
+  }
+  if (jobs.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-sm text-[var(--text-muted)]">No jobs for this account yet.</CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Jobs</CardTitle>
+        <CardDescription>Work linked to this account.</CardDescription>
+      </CardHeader>
+      <CardContent className="overflow-x-auto">
+        <table className="w-full min-w-[480px] text-left text-sm">
+          <thead>
+            <tr className="border-b border-[var(--border-color)] text-[var(--text-muted)]">
+              <th className="pb-2 pr-3 font-medium">#</th>
+              <th className="pb-2 pr-3 font-medium">Title</th>
+              <th className="pb-2 pr-3 font-medium">Status</th>
+              <th className="pb-2 pr-3 font-medium">Value</th>
+              <th className="pb-2 font-medium">Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.map((j) => (
+              <tr key={j.id} className="border-b border-[var(--border-color)]/60">
+                <td className="py-2 pr-3 font-mono text-xs">{j.job_number}</td>
+                <td className="py-2 pr-3">
+                  <Link className="font-medium text-[var(--primary-green)] hover:underline" to={`/jobs/${j.id}`}>
+                    {j.title || 'Untitled'}
+                  </Link>
+                </td>
+                <td className="py-2 pr-3">{j.status}</td>
+                <td className="py-2 pr-3 tabular-nums">{money(j.total_price)}</td>
+                <td className="py-2 text-[var(--text-muted)]">{formatInVancouver(j.created_at, 'MMM d, yyyy')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </CardContent>
     </Card>
   );
@@ -370,7 +1005,11 @@ function TimelineTab({
         <CardDescription>Calls, meetings, emails, and notes — newest first.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <form onSubmit={submit} className="space-y-3 rounded-[var(--radius-md)] border border-dashed border-[var(--border-strong)] p-4">
+        <form
+          id="log-interaction-form"
+          onSubmit={submit}
+          className="space-y-3 rounded-[var(--radius-md)] border border-dashed border-[var(--border-strong)] p-4"
+        >
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>Kind</Label>

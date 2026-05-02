@@ -56,11 +56,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'GET') {
     const action = String(req.query.action ?? '');
     if (action === 'list') {
-      const { data, error } = await db
-        .from('jobs')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false });
+      const accountId = String(req.query.account_id ?? '').trim();
+      let q = db.from('jobs').select('*').eq('tenant_id', tenantId);
+      if (accountId) q = q.eq('account_id', accountId);
+      const { data, error } = await q.order('created_at', { ascending: false });
       if (error) {
         res.status(500).json({ error: error.message });
         return;

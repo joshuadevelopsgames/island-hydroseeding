@@ -23,6 +23,12 @@
  *   JOBBER_PAGINATION_DELAY_MS=6000 (pause between pages; increase if THROTTLED)
  *   JOBBER_THROTTLE_RETRY_MAX=12    (retries with exponential backoff on THROTTLED)
  *
+ * If jobs/invoices keep throttling after OAuth, try e.g.:
+ *   JOBBER_GRAPHQL_PAGE_SIZE=8
+ *   JOBBER_PAGINATION_DELAY_MS=12000
+ *   JOBBER_THROTTLE_RETRY_MAX=20
+ * Waits also honor Retry-After (when Jobber sends it) and max with backoff.
+ *
  * RUN (from repo root, logged into the Jobber account you want to export — or use JOBBER_ACCESS_TOKEN):
  *   node scripts/jobber-migrate.mjs
  *
@@ -124,6 +130,35 @@ const TENANT_ID =
 
 // ── GraphQL helper ────────────────────────────────────────────────────────────
 
+const THROTTLE_WAIT_CAP_MS = 300_000;
+
+/** @param {string | null} header RFC 7231: delta-seconds or HTTP-date */
+function parseRetryAfterHeader(header) {
+  if (!header) return null;
+  const s = header.trim();
+  const sec = Number.parseInt(s, 10);
+  if (!Number.isNaN(sec) && String(sec) === s) return sec * 1000;
+  const t = Date.parse(s);
+  if (!Number.isNaN(t)) return Math.max(0, t - Date.now());
+  return null;
+}
+
+/** Prefer server hint (Retry-After / extensions) capped; combine with exponential backoff. */
+function computeThrottleWaitMs(res, json, attempt) {
+  const headerMs = parseRetryAfterHeader(res.headers.get('retry-after'));
+  let extMs = null;
+  for (const e of json?.errors ?? []) {
+    const ex = e?.extensions;
+    if (!ex) continue;
+    if (typeof ex.retryAfterMs === 'number') extMs = Math.max(extMs ?? 0, ex.retryAfterMs);
+    if (typeof ex.retryAfter === 'number') extMs = Math.max(extMs ?? 0, ex.retryAfter * 1000);
+    if (typeof ex.retryAfterSeconds === 'number') extMs = Math.max(extMs ?? 0, ex.retryAfterSeconds * 1000);
+  }
+  const backoffMs = Math.min(120_000, 5000 * 2 ** attempt);
+  const hintMs = Math.max(headerMs ?? 0, extMs ?? 0);
+  return Math.min(THROTTLE_WAIT_CAP_MS, Math.max(backoffMs, hintMs));
+}
+
 async function gql(token, query, variables = {}) {
   let attempt = 0;
   for (;;) {
@@ -138,7 +173,22 @@ async function gql(token, query, variables = {}) {
     });
 
     if (!res.ok) {
-      throw new Error(`Jobber API error: ${res.status} ${await res.text()}`);
+      const body = await res.text();
+      if (res.status === 429 && attempt < JOBBER_THROTTLE_RETRY_MAX) {
+        const headerMs = parseRetryAfterHeader(res.headers.get('retry-after'));
+        const backoffMs = Math.min(120_000, 5000 * 2 ** attempt);
+        const waitMs = Math.min(
+          THROTTLE_WAIT_CAP_MS,
+          Math.max(backoffMs, headerMs ?? 0, 5000),
+        );
+        console.warn(
+          `\n  Jobber rate limited (429) — waiting ${Math.round(waitMs / 1000)}s (retry ${attempt + 1}/${JOBBER_THROTTLE_RETRY_MAX})...\n`,
+        );
+        await sleep(waitMs);
+        attempt++;
+        continue;
+      }
+      throw new Error(`Jobber API error: ${res.status} ${body}`);
     }
 
     const json = await res.json();
@@ -151,7 +201,7 @@ async function gql(token, query, variables = {}) {
       );
 
     if (throttled && attempt < JOBBER_THROTTLE_RETRY_MAX) {
-      const waitMs = Math.min(120_000, 5000 * 2 ** attempt);
+      const waitMs = computeThrottleWaitMs(res, json, attempt);
       console.warn(
         `\n  Jobber throttled — waiting ${Math.round(waitMs / 1000)}s (retry ${attempt + 1}/${JOBBER_THROTTLE_RETRY_MAX})...\n`,
       );
@@ -289,7 +339,6 @@ const JOBS_QUERY = `
             quantity
             unitPrice
             totalPrice
-            sortOrder
           }
         }
         visits {
@@ -410,7 +459,7 @@ function mapLineItem(li, parentKey, parentId, index) {
     quantity:             parseFloat(li.quantity) || 1,
     unit_price:           parseFloat(li.unitPrice) || 0,
     total:                parseFloat(li.totalPrice) || 0,
-    sort_order:           li.sortOrder ?? index,
+    sort_order:           li.sortOrder != null ? li.sortOrder : index,
     created_at:           new Date().toISOString(),
   };
 }
@@ -741,15 +790,44 @@ async function migrateInvoices(token, accountIdMap, propertyIdMap, jobIdMap) {
   console.log(`  ✓ ${newInvoiceRows.length} new invoices, ${lineItemRows.length} line items, ${paymentRows.length} payments inserted (${existingInvoiceIds.size} already existed)`);
 }
 
+async function buildAccountIdMapFromSupabase() {
+  const rows = await selectAllIdJobber('crm_accounts');
+  const accountIdMap = {};
+  rows.forEach((a) => {
+    if (a.jobber_id) accountIdMap[a.jobber_id] = a.id;
+  });
+  return accountIdMap;
+}
+
 // ── Exported runner (CLI + Vercel cron) ─────────────────────────────────────
 
-export async function runJobberImport(accessToken) {
+/**
+ * @param {string} accessToken
+ * @param {{ skipClients?: boolean }} [options]
+ *   skipClients — use crm_accounts.jobber_id map from DB (no Jobber clients fetch); for resuming after accounts are synced
+ */
+export async function runJobberImport(accessToken, options = {}) {
+  const skipClients = Boolean(options.skipClients);
+
   console.log('\n🌱  Island Hydroseeding — Jobber import\n');
 
   const token = accessToken;
   console.log('✅  Authorized!\n');
 
-  const accountIdMap = await migrateClients(token);
+  let accountIdMap;
+  if (skipClients) {
+    console.log('⏭️  Skipping Jobber clients — using existing CRM accounts (jobber_id map).\n');
+    accountIdMap = await buildAccountIdMapFromSupabase();
+    const n = Object.keys(accountIdMap).length;
+    if (n === 0) {
+      throw new Error(
+        'No crm_accounts with jobber_id — run full import once (node scripts/jobber-migrate.mjs) before using skip-clients.',
+      );
+    }
+    console.log(`  ✓ ${n} accounts mapped from Supabase\n`);
+  } else {
+    accountIdMap = await migrateClients(token);
+  }
 
   const allProps = await selectAllIdJobber('crm_properties');
   const propertyIdMap = {};

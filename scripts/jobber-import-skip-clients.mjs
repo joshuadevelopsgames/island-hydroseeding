@@ -1,6 +1,13 @@
 /**
- * Local CLI for Jobber → Supabase import. OAuth in browser, then runs api/_jobberImport.mjs.
- * Scheduled sync: Vercel Cron → /api/cron/jobber-sync (refresh token from DB or JOBBER_REFRESH_TOKEN).
+ * Jobber → Supabase import **without** re-fetching clients.
+ * Uses `crm_accounts.jobber_id` already in Supabase, then imports quotes → jobs → invoices.
+ *
+ * Use when accounts are already synced and you want to resume or re-run downstream only.
+ *
+ *   node scripts/jobber-import-skip-clients.mjs
+ *
+ * Same .env.local as jobber-migrate.mjs (JOBBER_*, SUPABASE_*, DEFAULT_TENANT_ID).
+ * Or set JOBBER_ACCESS_TOKEN to skip OAuth.
  */
 import http from 'http';
 import { randomBytes } from 'crypto';
@@ -20,7 +27,7 @@ function loadEnv() {
       const val = trimmed.slice(eq + 1).trim().replace(/^['"]|['"]$/g, '');
       env[key] = val;
     }
-  } catch { /* .env.local optional */ }
+  } catch { /* optional */ }
   return { ...process.env, ...env };
 }
 
@@ -53,7 +60,7 @@ async function getAccessToken() {
       const retState = url.searchParams.get('state');
 
       res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end('<html><body><h2>✅ Authorized! You can close this tab.</h2><p>Return to your terminal to watch the migration.</p></body></html>');
+      res.end('<html><body><h2>✅ Authorized! You can close this tab.</h2><p>Return to your terminal.</p></body></html>');
       server.close();
 
       if (retState !== state) {
@@ -84,28 +91,11 @@ async function getAccessToken() {
       }
 
       const body = await tokenRes.json();
-      const access_token = body.access_token;
-      const refresh_token = body.refresh_token;
-      if (!access_token) {
+      if (!body.access_token) {
         reject(new Error('Token response missing access_token'));
         return;
       }
-      if (refresh_token) {
-        console.log('\n──────────────────────────────────────────────');
-        console.log('  JOBBER_REFRESH_TOKEN (copy for Vercel env — treat as secret)');
-        console.log('──────────────────────────────────────────────\n');
-        console.log(refresh_token);
-        console.log(
-          '\n  Add:  vercel env add JOBBER_REFRESH_TOKEN production  (paste when prompted)\n' +
-            '  Or:   Vercel → Project → Settings → Environment Variables\n',
-        );
-      } else {
-        console.warn(
-          '\n  ⚠️  No refresh_token in Jobber response — cron sync will not work until you get one.\n' +
-            '     Check app settings in developer.getjobber.com (OAuth / scopes).\n',
-        );
-      }
-      resolve(access_token);
+      resolve(body.access_token);
     });
 
     server.listen(3456, () => {});
@@ -123,10 +113,10 @@ async function main() {
   }
 
   const token = env.JOBBER_ACCESS_TOKEN ?? (await getAccessToken());
-  await runJobberImport(token);
+  await runJobberImport(token, { skipClients: true });
 }
 
 main().catch(err => {
-  console.error('\n❌  Migration failed:', err.message);
+  console.error('\n❌  Import failed:', err.message);
   process.exit(1);
 });

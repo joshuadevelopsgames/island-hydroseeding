@@ -27,6 +27,17 @@ async function readJson<T>(r: Response): Promise<T> {
   }
 }
 
+export async function fetchJobsForAccount(accountId: string): Promise<Job[]> {
+  const r = await apiFetch(`${JOBS}?action=list&account_id=${encodeURIComponent(accountId)}`);
+  if (r.status === 404 || r.status === 503) return [];
+  if (!r.ok) {
+    const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
+    throw new Error(j.error || `Jobs ${r.status}`);
+  }
+  const data = await readJson<{ jobs: Job[] }>(r);
+  return data.jobs ?? [];
+}
+
 export async function fetchJobs(): Promise<Job[]> {
   const r = await apiFetch(`${JOBS}?action=list`);
   if (r.status === 404 || r.status === 503) return [];
