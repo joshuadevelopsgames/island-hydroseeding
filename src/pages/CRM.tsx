@@ -74,21 +74,22 @@ function statusBadge(status: string) {
 
 function typeBadge(type: string) {
   const t = type as CrmAccountType;
+  /** Light: soft tint + readable mid-tone text. Dark: muted tint, not near-black pills. */
   const variantClass: Partial<Record<CrmAccountType, string>> = {
     Residential:
-      'border-emerald-700/55 bg-emerald-100 text-emerald-950 dark:border-emerald-400/55 dark:bg-emerald-950 dark:text-emerald-50',
+      'border-emerald-200/90 bg-emerald-50 text-emerald-800 dark:border-emerald-600/35 dark:bg-emerald-950/40 dark:text-emerald-100',
     Commercial:
-      'border-sky-700/55 bg-sky-100 text-sky-950 dark:border-sky-400/55 dark:bg-sky-950 dark:text-sky-50',
+      'border-sky-200/90 bg-sky-50 text-sky-800 dark:border-sky-600/35 dark:bg-sky-950/40 dark:text-sky-100',
     Municipal:
-      'border-violet-700/55 bg-violet-100 text-violet-950 dark:border-violet-400/55 dark:bg-violet-950 dark:text-violet-50',
+      'border-violet-200/90 bg-violet-50 text-violet-800 dark:border-violet-600/35 dark:bg-violet-950/40 dark:text-violet-100',
   };
   return (
     <Badge
       variant="outline"
       className={cn(
-        'whitespace-nowrap text-xs font-semibold',
+        'whitespace-nowrap text-xs font-medium',
         variantClass[t] ??
-          'border-[var(--border-strong)] bg-[var(--surface-raised)] text-[var(--text-primary)]'
+          'border-[var(--border-color)] bg-[var(--surface-raised)] text-[var(--text-secondary)]'
       )}
     >
       {type}

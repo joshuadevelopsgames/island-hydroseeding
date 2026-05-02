@@ -9,6 +9,8 @@ import {
   productsPost,
 } from '@/lib/quotesApi';
 import type { Quote, QuoteTemplate } from '@/lib/quotesTypes';
+import type { Invoice } from '@/lib/invoicesTypes';
+import { invoicesKeys } from '@/hooks/useInvoices';
 
 export const quotesKeys = {
   all: ['quotes'] as const,
@@ -104,8 +106,17 @@ export function useQuotesMutations() {
 
   const convertQuote = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
-      quotesPost<{ quote: Quote }>({ action: 'quote.convert', ...payload }),
+      quotesPost<{ quote: Quote }>({ action: 'quote.convert_to_job', ...payload }),
     onSuccess: invalidate,
+  });
+
+  const convertQuoteToInvoice = useMutation({
+    mutationFn: (quoteId: string) =>
+      quotesPost<{ invoice: Invoice }>({ action: 'quote.convert_to_invoice', quote_id: quoteId }),
+    onSuccess: () => {
+      invalidate();
+      void qc.invalidateQueries({ queryKey: invoicesKeys.all });
+    },
   });
 
   return {
@@ -117,6 +128,7 @@ export function useQuotesMutations() {
     deleteLineItem,
     sendQuote,
     convertQuote,
+    convertQuoteToInvoice,
   };
 }
 

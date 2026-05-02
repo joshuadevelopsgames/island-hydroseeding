@@ -1,8 +1,11 @@
 /**
  * /pay/:token — Public client-facing payment page
  * No auth required. Token in URL acts as the credential.
+ *
+ * Stripe: PaymentIntent is created with POST create_payment_intent (unchanged flow).
+ * PaymentElement + confirmPayment must stay wired the same.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { loadStripe } from '@stripe/stripe-js';
 import {
@@ -11,7 +14,17 @@ import {
   useStripe,
   useElements,
 } from '@stripe/react-stripe-js';
-import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import {
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  Lock,
+  Mail,
+  FileText,
+  Printer,
+  Share2,
+} from 'lucide-react';
+import './invoicePayPrint.css';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -24,6 +37,7 @@ interface PublicInvoice {
   due_date: string;
   subtotal: number;
   tax_rate: number;
+  tax_amount: number;
   total: number;
   amount_paid: number;
   balance_due: number;
@@ -61,13 +75,18 @@ interface InvoiceData {
   property: PublicProperty | null;
 }
 
-// ── Stripe promise (lazy — only loads when publishable key is set) ─────────────
+const ETRANSFER_EMAIL =
+  (import.meta.env.VITE_ETRANSFER_EMAIL as string | undefined)?.trim() || '';
+
+const INVOICE_LOGO_URL = (import.meta.env.VITE_INVOICE_LOGO_URL as string | undefined)?.trim() || '';
+
+const GST_REGISTRATION = (import.meta.env.VITE_GST_REGISTRATION as string | undefined)?.trim() || '';
+
+const COMPANY_NAME = 'Island Hydroseeding Ltd.';
 
 const stripePromise = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
   ? loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string)
   : null;
-
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 const CAD = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' });
 
@@ -75,13 +94,114 @@ function fmtDate(s: string) {
   return new Date(s).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
+function fmtDateTime() {
+  return new Date().toLocaleString('en-CA', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function parseLocalYmd(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  if (!y || !m || !d) return new Date(s);
+  return new Date(y, m - 1, d);
+}
+
+function startOfLocalDay(d: Date) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function isPastDue(dueDateStr: string, balanceDue: number): boolean {
+  if (balanceDue <= 0) return false;
+  const due = startOfLocalDay(parseLocalYmd(dueDateStr));
+  const today = startOfLocalDay(new Date());
+  return due < today;
+}
+
+function formatProperty(p: PublicProperty): string {
+  const parts = [p.address, p.city, p.province].filter(Boolean).join(', ');
+  return [parts, p.postal_code].filter(Boolean).join(p.postal_code ? ' ' : '');
+}
+
+function taxAmountFor(invoice: PublicInvoice): number {
+  if (invoice.tax_amount != null && !Number.isNaN(Number(invoice.tax_amount))) {
+    return Number(invoice.tax_amount);
+  }
+  return Math.max(0, Number(invoice.total) - Number(invoice.subtotal));
+}
+
+// ── brand mark (optional custom logo URL) ─────────────────────────────────────
+
+function BrandMark({ className }: { className?: string }) {
+  if (INVOICE_LOGO_URL) {
+    return (
+      <img
+        src={INVOICE_LOGO_URL}
+        alt=""
+        className={className ?? 'h-11 w-auto max-w-[200px] object-contain object-left'}
+        height={44}
+        decoding="async"
+      />
+    );
+  }
+  return (
+    <img
+      src="/invoice-brand-mark.svg"
+      alt=""
+      width={44}
+      height={44}
+      className={className ?? 'h-11 w-11 shrink-0'}
+      decoding="async"
+    />
+  );
+}
+
+// ── status chip ───────────────────────────────────────────────────────────────
+
+function InvoiceStatusChip({ invoice }: { invoice: PublicInvoice }) {
+  const balance = Number(invoice.balance_due ?? 0);
+  if (balance <= 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200/90 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+        Paid
+      </span>
+    );
+  }
+  if (isPastDue(invoice.due_date, balance)) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200/90 bg-rose-50 px-3 py-1 text-xs font-medium text-rose-800">
+        <span className="h-1.5 w-1.5 rounded-full bg-rose-500" aria-hidden />
+        Past due
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200/90 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+      Due {fmtDate(invoice.due_date)}
+    </span>
+  );
+}
+
 // ── checkout form ─────────────────────────────────────────────────────────────
 
-function CheckoutForm({ balanceDue, onSuccess }: { balanceDue: number; onSuccess: () => void }) {
-  const stripe   = useStripe();
+function CheckoutForm({
+  balanceDue,
+  onSuccess,
+}: {
+  balanceDue: number;
+  onSuccess: () => void | Promise<void>;
+}) {
+  const stripe = useStripe();
   const elements = useElements();
-  const [paying,  setPaying]  = useState(false);
-  const [errMsg,  setErrMsg]  = useState<string | null>(null);
+  const [paying, setPaying] = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,17 +219,23 @@ function CheckoutForm({ balanceDue, onSuccess }: { balanceDue: number; onSuccess
       setErrMsg(error.message ?? 'Payment failed. Please try again.');
       setPaying(false);
     } else {
-      onSuccess();
+      try {
+        await Promise.resolve(onSuccess());
+      } finally {
+        setPaying(false);
+      }
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <PaymentElement />
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-raised)]/50 p-4">
+        <PaymentElement />
+      </div>
 
       {errMsg && (
-        <div className="flex items-start gap-2 rounded-lg bg-red-50 p-4 text-sm text-red-700">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="flex items-start gap-2 rounded-xl border border-red-200/80 bg-red-50 p-4 text-sm text-red-800">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
           {errMsg}
         </div>
       )}
@@ -117,19 +243,195 @@ function CheckoutForm({ balanceDue, onSuccess }: { balanceDue: number; onSuccess
       <button
         type="submit"
         disabled={paying || !stripe}
-        className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-6 py-3 text-base font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+        className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-3.5 text-base font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60"
+        style={{ background: 'var(--primary-green)' }}
       >
-        {paying && <Loader2 className="h-5 w-5 animate-spin" />}
+        {paying && <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />}
         {paying ? 'Processing…' : `Pay ${CAD.format(balanceDue)}`}
       </button>
 
-      <p className="text-center text-xs text-slate-400">
-        Secured by{' '}
-        <a href="https://stripe.com" target="_blank" rel="noreferrer" className="underline">
-          Stripe
-        </a>
-      </p>
+      <div className="flex flex-col items-center gap-1 text-center text-xs text-[var(--text-muted)]">
+        <span className="inline-flex items-center gap-1.5">
+          <Lock className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+          Encrypted checkout · Apple Pay, Google Pay, and cards where available · processed by{' '}
+          <a
+            href="https://stripe.com"
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium underline decoration-[var(--border-strong)] underline-offset-2 hover:text-[var(--text-primary)]"
+          >
+            Stripe
+          </a>
+        </span>
+      </div>
     </form>
+  );
+}
+
+// ── payment received / receipt (print-friendly) ─────────────────────────────
+
+function PaymentReceivedScreen({ data, payUrl }: { data: InvoiceData; payUrl: string }) {
+  const { invoice, line_items, account, property } = data;
+  const taxPct = Math.round((invoice.tax_rate ?? 0.05) * 100);
+  const taxAmt = taxAmountFor(invoice);
+  const invNo = String(invoice.invoice_number).padStart(4, '0');
+  const amountPaidDisplay =
+    Number(invoice.amount_paid) > 0.005
+      ? Number(invoice.amount_paid)
+      : Number(invoice.balance_due) < 0.005
+        ? Number(invoice.total)
+        : Number(invoice.amount_paid);
+
+  const handleShare = async () => {
+    const title = `Invoice #${invNo} — ${COMPANY_NAME}`;
+    const text = `Invoice #${invNo} — Total ${CAD.format(invoice.total)}. Paid.`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text, url: payUrl });
+      }
+    } catch {
+      /* user cancelled or share unavailable */
+    }
+  };
+
+  return (
+    <div className="invoice-pay-root min-h-screen pb-16" style={{ background: 'var(--bg-color)' }}>
+      <header className="invoice-pay-header border-b border-[var(--border-color)] bg-[var(--surface-color)]">
+        <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-8 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+          <div className="flex min-w-0 items-center gap-4">
+            <BrandMark />
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--primary-green)]">{COMPANY_NAME}</p>
+              <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text-primary)]">Payment received</h1>
+              <p className="mt-1 text-sm text-[var(--text-muted)]">Receipt · Invoice #{invNo}</p>
+            </div>
+          </div>
+          <div className="invoice-pay-receipt-actions flex shrink-0 flex-wrap gap-2">
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-color)] px-4 py-2.5 text-sm font-semibold text-[var(--text-primary)] shadow-sm transition hover:bg-[var(--surface-raised)]"
+              onClick={() => window.print()}
+            >
+              <Printer className="h-4 w-4 shrink-0" aria-hidden />
+              Print / Save as PDF
+            </button>
+            {typeof navigator !== 'undefined' && typeof navigator.share === 'function' ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-color)] px-4 py-2.5 text-sm font-semibold text-[var(--text-primary)] shadow-sm transition hover:bg-[var(--surface-raised)]"
+                onClick={() => void handleShare()}
+              >
+                <Share2 className="h-4 w-4 shrink-0" aria-hidden />
+                Share
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-8">
+        <article
+          className="invoice-pay-receipt space-y-6 rounded-2xl border border-[var(--border-strong)] bg-[var(--surface-color)] p-6 shadow-[var(--shadow-sm)] sm:p-8"
+          aria-label="Payment receipt"
+        >
+          <div className="flex items-start gap-3 border-b border-[var(--border-color)] pb-6">
+            <div
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full"
+              style={{ background: 'var(--light-green)' }}
+            >
+              <CheckCircle2 className="h-7 w-7" style={{ color: 'var(--color-success)' }} aria-hidden />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-[var(--text-primary)]">Thank you — your payment was successful.</p>
+              <p className="mt-1 text-sm text-[var(--text-muted)]">Recorded {fmtDateTime()}</p>
+            </div>
+          </div>
+
+          {(account || property) && (
+            <section>
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Bill to</h2>
+              {account ? (
+                <div className="text-[var(--text-primary)]">
+                  <p className="font-semibold">{account.name}</p>
+                  {account.company ? <p className="text-sm text-[var(--text-secondary)]">{account.company}</p> : null}
+                  {account.email ? <p className="text-sm text-[var(--text-secondary)]">{account.email}</p> : null}
+                </div>
+              ) : null}
+              {property ? (
+                <p className="mt-2 text-sm text-[var(--text-secondary)]">{formatProperty(property)}</p>
+              ) : null}
+            </section>
+          )}
+
+          <section className="grid gap-3 text-sm sm:grid-cols-2">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Invoice</p>
+              <p className="mt-0.5 font-semibold text-[var(--text-primary)]">#{invNo}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Amount paid</p>
+              <p className="mt-0.5 text-lg font-bold tabular-nums text-[var(--text-primary)]">
+                {CAD.format(amountPaidDisplay)}
+              </p>
+            </div>
+          </section>
+
+          {line_items.length > 0 ? (
+            <section>
+              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Line items</h2>
+              <div className="overflow-hidden rounded-xl border border-[var(--border-color)]">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--border-color)] bg-[var(--surface-raised)] text-[0.65rem] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                      <th className="px-3 py-2">Service</th>
+                      <th className="w-24 px-3 py-2 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border-color)]">
+                    {line_items.map((item) => (
+                      <tr key={item.id}>
+                        <td className="px-3 py-2">
+                          <p className="font-medium text-[var(--text-primary)]">{item.product_service_name}</p>
+                          {item.description ? (
+                            <p className="mt-0.5 whitespace-pre-wrap break-words text-xs text-[var(--text-muted)]">
+                              {item.description}
+                            </p>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums font-medium text-[var(--text-primary)]">
+                          {CAD.format(item.total)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-4 space-y-1.5 border-t border-[var(--border-color)] pt-4 text-sm">
+                <div className="flex justify-between text-[var(--text-secondary)]">
+                  <span>Subtotal</span>
+                  <span className="tabular-nums">{CAD.format(invoice.subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-[var(--text-secondary)]">
+                  <span>Tax (GST {taxPct}%)</span>
+                  <span className="tabular-nums">{CAD.format(taxAmt)}</span>
+                </div>
+                {GST_REGISTRATION ? (
+                  <p className="text-xs text-[var(--text-muted)]">GST/HST registration no. {GST_REGISTRATION}</p>
+                ) : null}
+                <div className="flex justify-between font-semibold text-[var(--text-primary)]">
+                  <span>Total</span>
+                  <span className="tabular-nums">{CAD.format(invoice.total)}</span>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          <p className="border-t border-[var(--border-color)] pt-6 text-center text-sm text-[var(--text-muted)]">
+            {COMPANY_NAME} · Keep this page for your records.
+          </p>
+        </article>
+      </div>
+    </div>
   );
 }
 
@@ -140,16 +442,26 @@ export default function InvoicePay() {
 
   const [invoiceData, setInvoiceData] = useState<InvoiceData | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
-  const [loading,  setLoading]  = useState(true);
-  const [loadErr,  setLoadErr]  = useState<string | null>(null);
-  const [paid,     setPaid]     = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [paid, setPaid] = useState(false);
 
-  // 1. Fetch public invoice data
+  const refetchInvoice = useCallback(async () => {
+    if (!token) return;
+    const r = await fetch(`/api/stripe?action=invoice_by_token&token=${encodeURIComponent(token)}`);
+    const data = (await r.json()) as InvoiceData & { error?: string };
+    if (!data.error) setInvoiceData(data);
+  }, [token]);
+
   useEffect(() => {
-    if (!token) { setLoadErr('Invalid payment link.'); setLoading(false); return; }
+    if (!token) {
+      setLoadErr('Invalid payment link.');
+      setLoading(false);
+      return;
+    }
 
-    fetch(`/api/stripe?action=invoice_by_token&token=${token}`)
-      .then(r => r.json())
+    fetch(`/api/stripe?action=invoice_by_token&token=${encodeURIComponent(token)}`)
+      .then((r) => r.json())
       .then((data: InvoiceData & { error?: string }) => {
         if (data.error) throw new Error(data.error);
         setInvoiceData(data);
@@ -159,210 +471,334 @@ export default function InvoicePay() {
           return;
         }
 
-        // 2. Create PaymentIntent
         return fetch('/api/stripe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'create_payment_intent', invoice_id: data.invoice.id }),
-        }).then(r => r.json()).then((pi: { clientSecret?: string; error?: string }) => {
-          if (pi.error) throw new Error(pi.error);
-          setClientSecret(pi.clientSecret ?? null);
-        });
+        })
+          .then((r) => r.json())
+          .then((pi: { clientSecret?: string; error?: string }) => {
+            if (pi.error) throw new Error(pi.error);
+            setClientSecret(pi.clientSecret ?? null);
+          });
       })
-      .catch(err => setLoadErr((err as Error).message ?? 'Could not load invoice.'))
+      .catch((err) => setLoadErr((err as Error).message ?? 'Could not load invoice.'))
       .finally(() => setLoading(false));
   }, [token]);
 
-  // ── loading ──────────────────────────────────────────────────────────────────
-
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+      <div
+        className="invoice-pay-root flex min-h-screen items-center justify-center"
+        style={{ background: 'var(--bg-color)' }}
+      >
+        <Loader2 className="h-8 w-8 animate-spin text-[var(--text-muted)]" aria-hidden />
       </div>
     );
   }
 
   if (loadErr) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-50 p-8 text-center">
-        <AlertCircle className="h-12 w-12 text-red-400" />
-        <p className="text-lg font-semibold text-slate-700">{loadErr}</p>
-        <p className="text-sm text-slate-500">Please contact Island Hydroseeding if you believe this is an error.</p>
+      <div
+        className="invoice-pay-root flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center"
+        style={{ background: 'var(--bg-color)' }}
+      >
+        <AlertCircle className="h-12 w-12 text-[var(--color-danger)]" aria-hidden />
+        <p className="text-lg font-semibold text-[var(--text-primary)]">{loadErr}</p>
+        <p className="max-w-md text-sm text-[var(--text-muted)]">
+          Please contact Island Hydroseeding if you believe this is an error.
+        </p>
       </div>
     );
   }
 
-  // ── already paid ─────────────────────────────────────────────────────────────
-
-  if (paid || invoiceData?.invoice.status === 'Paid') {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-slate-50 p-8 text-center">
-        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-green-100">
-          <CheckCircle2 className="h-10 w-10 text-green-600" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Payment Received</h1>
-          <p className="mt-2 text-slate-500">
-            Invoice #{String(invoiceData?.invoice.invoice_number ?? '').padStart(4, '0')} has been paid. Thank you!
-          </p>
-        </div>
-        <p className="text-sm text-slate-400">Island Hydroseeding Ltd.</p>
-      </div>
-    );
+  if ((paid || invoiceData?.invoice.status === 'Paid') && invoiceData) {
+    const payUrl = typeof window !== 'undefined' ? window.location.href.split('#')[0] : '';
+    return <PaymentReceivedScreen data={invoiceData} payUrl={payUrl} />;
   }
 
   if (!invoiceData) return null;
 
   const { invoice, line_items, account, property } = invoiceData;
   const taxPct = Math.round((invoice.tax_rate ?? 0.05) * 100);
-
-  // ── main layout ───────────────────────────────────────────────────────────────
+  const taxAmount = taxAmountFor(invoice);
+  const balanceDue = Number(invoice.balance_due);
+  const amountPaid = Number(invoice.amount_paid ?? 0);
+  const contactEmail = account?.email?.trim() || '';
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Header */}
-      <div className="border-b border-slate-200 bg-white px-6 py-5">
-        <div className="mx-auto flex max-w-4xl items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-green-700">Island Hydroseeding Ltd.</p>
-            <h1 className="mt-0.5 text-xl font-bold text-slate-800">
-              Invoice #{String(invoice.invoice_number).padStart(4, '0')}
-            </h1>
+    <div className="invoice-pay-root min-h-screen pb-16" style={{ background: 'var(--bg-color)' }}>
+      <header className="invoice-pay-header border-b border-[var(--border-color)] bg-[var(--surface-color)]">
+        <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-6 sm:flex-row sm:items-start sm:justify-between sm:px-8">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+            <BrandMark />
+            <div className="min-w-0 space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--primary-green)]">{COMPANY_NAME}</p>
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
+                  Invoice #{String(invoice.invoice_number).padStart(4, '0')}
+                </h1>
+                {invoice.title ? (
+                  <span className="text-sm font-medium text-[var(--text-muted)]">{invoice.title}</span>
+                ) : null}
+              </div>
+            </div>
           </div>
-          <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-700">
-            {CAD.format(invoice.balance_due)} due
-          </span>
+          <div className="shrink-0 self-start">
+            <InvoiceStatusChip invoice={invoice} />
+          </div>
         </div>
-      </div>
+      </header>
 
-      <div className="mx-auto grid max-w-4xl gap-8 px-6 py-10 lg:grid-cols-[1fr_400px]">
+      <div className="invoice-pay-grid mx-auto grid max-w-6xl gap-8 px-4 py-8 lg:grid-cols-[1fr_380px] lg:items-start lg:gap-10 lg:px-8">
+        <article
+          className="invoice-pay-document order-2 space-y-6 rounded-2xl border border-[var(--border-strong)] bg-[var(--surface-color)] p-6 shadow-[var(--shadow-sm)] sm:p-8 lg:order-1"
+          aria-label="Invoice details"
+        >
+          <div className="flex items-start gap-3 border-b border-[var(--border-color)] pb-6">
+            <div
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+              style={{ background: 'var(--accent-soft)' }}
+            >
+              <FileText className="h-5 w-5 text-[var(--primary-green)]" aria-hidden />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Summary</h2>
+              <p className="mt-0.5 text-sm text-[var(--text-muted)]">Please review services and totals before paying.</p>
+            </div>
+          </div>
 
-        {/* Left — invoice summary */}
-        <div className="space-y-6">
-
-          {/* Client / Property */}
           {(account || property) && (
-            <div className="rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-500">Bill To</h2>
+            <section>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Bill to</h3>
               {account && (
-                <div className="mb-2">
-                  <p className="font-semibold text-slate-800">{account.name}</p>
-                  {account.company && <p className="text-sm text-slate-600">{account.company}</p>}
-                  {account.email   && <p className="text-sm text-slate-600">{account.email}</p>}
-                  {account.phone   && <p className="text-sm text-slate-600">{account.phone}</p>}
+                <div className="space-y-0.5 text-[var(--text-primary)]">
+                  <p className="text-lg font-semibold leading-snug">{account.name}</p>
+                  {account.company ? (
+                    <p className="text-sm text-[var(--text-secondary)]">{account.company}</p>
+                  ) : null}
+                  {account.phone ? (
+                    <p className="text-sm text-[var(--text-secondary)]">{account.phone}</p>
+                  ) : null}
+                  {account.email ? (
+                    <a
+                      href={`mailto:${account.email}`}
+                      className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--primary-green)] hover:underline"
+                    >
+                      <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      {account.email}
+                    </a>
+                  ) : null}
                 </div>
               )}
-              {property && (
-                <p className="text-sm text-slate-600">
-                  {property.address}{property.city ? `, ${property.city}` : ''}{property.province ? `, ${property.province}` : ''}{property.postal_code ? ` ${property.postal_code}` : ''}
-                </p>
-              )}
-            </div>
+              {property ? (
+                <p className="mt-3 text-sm leading-relaxed text-[var(--text-secondary)]">{formatProperty(property)}</p>
+              ) : null}
+            </section>
           )}
 
-          {/* Dates */}
-          <div className="grid grid-cols-2 gap-4 rounded-xl bg-white p-6 shadow-sm">
+          <section className="grid gap-4 rounded-xl bg-[var(--surface-raised)] p-4 sm:grid-cols-2">
             <div>
-              <p className="text-xs font-medium text-slate-500">Issue Date</p>
-              <p className="mt-1 font-semibold text-slate-800">{fmtDate(invoice.issue_date)}</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Issued</p>
+              <p className="mt-1 font-semibold text-[var(--text-primary)]">{fmtDate(invoice.issue_date)}</p>
             </div>
             <div>
-              <p className="text-xs font-medium text-slate-500">Due Date</p>
-              <p className="mt-1 font-semibold text-slate-800">{fmtDate(invoice.due_date)}</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Due</p>
+              <p className="mt-1 font-semibold text-[var(--text-primary)]">{fmtDate(invoice.due_date)}</p>
             </div>
-            {invoice.payment_terms && (
-              <div className="col-span-2">
-                <p className="text-xs font-medium text-slate-500">Payment Terms</p>
-                <p className="mt-1 text-sm text-slate-700">{invoice.payment_terms}</p>
+            {invoice.payment_terms ? (
+              <div className="sm:col-span-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Terms</p>
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">{invoice.payment_terms}</p>
               </div>
-            )}
-          </div>
+            ) : null}
+          </section>
 
-          {/* Line items */}
-          {line_items.length > 0 && (
-            <div className="rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-500">Services</h2>
-              <div className="space-y-3">
-                {line_items.map(item => (
-                  <div key={item.id} className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <p className="font-medium text-slate-800">{item.product_service_name}</p>
-                      {item.description && <p className="text-sm text-slate-500">{item.description}</p>}
-                      <p className="text-xs text-slate-400">
-                        {item.quantity} × {CAD.format(item.unit_price)}
-                      </p>
-                    </div>
-                    <p className="shrink-0 font-semibold text-slate-800">{CAD.format(item.total)}</p>
-                  </div>
-                ))}
+          {line_items.length > 0 ? (
+            <section>
+              <h3 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Services</h3>
+              <div className="overflow-hidden rounded-xl border border-[var(--border-color)]">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--border-color)] bg-[var(--surface-raised)] text-[0.65rem] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                      <th className="px-4 py-3">Service</th>
+                      <th className="hidden w-20 px-2 py-3 text-right sm:table-cell">Qty</th>
+                      <th className="w-28 px-4 py-3 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border-color)]">
+                    {line_items.map((item) => (
+                      <tr key={item.id} className="align-top">
+                        <td className="px-4 py-4">
+                          <p className="font-medium text-[var(--text-primary)]">{item.product_service_name}</p>
+                          {item.description ? (
+                            <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--text-muted)]">
+                              {item.description}
+                            </p>
+                          ) : null}
+                          <p className="mt-2 text-xs text-[var(--text-muted)] sm:hidden">
+                            {item.quantity} × {CAD.format(item.unit_price)}
+                          </p>
+                        </td>
+                        <td className="hidden px-2 py-4 text-right tabular-nums text-[var(--text-secondary)] sm:table-cell">
+                          {item.quantity}
+                        </td>
+                        <td className="px-4 py-4 text-right text-base font-semibold tabular-nums text-[var(--text-primary)]">
+                          {CAD.format(item.total)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
-              {/* Totals */}
-              <div className="mt-6 space-y-2 border-t border-slate-100 pt-4 text-sm">
-                <div className="flex justify-between text-slate-600">
+              <div className="mt-6 space-y-2 border-t border-[var(--border-color)] pt-5 text-sm">
+                <div className="flex justify-between gap-4 text-[var(--text-secondary)]">
                   <span>Subtotal</span>
-                  <span>{CAD.format(invoice.subtotal)}</span>
+                  <span className="tabular-nums">{CAD.format(invoice.subtotal)}</span>
                 </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>GST ({taxPct}%)</span>
-                  <span>{CAD.format(invoice.total - invoice.subtotal)}</span>
-                </div>
-                {invoice.amount_paid > 0 && (
-                  <div className="flex justify-between text-green-700">
-                    <span>Amount Paid</span>
-                    <span>−{CAD.format(invoice.amount_paid)}</span>
+                <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:gap-4">
+                  <span className="text-[var(--text-secondary)]">Tax (GST {taxPct}%)</span>
+                  <div className="text-right">
+                    <span className="tabular-nums text-[var(--text-secondary)]">{CAD.format(taxAmount)}</span>
+                    {GST_REGISTRATION ? (
+                      <p className="mt-0.5 text-xs text-[var(--text-muted)]">GST/HST registration no. {GST_REGISTRATION}</p>
+                    ) : null}
                   </div>
-                )}
-                <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-bold text-slate-800">
-                  <span>Balance Due</span>
-                  <span>{CAD.format(invoice.balance_due)}</span>
+                </div>
+                <div className="flex justify-between gap-4 border-b border-[var(--border-color)] pb-2 font-medium text-[var(--text-primary)]">
+                  <span>Invoice total</span>
+                  <span className="tabular-nums">{CAD.format(invoice.total)}</span>
+                </div>
+                {amountPaid > 0 ? (
+                  <div className="flex justify-between gap-4 text-emerald-800">
+                    <span>Amount paid</span>
+                    <span className="tabular-nums">−{CAD.format(amountPaid)}</span>
+                  </div>
+                ) : null}
+                <div className="flex justify-between gap-4 pt-1 text-lg font-bold text-[var(--text-primary)]">
+                  <span>Balance due</span>
+                  <span className="tabular-nums">{CAD.format(balanceDue)}</span>
                 </div>
               </div>
-            </div>
-          )}
+            </section>
+          ) : null}
 
-          {invoice.notes && (
-            <div className="rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-500">Notes</h2>
-              <p className="whitespace-pre-wrap text-sm text-slate-700">{invoice.notes}</p>
-            </div>
-          )}
-        </div>
+          {invoice.notes ? (
+            <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-raised)]/60 p-5">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Notes</h3>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-secondary)]">{invoice.notes}</p>
+            </section>
+          ) : null}
 
-        {/* Right — payment form */}
-        <div>
-          <div className="sticky top-8 rounded-xl bg-white p-6 shadow-sm">
-            <h2 className="mb-6 text-lg font-bold text-slate-800">Pay Online</h2>
+          <footer className="border-t border-[var(--border-color)] pt-6 text-center text-sm text-[var(--text-muted)]">
+            <p className="font-medium text-[var(--text-primary)]">Thank you for your business.</p>
+            <div className="invoice-pay-no-print mt-4">
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-raised)] px-4 py-2.5 text-sm font-semibold text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+                onClick={() => window.print()}
+              >
+                <Printer className="h-4 w-4 shrink-0" aria-hidden />
+                Print invoice
+              </button>
+            </div>
+            {ETRANSFER_EMAIL ? (
+              <p className="mt-4 leading-relaxed">
+                To pay by <strong className="text-[var(--text-secondary)]">e-Transfer</strong>, send to{' '}
+                <a
+                  href={`mailto:${ETRANSFER_EMAIL}`}
+                  className="font-semibold text-[var(--primary-green)] hover:underline"
+                >
+                  {ETRANSFER_EMAIL}
+                </a>
+                . Please include invoice #{String(invoice.invoice_number).padStart(4, '0')} in the message.
+              </p>
+            ) : contactEmail ? (
+              <p className="mt-4 leading-relaxed">
+                Questions or e-Transfer? Email{' '}
+                <a href={`mailto:${contactEmail}`} className="font-semibold text-[var(--primary-green)] hover:underline">
+                  {contactEmail}
+                </a>{' '}
+                and reference this invoice number.
+              </p>
+            ) : (
+              <p className="mt-4">Questions? Contact Island Hydroseeding with this invoice number.</p>
+            )}
+          </footer>
+        </article>
+
+        <aside className="invoice-pay-no-print order-1 lg:order-2">
+          <div className="sticky top-6 space-y-6 rounded-2xl border border-[var(--border-strong)] bg-[var(--surface-color)] p-6 shadow-[var(--shadow-md)] sm:p-7">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Amount due</p>
+              <p className="mt-2 text-4xl font-bold tabular-nums tracking-tight text-[var(--text-primary)]">
+                {CAD.format(balanceDue)}
+              </p>
+              {amountPaid > 0 ? (
+                <p className="mt-2 text-sm text-[var(--text-muted)]">
+                  <span className="tabular-nums text-[var(--text-secondary)]">{CAD.format(amountPaid)}</span> already
+                  received · Total invoice{' '}
+                  <span className="tabular-nums font-medium text-[var(--text-primary)]">{CAD.format(invoice.total)}</span>
+                </p>
+              ) : (
+                <p className="mt-2 text-sm text-[var(--text-muted)]">Secure card payment below.</p>
+              )}
+            </div>
+
+            <div className="h-px bg-[var(--border-color)]" aria-hidden />
+
+            <div>
+              <h2 className="text-base font-bold text-[var(--text-primary)]">Pay online</h2>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">You will not be charged until you confirm.</p>
+            </div>
 
             {!stripePromise ? (
-              <div className="rounded-lg bg-amber-50 p-4 text-sm text-amber-700">
-                Online payments are not configured yet. Please contact us to arrange payment.
+              <div className="rounded-xl border border-amber-200/80 bg-amber-50 p-4 text-sm text-amber-950">
+                Online payments are not configured yet. Please use the alternate payment instructions on this page or
+                contact us.
               </div>
             ) : clientSecret ? (
               <Elements
                 stripe={stripePromise}
                 options={{
                   clientSecret,
+                  business: { name: COMPANY_NAME },
                   appearance: {
                     theme: 'stripe',
                     variables: {
-                      colorPrimary: '#16a34a',
-                      borderRadius: '8px',
+                      colorPrimary: '#b23438',
+                      colorBackground: '#faf8f8',
+                      colorText: '#1a1a1a',
+                      colorDanger: '#d70015',
+                      fontFamily: 'Plus Jakarta Sans, ui-sans-serif, system-ui, sans-serif',
+                      borderRadius: '12px',
+                      spacingUnit: '3px',
+                    },
+                    rules: {
+                      '.Input': {
+                        borderColor: 'rgba(26, 26, 26, 0.12)',
+                        boxShadow: 'none',
+                      },
                     },
                   },
                 }}
               >
-                <CheckoutForm balanceDue={invoice.balance_due} onSuccess={() => setPaid(true)} />
+                <CheckoutForm
+                  balanceDue={balanceDue}
+                  onSuccess={async () => {
+                    await refetchInvoice();
+                    setPaid(true);
+                  }}
+                />
               </Elements>
             ) : (
-              <div className="flex justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+              <div className="flex justify-center py-10">
+                <Loader2 className="h-7 w-7 animate-spin text-[var(--text-muted)]" aria-hidden />
               </div>
             )}
           </div>
-        </div>
-
+        </aside>
       </div>
     </div>
   );

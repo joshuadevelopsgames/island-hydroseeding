@@ -16,6 +16,7 @@ import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { randomUUID } from 'crypto';
+import { syncInvoiceFinancials } from './_invoiceSync';
 
 // Tell Vercel NOT to parse the body — Stripe signature verification needs raw bytes
 export const config = { api: { bodyParser: false } };
@@ -97,11 +98,7 @@ async function handlePaymentSucceeded(pi: Stripe.PaymentIntent) {
     created_at:       now,
   });
 
-  // Mark invoice paid
-  await db
-    .from('invoices')
-    .update({ status: 'Paid', amount_paid: amountPaid, balance_due: 0, updated_at: now })
-    .eq('id', invoiceId);
+  await syncInvoiceFinancials(db, invoiceId);
 
-  console.log(`[stripe-webhook] Invoice ${invoiceId} → Paid (PI ${pi.id})`);
+  console.log(`[stripe-webhook] Invoice ${invoiceId} synced after PI ${pi.id}`);
 }

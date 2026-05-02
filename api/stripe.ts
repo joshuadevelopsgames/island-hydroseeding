@@ -150,6 +150,7 @@ async function createPaymentIntent(body: Record<string, unknown>, res: VercelRes
   const pi = await str.paymentIntents.create({
     amount: amountCents,
     currency: 'cad',
+    automatic_payment_methods: { enabled: true },
     metadata: {
       invoice_id:     invoice.id,
       invoice_number: String(invoice.invoice_number),

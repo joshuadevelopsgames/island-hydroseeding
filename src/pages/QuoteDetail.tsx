@@ -588,7 +588,14 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
 
 function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<typeof useNavigate> }) {
   const { data, isLoading, isError, error, refetch } = useQuoteDetail(id);
-  const { deleteQuote, sendQuote, convertQuote, updateLineItem, deleteLineItem } = useQuotesMutations();
+  const {
+    deleteQuote,
+    sendQuote,
+    convertQuote,
+    convertQuoteToInvoice,
+    updateLineItem,
+    deleteLineItem,
+  } = useQuotesMutations();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editLineItemOpen, setEditLineItemOpen] = useState(false);
   const [selectedLineItem, setSelectedLineItem] = useState<QuoteLineItem | null>(null);
@@ -658,6 +665,16 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
       await convertQuote.mutateAsync({ id: quote.id });
       toast.success('Quote converted to job');
       await refetch();
+    } catch (err) {
+      toast.error(formatErrorForUi(err));
+    }
+  };
+
+  const handleCreateInvoiceFromQuote = async () => {
+    try {
+      const { invoice } = await convertQuoteToInvoice.mutateAsync(quote.id);
+      toast.success('Draft invoice created');
+      navigate(`/invoices/${invoice.id}`);
     } catch (err) {
       toast.error(formatErrorForUi(err));
     }
@@ -1003,17 +1020,45 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
                     <Button onClick={handleSendQuote} disabled={sendQuote.isPending} className="w-full">
                       Send Quote
                     </Button>
+                    <Button
+                      onClick={() => void handleCreateInvoiceFromQuote()}
+                      disabled={convertQuoteToInvoice.isPending}
+                      variant="outline"
+                      className="w-full"
+                    >
+                      Create draft invoice
+                    </Button>
                   </>
                 )}
                 {(quote.status === 'Sent' || quote.status === 'Awaiting Response') && (
-                  <Button onClick={handleConvertToJob} disabled={convertQuote.isPending} variant="default" className="w-full">
-                    Convert to Job
-                  </Button>
+                  <>
+                    <Button onClick={handleConvertToJob} disabled={convertQuote.isPending} variant="default" className="w-full">
+                      Convert to Job
+                    </Button>
+                    <Button
+                      onClick={() => void handleCreateInvoiceFromQuote()}
+                      disabled={convertQuoteToInvoice.isPending}
+                      variant="outline"
+                      className="w-full"
+                    >
+                      Create draft invoice
+                    </Button>
+                  </>
                 )}
                 {quote.status === 'Approved' && (
-                  <Button onClick={handleConvertToJob} disabled={convertQuote.isPending} variant="default" className="w-full">
-                    Convert to Job
-                  </Button>
+                  <>
+                    <Button onClick={handleConvertToJob} disabled={convertQuote.isPending} variant="default" className="w-full">
+                      Convert to Job
+                    </Button>
+                    <Button
+                      onClick={() => void handleCreateInvoiceFromQuote()}
+                      disabled={convertQuoteToInvoice.isPending}
+                      variant="outline"
+                      className="w-full"
+                    >
+                      Create draft invoice
+                    </Button>
+                  </>
                 )}
               </div>
             </CardContent>

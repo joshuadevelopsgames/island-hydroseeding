@@ -1,0 +1,44 @@
+/* Public invoice / receipt — print & Save as PDF */
+@media print {
+  @page {
+    margin: 14mm 12mm;
+    size: auto;
+  }
+
+  body {
+    background: #fff !important;
+  }
+
+  .invoice-pay-root {
+    background: #fff !important;
+    min-height: auto !important;
+    padding-bottom: 0 !important;
+  }
+
+  .invoice-pay-no-print {
+    display: none !important;
+  }
+
+  .invoice-pay-document,
+  .invoice-pay-receipt {
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+    border-radius: 0 !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    break-inside: avoid;
+  }
+
+  .invoice-pay-header {
+    border-bottom: 1px solid #ccc !important;
+    padding: 0 0 12px !important;
+  }
+
+  .invoice-pay-grid {
+    display: block !important;
+  }
+
+  .invoice-pay-receipt-actions {
+    display: none !important;
+  }
+}

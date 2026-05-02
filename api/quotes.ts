@@ -2,6 +2,8 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { randomUUID } from 'crypto';
 import { requireAuth } from './_auth';
+import { documentTotalsFromSubtotal, lineTotal, roundMoney, MONEY_EPS } from './_documentPricing';
+import { syncInvoiceFinancials } from './_invoiceSync';
 
 function supabase(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL;
@@ -25,13 +27,33 @@ function parseBody(req: VercelRequest): Record<string, unknown> {
 
 const NOW_ISO = () => new Date().toISOString();
 
+function todayDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function defaultDueDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 30);
+  return d.toISOString().slice(0, 10);
+}
+
+const QUOTE_LINE_STATUSES_LOCKED = new Set(['Sent', 'Approved', 'Converted']);
+
+async function assertQuoteLinesEditable(db: SupabaseClient, quoteId: string): Promise<string | null> {
+  const { data, error } = await db.from('quotes').select('status').eq('id', quoteId).single();
+  if (error) return error.message;
+  if (QUOTE_LINE_STATUSES_LOCKED.has(String(data?.status ?? ''))) {
+    return 'Cannot edit line items while quote is Sent, Approved, or Converted';
+  }
+  return null;
+}
+
 async function recalculateQuote(db: SupabaseClient, quoteId: string) {
   const { data: items } = await db.from('quote_line_items').select('total').eq('quote_id', quoteId);
-  const subtotal = (items ?? []).reduce((sum, i) => sum + Number(i.total), 0);
+  const subtotalRaw = (items ?? []).reduce((sum, i) => sum + Number(i.total), 0);
   const { data: q } = await db.from('quotes').select('tax_rate').eq('id', quoteId).single();
   const taxRate = Number(q?.tax_rate ?? 0.05);
-  const tax_amount = Math.round(subtotal * taxRate * 100) / 100;
-  const total = Math.round((subtotal + tax_amount) * 100) / 100;
+  const { subtotal, tax_amount, total } = documentTotalsFromSubtotal(subtotalRaw, taxRate);
   await db.from('quotes').update({ subtotal, tax_amount, total, updated_at: NOW_ISO() }).eq('id', quoteId);
 }
 
@@ -185,6 +207,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         patch[k] = v;
       }
     }
+    const taxRatePatch = patch.tax_rate;
+    if (taxRatePatch !== undefined) {
+      await db
+        .from('quotes')
+        .update({ tax_rate: Number(taxRatePatch), updated_at: NOW_ISO() })
+        .eq('id', id);
+      delete patch.tax_rate;
+    }
+    if (
+      'deposit_required' in patch ||
+      'deposit_amount' in patch ||
+      body.recalc ||
+      taxRatePatch !== undefined
+    ) {
+      await recalculateQuote(db, id);
+    }
+    if ('deposit_required' in patch || 'deposit_amount' in patch) {
+      const { data: q } = await db
+        .from('quotes')
+        .select('total, deposit_required, deposit_amount')
+        .eq('id', id)
+        .maybeSingle();
+      const depReq =
+        patch.deposit_required !== undefined ? Boolean(patch.deposit_required) : Boolean(q?.deposit_required);
+      const depAmt =
+        patch.deposit_amount !== undefined ? Number(patch.deposit_amount) : Number(q?.deposit_amount ?? 0);
+      if (depReq && depAmt > roundMoney(Number(q?.total ?? 0)) + MONEY_EPS) {
+        res.status(400).json({ error: 'deposit_amount cannot exceed quote total' });
+        return;
+      }
+    }
     const { data, error } = await db.from('quotes').update(patch).eq('id', id).select('*').single();
     if (await errTable(error)) return;
     if (!data) {
@@ -235,14 +288,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'quote_id, product_service_name, quantity, and unit_price are required' });
       return;
     }
-    const total = Math.round(quantity * unit_price * 100) / 100;
+    const locked = await assertQuoteLinesEditable(db, quote_id);
+    if (locked) {
+      res.status(400).json({ error: locked });
+      return;
+    }
+    const total = lineTotal(quantity, unit_price);
     const row = {
       quote_id,
       product_service_name,
       quantity,
       unit_price,
       total,
-      updated_at: NOW_ISO(),
     };
     const { data, error } = await db.from('quote_line_items').insert(row).select('*').single();
     if (await errTable(error)) return;
@@ -257,12 +314,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
-    const { data: existing } = await db.from('quote_line_items').select('quote_id').eq('id', id).single();
+    const { data: existing } = await db
+      .from('quote_line_items')
+      .select('quote_id, quantity, unit_price')
+      .eq('id', id)
+      .single();
     if (!existing) {
       res.status(404).json({ error: 'Line item not found' });
       return;
     }
-    const patch: Record<string, unknown> = { updated_at: NOW_ISO() };
+    const locked = await assertQuoteLinesEditable(db, existing.quote_id as string);
+    if (locked) {
+      res.status(400).json({ error: locked });
+      return;
+    }
+    const patch: Record<string, unknown> = {};
     const keys = ['product_service_name', 'quantity', 'unit_price'] as const;
     for (const k of keys) {
       if (Object.prototype.hasOwnProperty.call(body, k)) {
@@ -272,7 +338,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (Object.prototype.hasOwnProperty.call(patch, 'quantity') || Object.prototype.hasOwnProperty.call(patch, 'unit_price')) {
       const q = Number(patch.quantity ?? existing.quantity);
       const up = Number(patch.unit_price ?? existing.unit_price);
-      patch.total = Math.round(q * up * 100) / 100;
+      patch.total = lineTotal(q, up);
     }
     const { data, error } = await db.from('quote_line_items').update(patch).eq('id', id).select('*').single();
     if (await errTable(error)) return;
@@ -292,6 +358,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(404).json({ error: 'Line item not found' });
       return;
     }
+    const locked = await assertQuoteLinesEditable(db, existing.quote_id as string);
+    if (locked) {
+      res.status(400).json({ error: locked });
+      return;
+    }
     const { error } = await db.from('quote_line_items').delete().eq('id', id);
     if (await errTable(error)) return;
     await recalculateQuote(db, existing.quote_id as string);
@@ -306,14 +377,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'quote_id and items array are required' });
       return;
     }
+    const locked = await assertQuoteLinesEditable(db, quote_id);
+    if (locked) {
+      res.status(400).json({ error: locked });
+      return;
+    }
     await db.from('quote_line_items').delete().eq('quote_id', quote_id);
-    const toInsert = items.map((item: Record<string, unknown>) => ({
+    const toInsert = items.map((item: Record<string, unknown>, idx: number) => ({
       quote_id,
       product_service_name: String(item.product_service_name ?? '').trim(),
       quantity: Number(item.quantity ?? 0),
       unit_price: Number(item.unit_price ?? 0),
-      total: Math.round(Number(item.quantity ?? 0) * Number(item.unit_price ?? 0) * 100) / 100,
-      updated_at: NOW_ISO(),
+      total: lineTotal(Number(item.quantity ?? 0), Number(item.unit_price ?? 0)),
+      sort_order: idx,
     }));
     const { data, error } = await db.from('quote_line_items').insert(toInsert).select('*');
     if (await errTable(error)) return;
@@ -425,6 +501,72 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     res.status(200).json({ quote: data });
+    return;
+  }
+
+  if (action === 'quote.convert_to_invoice') {
+    const quote_id = String(body.quote_id ?? body.id ?? '');
+    if (!quote_id) {
+      res.status(400).json({ error: 'quote_id is required' });
+      return;
+    }
+    const { data: quote, error: qe } = await db.from('quotes').select('*').eq('id', quote_id).single();
+    if (await errTable(qe)) return;
+    if (!quote) {
+      res.status(404).json({ error: 'Quote not found' });
+      return;
+    }
+    const { data: lines } = await db
+      .from('quote_line_items')
+      .select('*')
+      .eq('quote_id', quote_id)
+      .order('sort_order', { ascending: true });
+    const invoiceId = randomUUID();
+    const { data: invoice, error: ie } = await db
+      .from('invoices')
+      .insert({
+        id: invoiceId,
+        account_id: quote.account_id,
+        property_id: quote.property_id,
+        quote_id,
+        job_id: null,
+        title: `Invoice — ${quote.title}`,
+        status: 'Draft',
+        issue_date: todayDate(),
+        due_date: defaultDueDate(),
+        notes: quote.notes,
+        payment_terms: 'Net 30',
+        tax_rate: Number(quote.tax_rate ?? 0.05),
+        subtotal: 0,
+        tax_amount: 0,
+        total: 0,
+        amount_paid: 0,
+        balance_due: 0,
+        created_at: NOW_ISO(),
+        updated_at: NOW_ISO(),
+      })
+      .select('*')
+      .single();
+    if (await errTable(ie)) return;
+    if (lines && lines.length > 0) {
+      const rows = lines.map((li: Record<string, unknown>, idx: number) => ({
+        id: randomUUID(),
+        invoice_id: invoiceId,
+        product_service_name: li.product_service_name,
+        description: li.description ?? null,
+        quantity: li.quantity,
+        unit_price: li.unit_price,
+        total: li.total,
+        sort_order: li.sort_order != null ? Number(li.sort_order) : idx,
+        created_at: NOW_ISO(),
+      }));
+      const { error: le } = await db.from('invoice_line_items').insert(rows);
+      if (await errTable(le)) return;
+    }
+    await syncInvoiceFinancials(db, invoiceId);
+    const { data: finv, error: fe } = await db.from('invoices').select('*').eq('id', invoiceId).single();
+    if (await errTable(fe)) return;
+    res.status(201).json({ invoice: finv });
     return;
   }
 
