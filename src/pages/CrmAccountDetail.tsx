@@ -11,6 +11,7 @@ import {
   Download,
   FileText,
   Loader2,
+  MessageSquare,
   Pencil,
   Plus,
   StickyNote,
@@ -35,11 +36,13 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { useCrmAccountDetail, useCrmMutations } from '@/hooks/useCrm';
+import { useCrmAccountDetail, useCrmLeadSources, useCrmMutations, useCrmTagList } from '@/hooks/useCrm';
 import {
   CRM_CONTACT_TIER_RANK,
+  type AccountLifecycle,
   type CrmAccountStatus,
   type CrmAccountType,
+  type CrmCommLog,
   type CrmContactTier,
   type CrmProperty,
 } from '@/lib/crmTypes';
@@ -116,6 +119,27 @@ function parseNotesLines(notes: string | null): string[] {
 
 function money(n: number): string {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(n);
+}
+
+function cadMoney(n: number): string {
+  return new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(n);
+}
+
+function lifecyclePill(l: string) {
+  const x = l as AccountLifecycle;
+  const pill = cn(
+    'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium',
+    x === 'Lead' && 'bg-sky-50 text-blue-950 dark:bg-sky-950/45 dark:text-sky-100',
+    x === 'Active' && 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-100',
+    x === 'Inactive' && 'bg-slate-100 text-slate-700 dark:bg-slate-800/80 dark:text-slate-200',
+    x === 'Archived' && 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300'
+  );
+  return (
+    <span className={pill}>
+      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current opacity-90" />
+      {l}
+    </span>
+  );
 }
 
 export default function CrmAccountDetail() {
@@ -227,8 +251,51 @@ export default function CrmAccountDetail() {
               {account.company && <p className="mt-0.5 text-sm text-[var(--text-muted)]">{account.company}</p>}
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {crmStatusPill(account.status)}
+                {lifecyclePill(account.account_lifecycle ?? 'Lead')}
                 {crmTypeBadge(account.account_type)}
                 <span className="font-mono text-xs text-[var(--text-muted)]">ID: {account.id}</span>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--surface-raised)] p-3">
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    Lifetime value
+                  </p>
+                  <p className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-primary)]">
+                    {cadMoney(account.lifetime_value ?? 0)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-[var(--text-muted)]">Paid invoices (all time)</p>
+                </div>
+                <div className="rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--surface-raised)] p-3">
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    Current balance
+                  </p>
+                  <p className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-primary)]">
+                    {cadMoney(account.current_balance ?? 0)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-[var(--text-muted)]">Open invoice balances</p>
+                </div>
+                <div className="rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--surface-raised)] p-3">
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    Lead source
+                  </p>
+                  <p className="mt-2 text-sm font-medium text-[var(--text-primary)]">
+                    {account.lead_source_name ?? account.marketing_source ?? '—'}
+                  </p>
+                </div>
+                <div className="rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--surface-raised)] p-3">
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Tags</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {(account.tags ?? []).length ? (
+                      (account.tags ?? []).map((t) => (
+                        <Badge key={t.id} variant="secondary">
+                          {t.name}
+                        </Badge>
+                      ))
+                    ) : (
+                      <span className="text-sm text-[var(--text-muted)]">No tags</span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -279,6 +346,7 @@ export default function CrmAccountDetail() {
         onOpenChange={setEditOpen}
         account={account}
         onSave={(patch) => m.updateAccount.mutateAsync({ id: account.id, ...patch })}
+        onSaveTags={(tag_ids) => m.setAccountTags.mutateAsync({ account_id: account.id, tag_ids })}
       />
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -320,6 +388,15 @@ export default function CrmAccountDetail() {
             Timeline
           </TabsTrigger>
           <TabsTrigger
+            value="communications"
+            className="rounded-none border-b-2 border-transparent px-3 py-2 data-[state=active]:border-[var(--primary-green)] data-[state=active]:bg-transparent"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <MessageSquare className="h-3.5 w-3.5 opacity-80" aria-hidden />
+              Comms
+            </span>
+          </TabsTrigger>
+          <TabsTrigger
             value="research"
             className="rounded-none border-b-2 border-transparent px-3 py-2 data-[state=active]:border-[var(--primary-green)] data-[state=active]:bg-transparent"
           >
@@ -352,7 +429,7 @@ export default function CrmAccountDetail() {
           <ContactsTab accountId={account.id} contacts={data?.contacts ?? []} m={m} />
         </TabsContent>
         <TabsContent value="properties">
-          <PropertiesTab properties={data?.properties ?? []} />
+          <PropertiesTab accountId={account.id} properties={data?.properties ?? []} m={m} />
         </TabsContent>
         <TabsContent value="quotes">
           <AccountQuotesTab quotes={accountQuotes} loading={quotesQuery.isPending} />
@@ -365,6 +442,14 @@ export default function CrmAccountDetail() {
             accountId={account.id}
             interactions={sortedInteractions}
             userId={currentUser?.id ?? null}
+            m={m}
+          />
+        </TabsContent>
+        <TabsContent value="communications">
+          <CommunicationsTab
+            accountId={account.id}
+            entries={data?.comm_log ?? []}
+            sentByLabel={currentUser?.name?.trim() || currentUser?.email?.trim() || null}
             m={m}
           />
         </TabsContent>
@@ -1023,7 +1108,19 @@ function ContactTierBadge({ tier }: { tier: CrmContactTier }) {
   return null;
 }
 
-function PropertiesTab({ properties }: { properties: CrmProperty[] }) {
+function PropertiesTab({
+  accountId,
+  properties,
+  m,
+}: {
+  accountId: string;
+  properties: CrmProperty[];
+  m: ReturnType<typeof useCrmMutations>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<CrmProperty | null>(null);
+  const [delId, setDelId] = useState<string | null>(null);
+
   const sorted = useMemo(
     () =>
       [...properties].sort((a, b) => {
@@ -1033,6 +1130,34 @@ function PropertiesTab({ properties }: { properties: CrmProperty[] }) {
     [properties]
   );
 
+  const submit: React.FormEventHandler<HTMLFormElement> = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const payload: Record<string, unknown> = {
+      label: String(fd.get('label') ?? '').trim() || null,
+      address: String(fd.get('address') ?? '').trim(),
+      city: String(fd.get('city') ?? '').trim() || null,
+      province: String(fd.get('province') ?? '').trim() || null,
+      postal_code: String(fd.get('postal_code') ?? '').trim() || null,
+      notes: String(fd.get('notes') ?? '').trim() || null,
+      is_default: fd.get('is_default') === 'on',
+    };
+    try {
+      if (editing) {
+        await m.updateProperty.mutateAsync({ id: editing.id, ...payload });
+      } else {
+        await m.createProperty.mutateAsync({ account_id: accountId, ...payload });
+      }
+      setOpen(false);
+      setEditing(null);
+      e.currentTarget.reset();
+    } catch (err) {
+      toast.error(formatErrorForUi(err));
+    }
+  };
+
+  const pending = sorted.find((p) => p.id === delId);
+
   return (
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
@@ -1040,8 +1165,92 @@ function PropertiesTab({ properties }: { properties: CrmProperty[] }) {
           <CardTitle className="text-base">Properties</CardTitle>
           <CardDescription>Service addresses tied to this account.</CardDescription>
         </div>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            setEditing(null);
+            setOpen(true);
+          }}
+        >
+          Add property
+        </Button>
       </CardHeader>
       <CardContent>
+        <Dialog
+          open={open}
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (!next) setEditing(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{editing ? 'Edit property' : 'New property'}</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={submit} className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="p-label">Label</Label>
+                <Input id="p-label" name="label" placeholder="Main, Cabin, Shop…" defaultValue={editing?.label ?? ''} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="p-address">Address *</Label>
+                <Input id="p-address" name="address" required defaultValue={editing?.address ?? ''} />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="p-city">City</Label>
+                  <Input id="p-city" name="city" defaultValue={editing?.city ?? ''} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="p-province">Province</Label>
+                  <Input id="p-province" name="province" defaultValue={editing?.province ?? 'British Columbia'} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="p-postal">Postal code</Label>
+                <Input id="p-postal" name="postal_code" defaultValue={editing?.postal_code ?? ''} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="p-notes">Notes</Label>
+                <Textarea id="p-notes" name="notes" rows={2} defaultValue={editing?.notes ?? ''} />
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="is_default" defaultChecked={editing?.is_default ?? false} />
+                Default service property
+              </label>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setOpen(false);
+                    setEditing(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={m.createProperty.isPending || m.updateProperty.isPending}>
+                  Save
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        <ConfirmDialog
+          open={delId !== null}
+          title="Remove property?"
+          message={pending ? `Remove ${pending.label || pending.address}?` : ''}
+          confirmLabel="Remove"
+          variant="danger"
+          onConfirm={() => {
+            if (delId) void m.deleteProperty.mutateAsync(delId);
+            setDelId(null);
+          }}
+          onCancel={() => setDelId(null)}
+        />
+
         {sorted.length === 0 ? (
           <p className="text-sm text-[var(--text-muted)]">No properties yet.</p>
         ) : (
@@ -1050,20 +1259,171 @@ function PropertiesTab({ properties }: { properties: CrmProperty[] }) {
               const cityLine = [p.city, p.province, p.postal_code].filter(Boolean).join(', ');
               return (
                 <li key={p.id} className="rounded-[var(--radius-sm)] border border-[var(--border-color)] p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="font-semibold">{p.label || p.address}</p>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold">{p.label || p.address}</p>
+                        {p.is_default && <Badge variant="default">Default</Badge>}
+                      </div>
                       {p.label && <p className="text-sm text-[var(--text-secondary)]">{p.address}</p>}
                       {cityLine && <p className="text-sm text-[var(--text-secondary)]">{cityLine}</p>}
                       {p.notes && (
                         <p className="mt-2 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">{p.notes}</p>
                       )}
                     </div>
-                    {p.is_default && <Badge variant="default">Default</Badge>}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!p.is_default && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void m.setDefaultProperty.mutateAsync(p.id)}
+                          disabled={m.setDefaultProperty.isPending}
+                        >
+                          Set default
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setEditing(p);
+                          setOpen(true);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button type="button" size="sm" variant="destructive" onClick={() => setDelId(p.id)}>
+                        Remove
+                      </Button>
+                    </div>
                   </div>
                 </li>
               );
             })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CommunicationsTab({
+  accountId,
+  entries,
+  sentByLabel,
+  m,
+}: {
+  accountId: string;
+  entries: CrmCommLog[];
+  sentByLabel: string | null;
+  m: ReturnType<typeof useCrmMutations>;
+}) {
+  const [kind, setKind] = useState<'email' | 'sms' | 'call'>('email');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+
+  const sorted = useMemo(
+    () => [...entries].sort((a, b) => (a.sent_at < b.sent_at ? 1 : -1)),
+    [entries]
+  );
+
+  const submit: React.FormEventHandler<HTMLFormElement> = async (e) => {
+    e.preventDefault();
+    const b = body.trim();
+    if (!b) {
+      toast.error('Add a message or call summary.');
+      return;
+    }
+    try {
+      await m.createCommLog.mutateAsync({
+        account_id: accountId,
+        kind,
+        subject: subject.trim() || undefined,
+        body: b,
+        sent_by: sentByLabel ?? undefined,
+      });
+      toast.success('Communication logged');
+      setSubject('');
+      setBody('');
+    } catch (err) {
+      toast.error(formatErrorForUi(err));
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Communications log</CardTitle>
+        <CardDescription>Emails, SMS, and calls tied to this account (newest first).</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <form
+          onSubmit={submit}
+          className="space-y-3 rounded-[var(--radius-md)] border border-dashed border-[var(--border-strong)] p-4"
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <select
+                className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
+                value={kind}
+                onChange={(e) => setKind(e.target.value as 'email' | 'sms' | 'call')}
+              >
+                <option value="email">Email</option>
+                <option value="sms">SMS</option>
+                <option value="call">Call</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="comm-subject">Subject / title</Label>
+              <Input
+                id="comm-subject"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="Optional"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="comm-body">Body / notes *</Label>
+            <Textarea id="comm-body" value={body} onChange={(e) => setBody(e.target.value)} rows={4} required />
+          </div>
+          <Button type="submit" disabled={m.createCommLog.isPending}>
+            {m.createCommLog.isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving…
+              </>
+            ) : (
+              'Log communication'
+            )}
+          </Button>
+        </form>
+
+        {sorted.length === 0 ? (
+          <p className="text-sm text-[var(--text-muted)]">No communications logged yet.</p>
+        ) : (
+          <ul className="space-y-3">
+            {sorted.map((row) => (
+              <li
+                key={row.id}
+                className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-raised)] p-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
+                  <span className="font-semibold uppercase tracking-wide text-[var(--text-primary)]">{row.kind}</span>
+                  <time dateTime={row.sent_at}>{formatInVancouver(row.sent_at, 'MMM d, yyyy h:mm a')}</time>
+                </div>
+                {row.subject ? <p className="mt-1 font-medium text-[var(--text-primary)]">{row.subject}</p> : null}
+                {row.body ? (
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">{row.body}</p>
+                ) : null}
+                {row.sent_by ? (
+                  <p className="mt-2 text-xs text-[var(--text-muted)]">Logged by {row.sent_by}</p>
+                ) : null}
+              </li>
+            ))}
           </ul>
         )}
       </CardContent>
@@ -1314,17 +1674,23 @@ function ResearchNoteRow({
   );
 }
 
+const LIFECYCLE_EDIT: AccountLifecycle[] = ['Lead', 'Active', 'Inactive', 'Archived'];
+
 function EditAccountDialog({
   open,
   onOpenChange,
   account,
   onSave,
+  onSaveTags,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   account: NonNullable<ReturnType<typeof useCrmAccountDetail>['data']>['account'];
   onSave: (patch: Record<string, unknown>) => Promise<unknown>;
+  onSaveTags?: (tag_ids: string[]) => Promise<unknown>;
 }) {
+  const { data: leadSources = [] } = useCrmLeadSources();
+  const { data: allTags = [] } = useCrmTagList();
   const [type, setType] = useState<CrmAccountType>(account.account_type as CrmAccountType);
   const [status, setStatus] = useState<CrmAccountStatus>(account.status as CrmAccountStatus);
   const [pending, setPending] = useState(false);
@@ -1340,17 +1706,24 @@ function EditAccountDialog({
     const fd = new FormData(e.currentTarget);
     setPending(true);
     try {
+      const ls = String(fd.get('lead_source_id') ?? '').trim();
       await onSave({
         name: String(fd.get('name') ?? '').trim(),
         company: String(fd.get('company') ?? '').trim() || null,
         account_type: type,
         status,
+        account_lifecycle: String(fd.get('account_lifecycle') ?? 'Lead'),
+        lead_source_id: ls || null,
         marketing_source: String(fd.get('marketing_source') ?? '') || null,
         phone: normalizePhoneForSave(String(fd.get('phone') ?? '')),
         email: String(fd.get('email') ?? '').trim() || null,
         address: String(fd.get('address') ?? '').trim() || null,
         notes: String(fd.get('notes') ?? '') || null,
       });
+      if (onSaveTags) {
+        const tagIds = fd.getAll('tag').map((x) => String(x));
+        await onSaveTags(tagIds);
+      }
       onOpenChange(false);
     } finally {
       setPending(false);
@@ -1386,7 +1759,7 @@ function EditAccountDialog({
               </select>
             </div>
             <div className="space-y-2">
-              <Label>Status</Label>
+              <Label>Pipeline status</Label>
               <select
                 className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
                 value={status}
@@ -1398,6 +1771,57 @@ function EditAccountDialog({
                 <option>Won / Closed</option>
                 <option>Lost</option>
               </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ea-lifecycle">Lifecycle</Label>
+              <select
+                id="ea-lifecycle"
+                name="account_lifecycle"
+                className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
+                defaultValue={account.account_lifecycle ?? 'Lead'}
+              >
+                {LIFECYCLE_EDIT.map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="ea-leadsrc">Lead source</Label>
+              <select
+                id="ea-leadsrc"
+                name="lead_source_id"
+                className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
+                defaultValue={account.lead_source_id ?? ''}
+              >
+                <option value="">— None —</option>
+                {leadSources.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Tags</Label>
+              <div className="flex max-h-36 flex-wrap gap-3 overflow-y-auto rounded-[var(--radius-sm)] border border-[var(--border-strong)] p-3">
+                {allTags.length === 0 ? (
+                  <p className="text-sm text-[var(--text-muted)]">No tags defined yet.</p>
+                ) : (
+                  allTags.map((t) => (
+                    <label key={t.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        name="tag"
+                        value={t.id}
+                        defaultChecked={(account.tags ?? []).some((x) => x.id === t.id)}
+                      />
+                      {t.name}
+                    </label>
+                  ))
+                )}
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="ea-phone">Phone</Label>

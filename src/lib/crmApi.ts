@@ -1,9 +1,12 @@
 import type {
   CrmAccount,
+  CrmCommLog,
   CrmContact,
   CrmInteraction,
+  CrmLeadSource,
   CrmProperty,
   CrmResearchNote,
+  CrmTag,
   LegacyLead,
 } from '@/lib/crmTypes';
 import { apiFetch } from './apiClient';
@@ -45,12 +48,35 @@ export async function fetchCrmAccounts(): Promise<CrmAccount[]> {
   return data.accounts ?? [];
 }
 
+export async function fetchCrmLeadSources(): Promise<CrmLeadSource[]> {
+  const r = await apiFetch(`${CRM}?action=lead_sources`);
+  if (r.status === 404 || r.status === 503) return [];
+  if (!r.ok) {
+    const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
+    throw new Error(j.error || `CRM ${r.status}`);
+  }
+  const data = await readJson<{ lead_sources: CrmLeadSource[] }>(r);
+  return data.lead_sources ?? [];
+}
+
+export async function fetchCrmTagList(): Promise<CrmTag[]> {
+  const r = await apiFetch(`${CRM}?action=tags`);
+  if (r.status === 404 || r.status === 503) return [];
+  if (!r.ok) {
+    const j = (await readJson<{ error?: string }>(r).catch(() => ({}))) as { error?: string };
+    throw new Error(j.error || `CRM ${r.status}`);
+  }
+  const data = await readJson<{ tags: CrmTag[] }>(r);
+  return data.tags ?? [];
+}
+
 export async function fetchCrmAccountBundle(accountId: string): Promise<{
   account: CrmAccount;
   contacts: CrmContact[];
   properties: CrmProperty[];
   interactions: CrmInteraction[];
   research_notes: CrmResearchNote[];
+  comm_log: CrmCommLog[];
 }> {
   const r = await apiFetch(`${CRM}?action=account&id=${encodeURIComponent(accountId)}`);
   if (!r.ok) {

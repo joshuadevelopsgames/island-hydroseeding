@@ -218,10 +218,12 @@ export default function QuoteTemplates() {
       property: {
         id: 'p',
         account_id: 'sample',
+        label: null,
         address: '123 Bluff Lane',
         city: 'Saanich',
         province: 'British Columbia',
         postal_code: 'V8Y 2J6',
+        is_default: true,
         notes: null,
         created_at: '',
         updated_at: '',

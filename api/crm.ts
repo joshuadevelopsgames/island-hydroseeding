@@ -36,6 +36,60 @@ function normalizeContactTier(raw: unknown, isPrimaryHint?: unknown): ContactTie
   return isPrimaryHint ? 'primary' : 'other';
 }
 
+type CrmTagRow = { id: string; name: string; color: string | null };
+
+/** Adds lifetime_value, current_balance, tags[], lead_source_name to each account (Phase 2). */
+async function enrichAccounts(
+  db: SupabaseClient,
+  tenantId: string,
+  accounts: Record<string, unknown>[]
+): Promise<Record<string, unknown>[]> {
+  if (accounts.length === 0) return [];
+  const ids = accounts.map((a) => String(a.id));
+  const [invRes, tagLinkRes, lsRes] = await Promise.all([
+    db.from('invoices').select('account_id, amount_paid, balance_due').eq('tenant_id', tenantId).in('account_id', ids),
+    db.from('crm_account_tags').select('account_id, tag_id').eq('tenant_id', tenantId).in('account_id', ids),
+    db.from('crm_lead_sources').select('id, name').eq('tenant_id', tenantId),
+  ]);
+  const invoices = (invRes.data ?? []) as { account_id: string | null; amount_paid: unknown; balance_due: unknown }[];
+  const acctTagRows = (tagLinkRes.data ?? []) as { account_id: string; tag_id: string }[];
+  const tagIds = [...new Set(acctTagRows.map((r) => r.tag_id))];
+  let tagMeta: CrmTagRow[] = [];
+  if (tagIds.length > 0) {
+    const tr = await db.from('crm_tags').select('id, name, color').eq('tenant_id', tenantId).in('id', tagIds);
+    tagMeta = (tr.data ?? []) as CrmTagRow[];
+  }
+  const tagMap = new Map(tagMeta.map((t) => [t.id, t]));
+  const tagsByAccount = new Map<string, CrmTagRow[]>();
+  for (const r of acctTagRows) {
+    const t = tagMap.get(r.tag_id);
+    if (!t) continue;
+    const arr = tagsByAccount.get(r.account_id) ?? [];
+    arr.push(t);
+    tagsByAccount.set(r.account_id, arr);
+  }
+  const lv = new Map<string, number>();
+  const bal = new Map<string, number>();
+  for (const inv of invoices) {
+    if (!inv.account_id) continue;
+    const id = inv.account_id;
+    lv.set(id, (lv.get(id) ?? 0) + Number(inv.amount_paid ?? 0));
+    bal.set(id, (bal.get(id) ?? 0) + Number(inv.balance_due ?? 0));
+  }
+  const lsName = new Map((lsRes.data ?? []).map((x: { id: string; name: string }) => [x.id, x.name]));
+  return accounts.map((a) => {
+    const id = String(a.id);
+    const lsid = a.lead_source_id != null ? String(a.lead_source_id) : null;
+    return {
+      ...a,
+      lifetime_value: lv.get(id) ?? 0,
+      current_balance: bal.get(id) ?? 0,
+      tags: tagsByAccount.get(id) ?? [],
+      lead_source_name: lsid ? lsName.get(lsid) ?? null : null,
+    };
+  });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const db = supabase();
   if (!db) {
@@ -62,7 +116,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(500).json({ error: error.message });
         return;
       }
-      res.status(200).json({ accounts: data ?? [] });
+      const rows = (data ?? []) as Record<string, unknown>[];
+      const enriched = await enrichAccounts(db, tenantId, rows);
+      res.status(200).json({ accounts: enriched });
+      return;
+    }
+    if (action === 'lead_sources') {
+      const { data, error } = await db
+        .from('crm_lead_sources')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
+      if (error) {
+        res.status(500).json({ error: error.message });
+        return;
+      }
+      res.status(200).json({ lead_sources: data ?? [] });
+      return;
+    }
+    if (action === 'tags') {
+      const { data, error } = await db
+        .from('crm_tags')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('name', { ascending: true });
+      if (error) {
+        res.status(500).json({ error: error.message });
+        return;
+      }
+      res.status(200).json({ tags: data ?? [] });
+      return;
+    }
+    if (action === 'comm_log') {
+      const accountId = String(req.query.account_id ?? '').trim();
+      let q = db.from('comm_log').select('*').eq('tenant_id', tenantId).order('sent_at', { ascending: false }).limit(500);
+      if (accountId) q = q.eq('account_id', accountId);
+      const { data, error } = await q;
+      if (error) {
+        res.status(500).json({ error: error.message });
+        return;
+      }
+      res.status(200).json({ comm_log: data ?? [] });
       return;
     }
     if (action === 'account') {
@@ -71,7 +166,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ error: 'Missing id' });
         return;
       }
-      const [acc, contacts, properties, interactions, research_notes] = await Promise.all([
+      const [acc, contacts, properties, interactions, research_notes, comm_log] = await Promise.all([
         db.from('crm_accounts').select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle(),
         db
           .from('crm_contacts')
@@ -89,6 +184,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .order('created_at', { ascending: true }),
         db.from('crm_interactions').select('*').eq('account_id', id).eq('tenant_id', tenantId).order('occurred_at', { ascending: false }),
         db.from('crm_research_notes').select('*').eq('account_id', id).eq('tenant_id', tenantId).order('created_at', { ascending: false }),
+        db.from('comm_log').select('*').eq('account_id', id).eq('tenant_id', tenantId).order('sent_at', { ascending: false }).limit(200),
       ]);
       if (acc.error) {
         res.status(500).json({ error: acc.error.message });
@@ -98,16 +194,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(404).json({ error: 'Account not found' });
         return;
       }
+      const commLogRows = comm_log.error ? [] : comm_log.data ?? [];
+      const [acctEnriched] = await enrichAccounts(db, tenantId, [acc.data as Record<string, unknown>]);
       res.status(200).json({
-        account: acc.data,
+        account: acctEnriched,
         contacts: contacts.data ?? [],
         properties: properties.data ?? [],
         interactions: interactions.data ?? [],
         research_notes: research_notes.data ?? [],
+        comm_log: commLogRows,
       });
       return;
     }
-    res.status(400).json({ error: 'Invalid GET: use action=accounts or action=account&id=' });
+    res.status(400).json({
+      error:
+        'Invalid GET: use action=accounts, lead_sources, tags, comm_log, or action=account&id=',
+    });
     return;
   }
 
@@ -159,7 +261,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     const patch: Record<string, unknown> = { updated_at: NOW_ISO() };
-    const keys = ['name', 'company', 'account_type', 'status', 'marketing_source', 'phone', 'email', 'address', 'notes'] as const;
+    const keys = [
+      'name',
+      'company',
+      'account_type',
+      'status',
+      'marketing_source',
+      'phone',
+      'email',
+      'address',
+      'notes',
+      'account_lifecycle',
+      'lead_source_id',
+      'stripe_customer_id',
+    ] as const;
     for (const k of keys) {
       if (Object.prototype.hasOwnProperty.call(body, k)) {
         const v = body[k];
@@ -275,6 +390,152 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  if (action === 'property.create') {
+    const account_id = String(body.account_id ?? '');
+    const address = String(body.address ?? '').trim();
+    if (!account_id || !address) {
+      res.status(400).json({ error: 'account_id and address are required' });
+      return;
+    }
+    const wantsDefault = Boolean(body.is_default);
+    if (wantsDefault) {
+      await db
+        .from('crm_properties')
+        .update({ is_default: false, updated_at: NOW_ISO() })
+        .eq('account_id', account_id)
+        .eq('tenant_id', tenantId);
+    } else {
+      const existing = await db
+        .from('crm_properties')
+        .select('id')
+        .eq('account_id', account_id)
+        .eq('tenant_id', tenantId)
+        .limit(1);
+      if (!existing.error && (existing.data ?? []).length === 0) {
+        // First property for the account becomes the default automatically.
+        body.is_default = true;
+      }
+    }
+    const row = {
+      tenant_id: tenantId,
+      account_id,
+      address,
+      label: body.label != null ? String(body.label).trim() || null : null,
+      city: body.city != null ? String(body.city).trim() || null : null,
+      province: body.province != null ? String(body.province).trim() || null : null,
+      postal_code: body.postal_code != null ? String(body.postal_code).trim() || null : null,
+      notes: body.notes != null ? String(body.notes) : null,
+      is_default: Boolean(body.is_default),
+      updated_at: NOW_ISO(),
+    };
+    const { data, error } = await db.from('crm_properties').insert(row).select('*').single();
+    if (await errTable(error)) return;
+    res.status(200).json({ property: data });
+    return;
+  }
+
+  if (action === 'property.update') {
+    const id = String(body.id ?? '');
+    if (!id) {
+      res.status(400).json({ error: 'id is required' });
+      return;
+    }
+    const patch: Record<string, unknown> = { updated_at: NOW_ISO() };
+    for (const k of ['label', 'address', 'city', 'province', 'postal_code', 'notes'] as const) {
+      if (Object.prototype.hasOwnProperty.call(body, k)) {
+        const v = body[k];
+        patch[k] = v === null ? null : String(v);
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'is_default')) {
+      patch.is_default = Boolean(body.is_default);
+      if (Boolean(body.is_default)) {
+        const target = await db
+          .from('crm_properties')
+          .select('account_id')
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .maybeSingle();
+        if (target.data?.account_id) {
+          await db
+            .from('crm_properties')
+            .update({ is_default: false, updated_at: NOW_ISO() })
+            .eq('account_id', target.data.account_id)
+            .eq('tenant_id', tenantId)
+            .neq('id', id);
+        }
+      }
+    }
+    const { data, error } = await db
+      .from('crm_properties')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
+    if (await errTable(error)) return;
+    if (!data) {
+      res.status(404).json({ error: 'Property not found' });
+      return;
+    }
+    res.status(200).json({ property: data });
+    return;
+  }
+
+  if (action === 'property.set_default') {
+    const id = String(body.id ?? '');
+    if (!id) {
+      res.status(400).json({ error: 'id is required' });
+      return;
+    }
+    const target = await db
+      .from('crm_properties')
+      .select('account_id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (target.error) {
+      res.status(500).json({ error: target.error.message });
+      return;
+    }
+    if (!target.data?.account_id) {
+      res.status(404).json({ error: 'Property not found' });
+      return;
+    }
+    const account_id = target.data.account_id;
+    const clearOthers = await db
+      .from('crm_properties')
+      .update({ is_default: false, updated_at: NOW_ISO() })
+      .eq('account_id', account_id)
+      .eq('tenant_id', tenantId);
+    if (clearOthers.error) {
+      res.status(500).json({ error: clearOthers.error.message });
+      return;
+    }
+    const { data, error } = await db
+      .from('crm_properties')
+      .update({ is_default: true, updated_at: NOW_ISO() })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
+    if (await errTable(error)) return;
+    res.status(200).json({ property: data });
+    return;
+  }
+
+  if (action === 'property.delete') {
+    const id = String(body.id ?? '');
+    if (!id) {
+      res.status(400).json({ error: 'id is required' });
+      return;
+    }
+    const { error } = await db.from('crm_properties').delete().eq('id', id).eq('tenant_id', tenantId);
+    if (await errTable(error)) return;
+    res.status(200).json({ ok: true });
+    return;
+  }
+
   if (action === 'interaction.create') {
     const account_id = String(body.account_id ?? '');
     const kind = String(body.kind ?? 'note').trim();
@@ -367,6 +628,89 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { error } = await db.from('crm_research_notes').delete().eq('id', id).eq('tenant_id', tenantId);
     if (await errTable(error)) return;
     res.status(200).json({ ok: true });
+    return;
+  }
+
+  if (action === 'lead_source.create') {
+    const name = String(body.name ?? '').trim();
+    if (!name) {
+      res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    const { data, error } = await db
+      .from('crm_lead_sources')
+      .insert({ tenant_id: tenantId, name, sort_order: Number(body.sort_order ?? 99) })
+      .select('*')
+      .single();
+    if (await errTable(error)) return;
+    res.status(200).json({ lead_source: data });
+    return;
+  }
+
+  if (action === 'tag.create') {
+    const name = String(body.name ?? '').trim();
+    if (!name) {
+      res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    const color = body.color != null ? String(body.color) : '#6B7280';
+    const { data, error } = await db
+      .from('crm_tags')
+      .insert({ tenant_id: tenantId, name, color })
+      .select('*')
+      .single();
+    if (await errTable(error)) return;
+    res.status(200).json({ tag: data });
+    return;
+  }
+
+  if (action === 'account.tags.set') {
+    const account_id = String(body.account_id ?? '');
+    if (!account_id) {
+      res.status(400).json({ error: 'account_id is required' });
+      return;
+    }
+    const tagIds = Array.isArray(body.tag_ids) ? (body.tag_ids as unknown[]).map((x) => String(x)) : [];
+    const accOk = await db.from('crm_accounts').select('id').eq('id', account_id).eq('tenant_id', tenantId).maybeSingle();
+    if (!accOk.data) {
+      res.status(404).json({ error: 'Account not found' });
+      return;
+    }
+    const { error: delErr } = await db.from('crm_account_tags').delete().eq('account_id', account_id).eq('tenant_id', tenantId);
+    if (await errTable(delErr)) return;
+    if (tagIds.length > 0) {
+      const rows = tagIds.map((tag_id) => ({ tenant_id: tenantId, account_id, tag_id }));
+      const { error: insErr } = await db.from('crm_account_tags').insert(rows);
+      if (await errTable(insErr)) return;
+    }
+    res.status(200).json({ ok: true });
+    return;
+  }
+
+  if (action === 'comm_log.create') {
+    const kind = String(body.kind ?? 'email').toLowerCase();
+    if (!['email', 'sms', 'call'].includes(kind)) {
+      res.status(400).json({ error: 'kind must be email, sms, or call' });
+      return;
+    }
+    const row = {
+      tenant_id: tenantId,
+      account_id: body.account_id != null ? String(body.account_id) : null,
+      contact_id: body.contact_id != null ? String(body.contact_id) : null,
+      property_id: body.property_id != null ? String(body.property_id) : null,
+      kind,
+      direction: String(body.direction ?? 'outbound'),
+      subject: body.subject != null ? String(body.subject) : null,
+      body: body.body != null ? String(body.body) : null,
+      sent_by: body.sent_by != null ? String(body.sent_by) : null,
+      sent_at: body.sent_at != null ? String(body.sent_at) : NOW_ISO(),
+      related_entity_type: body.related_entity_type != null ? String(body.related_entity_type) : null,
+      related_entity_id: body.related_entity_id != null ? String(body.related_entity_id) : null,
+      status: body.status != null ? String(body.status) : null,
+    };
+    const { data, error } = await db.from('comm_log').insert(row).select('*').single();
+    if (await errTable(error)) return;
+    res.status(200).json({ comm_log: data });
     return;
   }
 

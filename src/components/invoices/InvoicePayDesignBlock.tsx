@@ -106,10 +106,12 @@ export default function InvoicePayDesignBlock({
       ? {
           id: '',
           account_id: '',
+          label: null,
           address: property.address,
           city: property.city,
           province: property.province,
           postal_code: property.postal_code,
+          is_default: false,
           notes: null,
           created_at: '',
           updated_at: '',

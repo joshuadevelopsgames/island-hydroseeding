@@ -87,10 +87,12 @@ export type QuoteLineItem = QuoteLineItemDraft & {
 export type CrmProperty = {
   id: string;
   account_id: string;
+  label: string | null;
   address: string;
   city: string | null;
   province: string | null;
   postal_code: string | null;
+  is_default: boolean;
   notes: string | null;
   created_at: string;
   updated_at: string;

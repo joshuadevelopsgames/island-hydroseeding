@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Loader2, Trash2, MoreVertical, Send, Pencil, ChevronDown, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, Loader2, Trash2, MoreVertical, Send, Pencil, ChevronDown, Eye, EyeOff, MessageSquare, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -83,9 +83,17 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
   const [discountValue, setDiscountValue] = useState<number>(0);
   const [depositRequired, setDepositRequired] = useState<boolean>(false);
   const [depositAmount, setDepositAmount] = useState<number>(0);
-  const [lineItems, setLineItems] = useState<Array<{ product_service_name: string; description: string | null; quantity: number; unit_price: number; sort_order: number; is_optional?: boolean }>>(
-    []
-  );
+  const [lineItems, setLineItems] = useState<
+    Array<{
+      product_service_name: string;
+      description: string | null;
+      quantity: number;
+      unit_price: number;
+      sort_order: number;
+      is_optional?: boolean;
+      section_title?: string | null;
+    }>
+  >([]);
   const [showLineItemDialog, setShowLineItemDialog] = useState(false);
   const [clientBranding, setClientBranding] = useState(() => resolveClientBranding(undefined));
   useEffect(() => {
@@ -101,6 +109,7 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
     quantity: number;
     unit_price: number;
     is_optional?: boolean;
+    section_title?: string | null;
   }>({
     idx: null,
     product_service_name: '',
@@ -108,6 +117,7 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
     quantity: 1,
     unit_price: 0,
     is_optional: false,
+    section_title: null,
   });
 
   const selectedAccount = accounts?.find((a) => a.id === selectedAccountId);
@@ -155,6 +165,7 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
       quantity: 1,
       unit_price: 0,
       is_optional: false,
+      section_title: null,
     });
     setShowLineItemDialog(true);
   };
@@ -168,6 +179,7 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
       quantity: item.quantity,
       unit_price: item.unit_price,
       is_optional: item.is_optional ?? false,
+      section_title: item.section_title ?? null,
     });
     setShowLineItemDialog(true);
   };
@@ -191,6 +203,7 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
         unit_price: currentLineItem.unit_price,
         sort_order: currentLineItem.idx,
         is_optional: currentLineItem.is_optional ?? false,
+        section_title: currentLineItem.section_title?.trim() || null,
       };
     } else {
       newItems.push({
@@ -200,6 +213,7 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
         unit_price: currentLineItem.unit_price,
         sort_order: newItems.length,
         is_optional: currentLineItem.is_optional ?? false,
+        section_title: currentLineItem.section_title?.trim() || null,
       });
     }
     setLineItems(newItems);
@@ -702,6 +716,8 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
   const {
     deleteQuote,
     sendQuote,
+    sendQuoteSms,
+    createLineItem,
     convertQuote,
     convertQuoteToInvoice,
     updateQuote,
@@ -710,8 +726,15 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
   } = useQuotesMutations();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editLineItemOpen, setEditLineItemOpen] = useState(false);
+  const [addLineItemOpen, setAddLineItemOpen] = useState(false);
   const [selectedLineItem, setSelectedLineItem] = useState<QuoteLineItem | null>(null);
-  const [editLineItemValues, setEditLineItemValues] = useState({ quantity: 1, unit_price: 0 });
+  const [editLineItemValues, setEditLineItemValues] = useState({ quantity: 1, unit_price: 0, section_title: '' });
+  const [newLineDraft, setNewLineDraft] = useState({
+    product_service_name: '',
+    section_title: '',
+    quantity: 1,
+    unit_price: 0,
+  });
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [clientBranding, setClientBranding] = useState(() => resolveClientBranding(undefined));
   useEffect(() => {
@@ -779,11 +802,64 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
     }
   };
 
+  const handleSendSms = async () => {
+    try {
+      await sendQuoteSms.mutateAsync({ id: quote.id });
+      toast.success('SMS sent');
+      await refetch();
+    } catch (err) {
+      toast.error(formatErrorForUi(err));
+    }
+  };
+
+  const copyPublicLink = async () => {
+    const t = quote.approval_token;
+    if (!t) {
+      toast.error('No approval token on this quote yet — save or send once.');
+      return;
+    }
+    const url = `${window.location.origin}/quote/${t}`;
+    await navigator.clipboard.writeText(url);
+    toast.success('Public link copied');
+  };
+
+  const handleSaveNewLine = async () => {
+    if (!newLineDraft.product_service_name.trim()) {
+      toast.error('Product/service name is required');
+      return;
+    }
+    try {
+      await createLineItem.mutateAsync({
+        quote_id: quote.id,
+        product_service_name: newLineDraft.product_service_name.trim(),
+        section_title: newLineDraft.section_title.trim() || null,
+        quantity: newLineDraft.quantity,
+        unit_price: newLineDraft.unit_price,
+      });
+      toast.success('Line item added');
+      setAddLineItemOpen(false);
+      setNewLineDraft({ product_service_name: '', section_title: '', quantity: 1, unit_price: 0 });
+      await refetch();
+    } catch (err) {
+      toast.error(formatErrorForUi(err));
+    }
+  };
+
   const handleStatusChange = async (next: QuoteStatus) => {
     if (next === quote.status) return;
     try {
       await updateQuote.mutateAsync({ id: quote.id, status: next });
       toast.success('Status updated');
+      await refetch();
+    } catch (err) {
+      toast.error(formatErrorForUi(err));
+    }
+  };
+
+  const handleRequirePaymentOnFile = async (checked: boolean) => {
+    try {
+      await updateQuote.mutateAsync({ id: quote.id, require_payment_method_on_file: checked });
+      toast.success(checked ? 'Clients must add a card before approving online.' : 'Payment method no longer required to approve.');
       await refetch();
     } catch (err) {
       toast.error(formatErrorForUi(err));
@@ -810,9 +886,15 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
     }
   };
 
+  const canEditLines = quote.status === 'Draft';
+
   const handleEditLineItem = (item: QuoteLineItem) => {
     setSelectedLineItem(item);
-    setEditLineItemValues({ quantity: item.quantity, unit_price: item.unit_price });
+    setEditLineItemValues({
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      section_title: item.section_title ?? '',
+    });
     setEditLineItemOpen(true);
   };
 
@@ -823,6 +905,7 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
         id: selectedLineItem.id,
         quantity: editLineItemValues.quantity,
         unit_price: editLineItemValues.unit_price,
+        section_title: editLineItemValues.section_title.trim() || null,
       });
       toast.success('Line item updated');
       setEditLineItemOpen(false);
@@ -899,6 +982,15 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
                 onChange={(e) => setEditLineItemValues({ ...editLineItemValues, unit_price: parseFloat(e.target.value) || 0 })}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-section">Section heading</Label>
+              <Input
+                id="edit-section"
+                value={editLineItemValues.section_title}
+                onChange={(e) => setEditLineItemValues({ ...editLineItemValues, section_title: e.target.value })}
+                placeholder="Optional — groups rows on PDF"
+              />
+            </div>
             <p className="text-sm">
               Total: <span className="font-semibold">{formatCurrency(editLineItemValues.quantity * editLineItemValues.unit_price)}</span>
             </p>
@@ -909,6 +1001,66 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
             </Button>
             <Button type="button" onClick={() => void handleSaveLineItemEdit()} disabled={updateLineItem.isPending}>
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addLineItemOpen} onOpenChange={setAddLineItemOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add line item</DialogTitle>
+            <DialogDescription>New row on this quote (draft only).</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="nl-name">Product / service *</Label>
+              <Input
+                id="nl-name"
+                value={newLineDraft.product_service_name}
+                onChange={(e) => setNewLineDraft({ ...newLineDraft, product_service_name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="nl-sec">Section heading</Label>
+              <Input
+                id="nl-sec"
+                value={newLineDraft.section_title}
+                onChange={(e) => setNewLineDraft({ ...newLineDraft, section_title: e.target.value })}
+                placeholder="Optional"
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="nl-qty">Quantity</Label>
+                <Input
+                  id="nl-qty"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={newLineDraft.quantity}
+                  onChange={(e) => setNewLineDraft({ ...newLineDraft, quantity: parseFloat(e.target.value) || 1 })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="nl-price">Unit price</Label>
+                <Input
+                  id="nl-price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={newLineDraft.unit_price}
+                  onChange={(e) => setNewLineDraft({ ...newLineDraft, unit_price: parseFloat(e.target.value) || 0 })}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setAddLineItemOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void handleSaveNewLine()} disabled={createLineItem.isPending}>
+              Add
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -929,6 +1081,14 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
           <Button type="button" variant="ghost" size="sm" onClick={handleSendQuote}>
             <Send className="h-4 w-4" />
             Send
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => void handleSendSms()} disabled={sendQuoteSms.isPending}>
+            <MessageSquare className="h-4 w-4" />
+            Text link
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => void copyPublicLink()}>
+            <Copy className="h-4 w-4" />
+            Copy link
           </Button>
           <div className="relative">
             <Button
@@ -1014,8 +1174,13 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
           )}
 
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-lg">Line Items</CardTitle>
+              {canEditLines && (
+                <Button type="button" size="sm" variant="outline" onClick={() => setAddLineItemOpen(true)}>
+                  Add line
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="space-y-4">
               {lineItems.length === 0 ? (
@@ -1038,6 +1203,11 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
                           <tr key={item.id} className="border-b border-[var(--border-color)] hover:bg-[var(--bg-secondary)]">
                             <td className="py-3 pr-2">
                               <div>
+                                {item.section_title ? (
+                                  <p className="mb-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--primary-green)]">
+                                    {item.section_title}
+                                  </p>
+                                ) : null}
                                 <p className="font-medium">{item.product_service_name}</p>
                                 {item.description && <p className="text-xs text-[var(--text-muted)]">{item.description}</p>}
                               </div>
@@ -1180,6 +1350,19 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
                 <p className="text-lg font-bold">{formatCurrency(total)}</p>
               </div>
               <Separator />
+              <label className="flex cursor-pointer items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-[var(--border-color)]"
+                  checked={quote.require_payment_method_on_file}
+                  onChange={(e) => void handleRequirePaymentOnFile(e.target.checked)}
+                  disabled={updateQuote.isPending}
+                />
+                <span>
+                  Require payment method on file before client can approve online (Stripe Connect).
+                </span>
+              </label>
+              <Separator />
               <div className="flex flex-col gap-2">
                 {quote.status === 'Draft' && (
                   <>
@@ -1275,6 +1458,7 @@ function LineItemDialog({
     quantity: number;
     unit_price: number;
     is_optional?: boolean;
+    section_title?: string | null;
   };
   setCurrentLineItem: (item: typeof currentLineItem) => void;
   products: ProductService[];
@@ -1325,6 +1509,18 @@ function LineItemDialog({
               value={currentLineItem.product_service_name}
               onChange={(e) => setCurrentLineItem({ ...currentLineItem, product_service_name: e.target.value })}
               placeholder="e.g., Hydroseeding - Premium"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="li-section">Section heading (optional)</Label>
+            <Input
+              id="li-section"
+              value={currentLineItem.section_title ?? ''}
+              onChange={(e) =>
+                setCurrentLineItem({ ...currentLineItem, section_title: e.target.value.trim() || null })
+              }
+              placeholder="e.g. Site prep — groups rows in the PDF"
             />
           </div>
 

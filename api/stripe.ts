@@ -24,6 +24,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { randomUUID } from 'crypto';
 import { requireAuth } from './_auth';
+import { insertCommLog } from './_commLogServer';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -249,7 +250,7 @@ async function getPaymentLink(body: Record<string, unknown>, req: VercelRequest,
 
   const { data: invoice, error } = await db
     .from('invoices')
-    .select('id, tenant_id, pay_token, status')
+    .select('id, tenant_id, pay_token, status, account_id, invoice_number, title')
     .eq('id', invoice_id)
     .single();
 
@@ -271,6 +272,17 @@ async function getPaymentLink(body: Record<string, unknown>, req: VercelRequest,
   const proto = req.headers['x-forwarded-proto'] ?? 'https';
   const host  = req.headers['x-forwarded-host'] ?? req.headers.host ?? 'island-hydroseeding.vercel.app';
   const url   = `${proto}://${host}/pay/${token}`;
+
+  await insertCommLog(db, {
+    tenant_id: tid,
+    account_id: (invoice.account_id as string) ?? null,
+    kind: 'email',
+    subject: `Invoice #${invoice.invoice_number} payment link`,
+    body: url,
+    related_entity_type: 'invoice',
+    related_entity_id: invoice.id as string,
+    status: 'link_generated',
+  });
 
   return res.status(200).json({ url, token });
 }

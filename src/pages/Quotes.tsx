@@ -1,11 +1,14 @@
 import { useMemo, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Search, MoreHorizontal, ChevronUp, ChevronDown } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Loader2, Search, MoreHorizontal, ChevronUp, ChevronDown, LayoutGrid, List } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useQuotes } from '@/hooks/useQuotes';
+import { quotesKeys, useQuotes } from '@/hooks/useQuotes';
 import { formatInVancouver } from '@/lib/vancouverTime';
-import type { QuoteStatus } from '@/lib/quotesTypes';
+import { QUOTE_STATUS_OPTIONS, type Quote, type QuoteStatus } from '@/lib/quotesTypes';
+import { quotesPost } from '@/lib/quotesApi';
+import { StatusKanban } from '@/components/StatusKanban';
 
 /* ─── status badge color map ─── */
 const STATUS_COLORS: Record<QuoteStatus, 'default' | 'secondary' | 'outline'> = {
@@ -47,9 +50,11 @@ type SortDir = 'asc' | 'desc';
 
 export default function Quotes() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data: quotes = [], isLoading, error } = useQuotes();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [viewMode, setViewMode] = useState<'list' | 'board'>('list');
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [moreOpen, setMoreOpen] = useState(false);
@@ -122,6 +127,23 @@ export default function Quotes() {
     if (sortKey !== col) return <ChevronDown className="h-3.5 w-3.5 opacity-30" />;
     return sortDir === 'asc' ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />;
   };
+
+  const quoteStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      quotesPost({ action: 'quote.update', id, status }),
+    onMutate: async (variables) => {
+      await qc.cancelQueries({ queryKey: quotesKeys.list() });
+      const prev = qc.getQueryData<Quote[]>(quotesKeys.list());
+      qc.setQueryData(quotesKeys.list(), (old: Quote[] | undefined) =>
+        old?.map((q) => (q.id === variables.id ? { ...q, status: variables.status as Quote['status'] } : q))
+      );
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(quotesKeys.list(), ctx.prev);
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: quotesKeys.all }),
+  });
 
   return (
     <div>
@@ -251,6 +273,30 @@ export default function Quotes() {
           </p>
 
           <div className="flex w-full min-w-0 flex-row flex-wrap items-center gap-3">
+            <div className="flex shrink-0 items-center gap-1 rounded-md border border-[var(--border-color)] p-0.5">
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium ${
+                  viewMode === 'list'
+                    ? 'bg-[var(--primary-green)] text-white'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
+                }`}
+              >
+                <List className="h-3.5 w-3.5" /> List
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('board')}
+                className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium ${
+                  viewMode === 'board'
+                    ? 'bg-[var(--primary-green)] text-white'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
+                }`}
+              >
+                <LayoutGrid className="h-3.5 w-3.5" /> Board
+              </button>
+            </div>
             <div className="flex min-w-0 flex-1 flex-wrap gap-2">
               {['All', 'Draft', 'Sent', 'Awaiting Response', 'Approved', 'Converted'].map((s) => (
                 <button
@@ -279,8 +325,34 @@ export default function Quotes() {
           </div>
         </div>
 
+        {viewMode === 'board' && (
+          <div className="border-b border-[var(--border-color)] px-5 py-4">
+            <StatusKanban<Quote>
+              columns={QUOTE_STATUS_OPTIONS}
+              items={filtered}
+              getStatus={(q) => q.status}
+              onStatusChange={(id, status) => quoteStatusMutation.mutate({ id, status })}
+              renderCard={(q) => (
+                <button
+                  type="button"
+                  className="w-full text-left"
+                  onClick={() => navigate(`/quotes/${q.id}`)}
+                >
+                  <p className="font-semibold text-[var(--text-primary)]">
+                    #{String(q.quote_number).padStart(4, '0')}
+                  </p>
+                  <p className="mt-1 line-clamp-2 text-xs text-[var(--text-secondary)]">{q.title || '—'}</p>
+                  <p className="mt-2 text-sm font-medium tabular-nums text-[var(--text-primary)]">
+                    {formatCurrency(q.total)}
+                  </p>
+                </button>
+              )}
+            />
+          </div>
+        )}
+
         {/* Data table */}
-        <div className="overflow-x-auto">
+        <div className={viewMode === 'board' ? 'hidden' : 'overflow-x-auto'}>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--border-color)] bg-[var(--surface-raised,var(--surface-hover))]">

@@ -5,6 +5,8 @@ import { requireAuth } from './_auth';
 import { resolveTenantId } from './_tenant';
 import { documentTotalsFromSubtotal, lineTotal, roundMoney, MONEY_EPS } from './_documentPricing';
 import { syncInvoiceFinancials } from './_invoiceSync';
+import { insertCommLog } from './_commLogServer';
+import { publicAppUrl } from './_publicAppUrl';
 
 function supabase(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL;
@@ -887,9 +889,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'id is required' });
       return;
     }
+    const { data: prev } = await db.from('quotes').select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+    if (!prev) {
+      res.status(404).json({ error: 'Quote not found' });
+      return;
+    }
+    const newToken = randomUUID();
     const { data, error } = await db
       .from('quotes')
-      .update({ status: 'Sent', sent_at: NOW_ISO(), updated_at: NOW_ISO() })
+      .update({
+        status: 'Sent',
+        sent_at: NOW_ISO(),
+        updated_at: NOW_ISO(),
+        ...((prev.approval_token as string | null) ? {} : { approval_token: newToken }),
+      })
       .eq('id', id)
       .eq('tenant_id', tenantId)
       .select('*')
@@ -899,7 +912,91 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(404).json({ error: 'Quote not found' });
       return;
     }
+    const tok = String(data.approval_token ?? '');
+    const link = tok ? publicAppUrl(req, `/quote/${tok}`) : publicAppUrl(req, '/quotes');
+    await insertCommLog(db, {
+      tenant_id: tenantId,
+      account_id: (data.account_id as string) ?? null,
+      kind: 'email',
+      subject: `Quote #${data.quote_number} sent`,
+      body: `Public link for the client:\n${link}`,
+      sent_by: auth.email || null,
+      related_entity_type: 'quote',
+      related_entity_id: data.id as string,
+      status: 'sent',
+    });
     res.status(200).json({ quote: data });
+    return;
+  }
+
+  if (action === 'quote.send_sms') {
+    const id = String(body.id ?? '');
+    if (!id) {
+      res.status(400).json({ error: 'id is required' });
+      return;
+    }
+    const twSid = process.env.TWILIO_ACCOUNT_SID;
+    const twTok = process.env.TWILIO_AUTH_TOKEN;
+    const twFrom = process.env.TWILIO_FROM_NUMBER;
+    if (!twSid || !twTok || !twFrom) {
+      res.status(503).json({
+        error: 'SMS is not configured (set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER)',
+      });
+      return;
+    }
+    const { data: qprev } = await db.from('quotes').select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+    if (!qprev) {
+      res.status(404).json({ error: 'Quote not found' });
+      return;
+    }
+    const genTok = randomUUID();
+    const patch: Record<string, unknown> = { updated_at: NOW_ISO() };
+    if (!(qprev.approval_token as string | null)) patch.approval_token = genTok;
+    const { data: qrow, error: upErr } = await db
+      .from('quotes')
+      .update(patch)
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
+    if (await errTable(upErr)) return;
+    const quoteRow = qrow ?? qprev;
+    const tokFinal = String(quoteRow.approval_token ?? '');
+    const link = tokFinal ? publicAppUrl(req, `/quote/${tokFinal}`) : publicAppUrl(req, '/quotes');
+    const { data: acc } = quoteRow.account_id
+      ? await db.from('crm_accounts').select('phone').eq('id', quoteRow.account_id).eq('tenant_id', tenantId).maybeSingle()
+      : { data: null };
+    const toRaw = String(body.to ?? '').trim() || String(acc?.phone ?? '').trim();
+    const to = toRaw.replace(/\s/g, '');
+    if (!to) {
+      res.status(400).json({ error: 'No phone number: pass to= or set account phone' });
+      return;
+    }
+    const defaultMsg = `Island Hydroseeding — your quote #${quoteRow.quote_number}: ${link}`;
+    const text = String(body.message ?? '').trim() || defaultMsg;
+    const authHeader = Buffer.from(`${twSid}:${twTok}`).toString('base64');
+    const twRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twSid}/Messages.json`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${authHeader}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ To: to, From: twFrom, Body: text }),
+    });
+    const twJson = (await twRes.json().catch(() => ({}))) as { message?: string };
+    if (!twRes.ok) {
+      res.status(502).json({ error: twJson.message || twRes.statusText || 'Twilio error' });
+      return;
+    }
+    await insertCommLog(db, {
+      tenant_id: tenantId,
+      account_id: quoteRow.account_id as string,
+      kind: 'sms',
+      subject: null,
+      body: text,
+      sent_by: auth.email || null,
+      related_entity_type: 'quote',
+      related_entity_id: quoteRow.id as string,
+      status: 'sent',
+    });
+    res.status(200).json({ ok: true, quote: quoteRow });
     return;
   }
 

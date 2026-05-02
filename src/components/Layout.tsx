@@ -23,6 +23,7 @@ import {
   Briefcase,
   Receipt,
   CreditCard,
+  BarChart3,
 } from 'lucide-react';
 import { formatInVancouver } from '../lib/vancouverTime';
 import { useAuth } from '../context/AuthContext';
@@ -68,6 +69,7 @@ const secondaryNavItems: { name: string; path: string; icon: typeof LayoutDashbo
   { name: 'Fuel & road', path: '/fuel', icon: Fuel },
   { name: 'Maintenance', path: '/equipment', icon: Wrench },
   { name: 'Inventory', path: '/inventory', icon: Package },
+  { name: 'Reports', path: '/reports', icon: BarChart3 },
   { name: 'Team & access', path: '/team', icon: UserCog },
 ];
 

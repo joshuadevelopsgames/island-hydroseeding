@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
   ClipboardCheck,
   ShieldAlert,
@@ -29,6 +30,7 @@ import {
 } from '../lib/vancouverTime';
 import { loadWorkOrders, loadAssets, loadFuelEntries, loadIssues } from '../lib/fleetStore';
 import AdminApprovalsCard from '../components/AdminApprovalsCard';
+import { fetchWorkflowSnapshot } from '../lib/reportsApi';
 
 type PreTripLog = { id: string; date: string; employeeName: string; equipmentId: string; type?: string };
 type FLHALog = { id: string; date: string; projectNumber?: string; supervisorName?: string };
@@ -44,6 +46,11 @@ function displayFirstName(fullName: string | undefined): string {
 
 export default function Dashboard() {
   const { currentUser } = useAuth();
+  const wfQuery = useQuery({
+    queryKey: ['reports', 'workflow_snapshot'],
+    queryFn: fetchWorkflowSnapshot,
+    staleTime: 60_000,
+  });
   const [tick, setTick] = useState(0);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -279,9 +286,52 @@ export default function Dashboard() {
 
   const welcomeName = displayFirstName(currentUser?.name);
 
+  const wf = wfQuery.data;
+  const sumStatuses = (m: Record<string, number> | undefined) =>
+    m ? Object.values(m).reduce((a, b) => a + b, 0) : 0;
+
   return (
     <div>
       <AdminApprovalsCard />
+      {(wfQuery.isLoading || wfQuery.isSuccess) && (
+        <section className="mb-8 rounded-xl border border-[var(--border-color)] bg-[var(--surface-color)] p-4 sm:p-5">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">Sales &amp; billing snapshot</h2>
+            <Link to="/reports" className="text-sm font-medium text-[var(--primary-green)] hover:underline">
+              Open reports
+            </Link>
+          </div>
+          {wfQuery.isLoading ? (
+            <p className="text-sm text-[var(--text-muted)]">Loading snapshot…</p>
+          ) : wfQuery.isError ? (
+            <p className="text-sm text-[var(--text-muted)]">Snapshot unavailable.</p>
+          ) : wf ? (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-raised)] p-3">
+                <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Requests</p>
+                <p className="mt-1 text-2xl font-bold tabular-nums text-[var(--text-primary)]">{sumStatuses(wf.requests)}</p>
+              </div>
+              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-raised)] p-3">
+                <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Quotes (30d conv.)</p>
+                <p className="mt-1 text-2xl font-bold tabular-nums text-[var(--text-primary)]">
+                  {wf.quotes_conversion_30d.rate}%
+                </p>
+                <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                  {wf.quotes_conversion_30d.converted} / {wf.quotes_conversion_30d.pool} sent
+                </p>
+              </div>
+              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-raised)] p-3">
+                <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Jobs</p>
+                <p className="mt-1 text-2xl font-bold tabular-nums text-[var(--text-primary)]">{sumStatuses(wf.jobs)}</p>
+              </div>
+              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-raised)] p-3">
+                <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Overdue invoices</p>
+                <p className="mt-1 text-2xl font-bold tabular-nums text-[var(--text-primary)]">{wf.overdue_invoices}</p>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      )}
       <div className="flex justify-between items-center mb-8 page-hero">
         <div>
           <p className="page-kicker">{greeting}</p>

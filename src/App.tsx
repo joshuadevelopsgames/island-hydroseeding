@@ -4,6 +4,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import InvoicePay from './pages/InvoicePay';
+import QuotePublic from './pages/QuotePublic';
 import Dashboard from './pages/Dashboard';
 import PreTrips from './pages/PreTrips';
 import FLHA from './pages/FLHA';
@@ -30,6 +31,7 @@ import Schedule from './pages/Schedule';
 import Time from './pages/Time';
 import Team from './pages/Team';
 import Account from './pages/Account';
+import Reports from './pages/Reports';
 
 function App() {
   return (
@@ -40,6 +42,7 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/pay/:token" element={<InvoicePay />} />
+        <Route path="/quote/:token" element={<QuotePublic />} />
 
         {/* Authenticated app shell */}
         <Route path="/*" element={
@@ -226,6 +229,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Schedule />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reports"
+            element={
+              <ProtectedRoute>
+                <Reports />
               </ProtectedRoute>
             }
           />

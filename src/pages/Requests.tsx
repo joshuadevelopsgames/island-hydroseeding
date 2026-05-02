@@ -1,11 +1,23 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Inbox, Loader2, Search, Phone, Mail, Globe, UserPlus } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Inbox, Loader2, Search, Phone, Mail, Globe, UserPlus, LayoutGrid, List } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useRequests } from '@/hooks/useRequests';
+import { requestsKeys, useRequests } from '@/hooks/useRequests';
 import { formatInVancouver } from '@/lib/vancouverTime';
 import type { WorkRequest, RequestStatus } from '@/lib/requestsTypes';
+import { requestsPost } from '@/lib/requestsApi';
+import { StatusKanban } from '@/components/StatusKanban';
+import { fetchWorkflowSnapshot } from '@/lib/reportsApi';
+
+const REQUEST_COLUMNS: RequestStatus[] = [
+  'New',
+  'Assessment Scheduled',
+  'Assessment Complete',
+  'Converted',
+  'Archived',
+];
 
 const STATUS_COLORS: Record<RequestStatus, 'default' | 'secondary' | 'outline'> = {
   'New': 'default',
@@ -102,9 +114,11 @@ function StatusBreakdownCard({ requests, isLoading }: { requests: WorkRequest[];
 
 export default function Requests() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data: requests = [], isLoading, error } = useRequests();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [viewMode, setViewMode] = useState<'list' | 'board'>('list');
 
   const filtered = useMemo(() => {
     let result = requests;
@@ -123,6 +137,23 @@ export default function Requests() {
     );
   }, [requests, search, statusFilter]);
 
+  const requestStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      requestsPost({ action: 'request.update', id, status }),
+    onMutate: async (variables) => {
+      await qc.cancelQueries({ queryKey: requestsKeys.list() });
+      const prev = qc.getQueryData<WorkRequest[]>(requestsKeys.list());
+      qc.setQueryData(requestsKeys.list(), (old: WorkRequest[] | undefined) =>
+        old?.map((r) => (r.id === variables.id ? { ...r, status: variables.status } : r))
+      );
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(requestsKeys.list(), ctx.prev);
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: requestsKeys.all }),
+  });
+
   const stats = useMemo(() => {
     const newRequests = requests.filter((r) => r.status === 'New');
     const awaitingAssessment = requests.filter((r) => r.status === 'Assessment Scheduled');
@@ -134,6 +165,12 @@ export default function Requests() {
       convertedCount: converted.length,
     };
   }, [requests]);
+
+  const wfSnap = useQuery({
+    queryKey: ['reports', 'workflow_snapshot', 'requests-page'],
+    queryFn: fetchWorkflowSnapshot,
+    staleTime: 60_000,
+  });
 
   return (
     <div>
@@ -166,7 +203,7 @@ export default function Requests() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 mb-8 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 mb-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <StatusBreakdownCard requests={requests} isLoading={isLoading} />
         <DashboardCard
           title="New This Week"
@@ -183,6 +220,16 @@ export default function Requests() {
           value={stats.convertedCount}
           isLoading={isLoading}
         />
+        <DashboardCard
+          title="Quote conversion (30d)"
+          value={wfSnap.data ? `${wfSnap.data.quotes_conversion_30d.rate}%` : '—'}
+          subtitle={
+            wfSnap.data
+              ? `${wfSnap.data.quotes_conversion_30d.converted} won / ${wfSnap.data.quotes_conversion_30d.pool} sent (non-draft)`
+              : undefined
+          }
+          isLoading={wfSnap.isLoading}
+        />
       </div>
 
       <div className="card min-w-0 overflow-hidden p-0">
@@ -197,6 +244,30 @@ export default function Requests() {
             </p>
           </div>
           <div className="flex w-full min-w-0 flex-row flex-wrap items-center gap-3 sm:w-auto sm:max-w-[min(100%,44rem)] sm:justify-end">
+            <div className="flex shrink-0 items-center gap-1 rounded-md border border-[var(--border-color)] p-0.5">
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium ${
+                  viewMode === 'list'
+                    ? 'bg-[var(--primary-green)] text-white'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
+                }`}
+              >
+                <List className="h-3.5 w-3.5" /> List
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('board')}
+                className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium ${
+                  viewMode === 'board'
+                    ? 'bg-[var(--primary-green)] text-white'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
+                }`}
+              >
+                <LayoutGrid className="h-3.5 w-3.5" /> Board
+              </button>
+            </div>
             <div className="relative min-w-0 flex-1 max-w-md">
               <Search
                 size={18}
@@ -228,7 +299,33 @@ export default function Requests() {
           </div>
         </div>
 
-        <div className="max-h-[min(60vh,520px)] overflow-y-auto">
+        {viewMode === 'board' && (
+          <div className="border-b border-[var(--border-color)] px-6 py-4">
+            <StatusKanban<WorkRequest>
+              columns={REQUEST_COLUMNS}
+              items={filtered}
+              getStatus={(r) => r.status}
+              onStatusChange={(id, status) => requestStatusMutation.mutate({ id, status })}
+              renderCard={(req) => (
+                <button
+                  type="button"
+                  className="w-full text-left"
+                  onClick={() => navigate(`/requests/${req.id}`)}
+                >
+                  <p className="font-semibold text-[var(--text-primary)]">{req.title || 'Untitled'}</p>
+                  {req.contact_name && (
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">{req.contact_name}</p>
+                  )}
+                  <p className="mt-2 text-xs text-[var(--text-secondary)]">
+                    {formatInVancouver(new Date(req.requested_at), 'MMM d, yyyy')}
+                  </p>
+                </button>
+              )}
+            />
+          </div>
+        )}
+
+        <div className={`max-h-[min(60vh,520px)] overflow-y-auto ${viewMode === 'board' ? 'hidden' : ''}`}>
           <div className="divide-y divide-[var(--border-color)]">
             {isLoading && requests.length === 0 && (
               <div className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-secondary">

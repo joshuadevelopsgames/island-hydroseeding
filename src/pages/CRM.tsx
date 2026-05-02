@@ -16,12 +16,18 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { crmKeys, useCrmAccounts, useCrmMutations } from '@/hooks/useCrm';
+import { crmKeys, useCrmAccounts, useCrmLeadSources, useCrmMutations, useCrmTagList } from '@/hooks/useCrm';
 import { formatErrorForUi, importLegacyLeads as postLegacyLeads } from '@/lib/crmApi';
 import { cn } from '@/lib/utils';
 import { formatInVancouver } from '@/lib/vancouverTime';
 import { formatPhone, normalizePhoneForSave } from '@/lib/phone';
-import type { CrmAccount, CrmAccountStatus, CrmAccountType, LegacyLead } from '@/lib/crmTypes';
+import type {
+  AccountLifecycle,
+  CrmAccount,
+  CrmAccountStatus,
+  CrmAccountType,
+  LegacyLead,
+} from '@/lib/crmTypes';
 
 const LEGACY_LEADS_KEY = 'crmLeads';
 
@@ -40,10 +46,47 @@ const FILTER_SELECT_CLASS =
 
 type TypeFilter = 'all' | CrmAccountType;
 type StatusFilter = 'all' | CrmAccountStatus;
+type LifecycleFilter = 'all' | AccountLifecycle;
 type SortKey = 'name_asc' | 'name_desc' | 'updated_desc' | 'updated_asc' | 'type_asc';
 
-function accountsToCsv(accounts: { name: string; company: string | null; account_type: string; status: string; phone: string | null; email: string | null; address: string | null; notes: string | null }[]) {
-  const headers = ['name', 'company', 'account_type', 'status', 'phone', 'email', 'address', 'notes'];
+const LIFECYCLE_OPTIONS: AccountLifecycle[] = ['Lead', 'Active', 'Inactive', 'Archived'];
+
+function cad(n: number) {
+  return new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(n);
+}
+
+function accountsToCsv(
+  accounts: {
+    name: string;
+    company: string | null;
+    account_type: string;
+    status: string;
+    account_lifecycle?: string;
+    lead_source_name?: string | null;
+    tags?: { name: string }[];
+    lifetime_value?: number;
+    current_balance?: number;
+    phone: string | null;
+    email: string | null;
+    address: string | null;
+    notes: string | null;
+  }[]
+) {
+  const headers = [
+    'name',
+    'company',
+    'account_type',
+    'status',
+    'lifecycle',
+    'lead_source',
+    'tags',
+    'lifetime_value',
+    'current_balance',
+    'phone',
+    'email',
+    'address',
+    'notes',
+  ];
   const escape = (v: string | null | undefined) => {
     const s = String(v ?? '');
     if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
@@ -51,7 +94,22 @@ function accountsToCsv(accounts: { name: string; company: string | null; account
   };
   const lines = [headers.join(',')];
   for (const a of accounts) {
-    lines.push(headers.map((h) => escape(a[h as keyof typeof a] as string | null)).join(','));
+    const row = {
+      name: a.name,
+      company: a.company,
+      account_type: a.account_type,
+      status: a.status,
+      lifecycle: a.account_lifecycle ?? '',
+      lead_source: a.lead_source_name ?? '',
+      tags: (a.tags ?? []).map((t) => t.name).join('; '),
+      lifetime_value: String(a.lifetime_value ?? ''),
+      current_balance: String(a.current_balance ?? ''),
+      phone: a.phone,
+      email: a.email,
+      address: a.address,
+      notes: a.notes,
+    };
+    lines.push(headers.map((h) => escape(row[h as keyof typeof row] as string | null)).join(','));
   }
   return lines.join('\n');
 }
@@ -89,6 +147,18 @@ function statusBadge(status: string) {
       {status}
     </span>
   );
+}
+
+function lifecycleBadge(l: string) {
+  const x = l as AccountLifecycle;
+  const pill = cn(
+    'inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
+    x === 'Lead' && 'bg-sky-50 text-sky-900 dark:bg-sky-950/45 dark:text-sky-100',
+    x === 'Active' && 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-100',
+    x === 'Inactive' && 'bg-slate-100 text-slate-700 dark:bg-slate-800/80 dark:text-slate-200',
+    x === 'Archived' && 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300'
+  );
+  return <span className={pill}>{l}</span>;
 }
 
 function typeBadge(type: string) {
@@ -148,10 +218,15 @@ export default function CRM() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data: accounts = [], isLoading, isError, error, refetch } = useCrmAccounts();
+  const { data: leadSources = [] } = useCrmLeadSources();
+  const { data: tagList = [] } = useCrmTagList();
   const m = useCrmMutations();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>('all');
+  const [leadSourceFilter, setLeadSourceFilter] = useState<string>('all');
+  const [tagFilter, setTagFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<SortKey>('name_asc');
   const [createOpen, setCreateOpen] = useState(false);
   const legacyDone = useRef(false);
@@ -197,8 +272,17 @@ export default function CRM() {
     if (statusFilter !== 'all') {
       next = next.filter((a) => a.status === statusFilter);
     }
+    if (lifecycleFilter !== 'all') {
+      next = next.filter((a) => (a.account_lifecycle ?? 'Lead') === lifecycleFilter);
+    }
+    if (leadSourceFilter !== 'all') {
+      next = next.filter((a) => a.lead_source_id === leadSourceFilter);
+    }
+    if (tagFilter !== 'all') {
+      next = next.filter((a) => (a.tags ?? []).some((t) => t.id === tagFilter));
+    }
     return sortedAccounts(next, sortBy);
-  }, [accounts, search, typeFilter, statusFilter, sortBy]);
+  }, [accounts, search, typeFilter, statusFilter, lifecycleFilter, leadSourceFilter, tagFilter, sortBy]);
 
   const exportCsv = () => {
     const blob = new Blob([accountsToCsv(filtered)], { type: 'text/csv;charset=utf-8' });
@@ -311,6 +395,51 @@ export default function CRM() {
               ))}
             </select>
           </div>
+          <div className="w-36 shrink-0 min-w-0 sm:w-40">
+            <select
+              className={FILTER_SELECT_CLASS}
+              value={lifecycleFilter}
+              onChange={(e) => setLifecycleFilter(e.target.value as LifecycleFilter)}
+              aria-label="Filter by lifecycle"
+            >
+              <option value="all">All lifecycle</option>
+              {LIFECYCLE_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="w-40 shrink-0 min-w-0 sm:w-44">
+            <select
+              className={FILTER_SELECT_CLASS}
+              value={leadSourceFilter}
+              onChange={(e) => setLeadSourceFilter(e.target.value)}
+              aria-label="Filter by lead source"
+            >
+              <option value="all">All sources</option>
+              {leadSources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="w-36 shrink-0 min-w-0 sm:w-40">
+            <select
+              className={FILTER_SELECT_CLASS}
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              aria-label="Filter by tag"
+            >
+              <option value="all">All tags</option>
+              {tagList.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="flex w-56 min-w-0 shrink-0 items-center gap-2 sm:w-60">
             <ArrowUpDown size={16} aria-hidden className="shrink-0 text-[var(--text-muted)]" />
             <select
@@ -344,15 +473,20 @@ export default function CRM() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
+              <table className="w-full min-w-[1100px] table-fixed border-collapse text-sm">
                 <thead className="sticky top-0 z-[1] border-b border-[var(--border-color)] bg-[var(--surface-raised)]">
                   <tr className="text-left text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                    <th className="px-4 py-3 sm:px-6 w-[26%]">Account</th>
-                    <th className="px-3 py-3 w-[13%]">Type</th>
-                    <th className="px-3 py-3 w-[16%]">Status</th>
-                    <th className="px-3 py-3 w-[15%]">Phone</th>
-                    <th className="px-3 py-3 min-w-[8rem] w-[22%]">Email</th>
-                    <th className="px-4 py-3 text-right sm:px-6 w-[13%]">Updated</th>
+                    <th className="px-4 py-3 sm:px-6 w-[18%]">Account</th>
+                    <th className="px-3 py-3 w-[9%]">Type</th>
+                    <th className="px-3 py-3 w-[12%]">Pipeline</th>
+                    <th className="px-3 py-3 w-[10%]">Lifecycle</th>
+                    <th className="px-3 py-3 w-[10%]">Source</th>
+                    <th className="px-3 py-3 w-[12%]">Tags</th>
+                    <th className="px-3 py-3 text-right w-[8%]">LTV</th>
+                    <th className="px-3 py-3 text-right w-[8%]">Balance</th>
+                    <th className="px-3 py-3 w-[11%]">Phone</th>
+                    <th className="px-3 py-3 min-w-[7rem] w-[14%]">Email</th>
+                    <th className="px-4 py-3 text-right sm:px-6 w-[10%]">Updated</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border-color)] bg-[var(--surface-color)]">
@@ -378,6 +512,29 @@ export default function CRM() {
                       </td>
                       <td className="px-3 py-3 align-middle">{typeBadge(a.account_type)}</td>
                       <td className="px-3 py-3 align-middle">{statusBadge(a.status)}</td>
+                      <td className="px-3 py-3 align-middle">{lifecycleBadge(a.account_lifecycle ?? 'Lead')}</td>
+                      <td className="px-3 py-3 align-middle text-[var(--text-secondary)] truncate" title={a.lead_source_name ?? ''}>
+                        {a.lead_source_name ?? '—'}
+                      </td>
+                      <td className="px-3 py-3 align-middle">
+                        <div className="flex flex-wrap gap-1">
+                          {(a.tags ?? []).slice(0, 3).map((t) => (
+                            <Badge key={t.id} variant="outline" className="text-[0.65rem] font-normal">
+                              {t.name}
+                            </Badge>
+                          ))}
+                          {(a.tags ?? []).length > 3 ? (
+                            <span className="text-xs text-[var(--text-muted)]">+{(a.tags ?? []).length - 3}</span>
+                          ) : null}
+                          {(a.tags ?? []).length === 0 ? <span className="text-[var(--text-muted)]">—</span> : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 align-middle text-right tabular-nums text-[var(--text-primary)]">
+                        {cad(a.lifetime_value ?? 0)}
+                      </td>
+                      <td className="px-3 py-3 align-middle text-right tabular-nums text-[var(--text-primary)]">
+                        {cad(a.current_balance ?? 0)}
+                      </td>
                       <td className="px-3 py-3 align-middle text-[var(--text-primary)] whitespace-nowrap">
                         {formatPhone(a.phone) || '—'}
                       </td>

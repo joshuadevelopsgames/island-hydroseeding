@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { fmtMoney, isVisible, type DesignContext } from './types';
 import EditableText from './EditableText';
 
@@ -250,22 +251,41 @@ export default function FieldQuoteDesign({ ctx }: { ctx: DesignContext }) {
               </thead>
               <tbody>
                 {ctx.items.map((it) => (
-                  <tr key={it.id} className={it.isOptional ? 'opt' : ''}>
-                    <td>
-                      <span className={'fq-code-tag ' + (it.isOptional ? 'opt' : '')}>{it.code}</span>
-                    </td>
-                    <td>
-                      <div className="fq-desc-main">
-                        {it.description}
-                        {it.isOptional && <em>+ add-on</em>}
-                      </div>
-                      {it.detail && <div className="fq-desc-sub">{it.detail}</div>}
-                    </td>
-                    <td className="num">{it.quantity}</td>
-                    <td>{it.unit}</td>
-                    <td className="num">{fmtMoney(it.rate)}</td>
-                    <td className="num">{fmtMoney(it.amount)}</td>
-                  </tr>
+                  <Fragment key={String(it.id)}>
+                    {it.sectionHeading ? (
+                      <tr>
+                        <td
+                          colSpan={6}
+                          style={{
+                            padding: '10px 6px 4px',
+                            fontSize: '10px',
+                            letterSpacing: '2px',
+                            textTransform: 'uppercase',
+                            color: 'var(--accent)',
+                            borderBottom: '1px solid rgba(0,0,0,.08)',
+                          }}
+                        >
+                          {it.sectionHeading}
+                        </td>
+                      </tr>
+                    ) : null}
+                    <tr className={it.isOptional ? 'opt' : ''}>
+                      <td>
+                        <span className={'fq-code-tag ' + (it.isOptional ? 'opt' : '')}>{it.code}</span>
+                      </td>
+                      <td>
+                        <div className="fq-desc-main">
+                          {it.description}
+                          {it.isOptional && <em>+ add-on</em>}
+                        </div>
+                        {it.detail && <div className="fq-desc-sub">{it.detail}</div>}
+                      </td>
+                      <td className="num">{it.quantity}</td>
+                      <td>{it.unit}</td>
+                      <td className="num">{fmtMoney(it.rate)}</td>
+                      <td className="num">{fmtMoney(it.amount)}</td>
+                    </tr>
+                  </Fragment>
                 ))}
                 {ctx.items.length === 0 && (
                   <tr>

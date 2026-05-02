@@ -1,7 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import type { Job, JobLineItem, JobVisit, JobExpense, JobTimeEntry, JobStatus } from '@/lib/jobsTypes';
 import { useJobDetail, useJobsMutations } from '@/hooks/useJobs';
+import { useAuth } from '@/context/AuthContext';
+import { useCrmAccounts } from '@/hooks/useCrm';
+import { useAccountProperties } from '@/hooks/useQuotes';
+import { toast } from 'sonner';
+import { formatErrorForUi } from '@/lib/jobsApi';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { formatInVancouver } from '@/lib/vancouverTime';
@@ -15,6 +20,8 @@ import {
   DollarSign,
   Clock,
   CheckCircle,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 
 const STATUS_COLORS: Record<JobStatus, 'default' | 'secondary' | 'outline'> = {
@@ -35,6 +42,8 @@ const VISIT_STATUS_COLORS: Record<string, 'default' | 'secondary' | 'outline'> =
 function JobDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { currentUser } = useAuth();
+  const isAdmin = currentUser?.isAdmin ?? false;
   const [activeTab, setActiveTab] = useState<'overview' | 'line-items' | 'visits' | 'expenses' | 'time' | 'profitability'>('overview');
   const [editingFields, setEditingFields] = useState<Record<string, string | null>>({});
 
@@ -80,7 +89,7 @@ function JobDetail() {
     );
   }
 
-  const { job, line_items, visits, expenses, time_entries, account, property } = bundle;
+  const { job, line_items, visits, expenses, time_entries, hourly_rates, account, property } = bundle;
 
   const handleJobUpdate = async () => {
     const updates: Partial<Job> = {};
@@ -285,6 +294,8 @@ function JobDetail() {
                 lineItems={line_items}
                 expenses={expenses}
                 timeEntries={time_entries}
+                hourlyRates={hourly_rates ?? {}}
+                defaultOpen={isAdmin}
               />
             )}
           </div>
@@ -297,25 +308,47 @@ function JobDetail() {
 function CreateJobForm({ onSuccess }: { onSuccess: (jobId: string) => void }) {
   const navigate = useNavigate();
   const { createJob } = useJobsMutations();
+  const { data: accounts } = useCrmAccounts();
+  const [accountId, setAccountId] = useState('');
+  const { data: properties = [] } = useAccountProperties(accountId || undefined);
+  const [propertyId, setPropertyId] = useState('');
+
   const [formData, setFormData] = useState({
     title: '',
     job_type: 'One-off' as string,
     status: 'Active' as JobStatus,
     start_date: new Date().toISOString().split('T')[0],
     notes: '',
-    account_id: '',
   });
+
+  useEffect(() => {
+    setPropertyId('');
+  }, [accountId]);
+
+  useEffect(() => {
+    if (properties.length === 0) return;
+    const def = properties.find((p) => p.is_default);
+    setPropertyId((prev) => {
+      if (prev && properties.some((p) => p.id === prev)) return prev;
+      return (def ?? properties[0]).id;
+    });
+  }, [properties]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!accountId) {
+      toast.error('Please select a client');
+      return;
+    }
     try {
       const result = await createJob.mutateAsync({
         ...formData,
-        account_id: formData.account_id || null,
+        account_id: accountId,
+        property_id: propertyId || null,
       });
       onSuccess(result.job.id);
     } catch (error) {
-      console.error('Failed to create job:', error);
+      toast.error(formatErrorForUi(error));
     }
   };
 
@@ -379,14 +412,46 @@ function CreateJobForm({ onSuccess }: { onSuccess: (jobId: string) => void }) {
           </div>
 
           <div>
-            <label>Account ID</label>
-            <input
-              type="text"
-              value={formData.account_id}
-              onChange={(e) => setFormData({ ...formData, account_id: e.target.value })}
-              placeholder="—"
-            />
+            <label>Client *</label>
+            <select
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              required
+            >
+              <option value="">Select a client</option>
+              {(accounts ?? []).map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                  {a.company ? ` — ${a.company}` : ''}
+                </option>
+              ))}
+            </select>
           </div>
+
+          {accountId && (
+            <div>
+              <label>Property</label>
+              <select
+                value={propertyId}
+                onChange={(e) => setPropertyId(e.target.value)}
+                disabled={properties.length === 0}
+              >
+                {properties.length === 0 ? (
+                  <option value="">No properties — add one on the account</option>
+                ) : (
+                  <>
+                    <option value="">No property linked</option>
+                    {properties.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label ? `${p.label} — ${p.address}` : p.address}
+                        {p.is_default ? ' (default)' : ''}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+            </div>
+          )}
 
           <div>
             <label>Notes</label>
@@ -663,6 +728,7 @@ function ExpensesSection({
     description: '',
     amount: '0',
     category: '',
+    billable: false,
   });
 
   const handleAddExpense = async (e: React.FormEvent) => {
@@ -672,8 +738,9 @@ function ExpensesSection({
       description: formData.description,
       amount: parseFloat(formData.amount),
       category: formData.category,
+      billable: formData.billable,
     });
-    setFormData({ description: '', amount: '0', category: '' });
+    setFormData({ description: '', amount: '0', category: '', billable: false });
   };
 
   const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
@@ -690,7 +757,14 @@ function ExpensesSection({
                 <DollarSign className="w-4 h-4 text-slate-500" />
                 <div>
                   <p className="font-medium text-slate-900">{expense.description}</p>
-                  <p className="text-sm text-slate-600">{expense.category}</p>
+                  <p className="text-sm text-slate-600">
+                    {expense.category}
+                    {expense.billable ? (
+                      <Badge variant="outline" className="ml-2 text-[0.65rem]">
+                        Billable
+                      </Badge>
+                    ) : null}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -751,6 +825,14 @@ function ExpensesSection({
             onChange={(e) => setFormData({ ...formData, category: e.target.value })}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg"
           />
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={formData.billable}
+              onChange={(e) => setFormData({ ...formData, billable: e.target.checked })}
+            />
+            Billable (pass-through to invoice — excluded from internal cost)
+          </label>
         </div>
 
         <Button type="submit" size="sm" disabled={createExpense.isPending}>
@@ -878,94 +960,119 @@ function TimeEntriesSection({
   );
 }
 
+const DEFAULT_HOURLY = 45;
+
+function labourLineCost(entry: JobTimeEntry, hourlyRates: Record<string, number>): number {
+  const hrs = (entry.duration_minutes ?? 0) / 60;
+  const uid = entry.user_id;
+  const rate =
+    uid && hourlyRates[uid] != null ? hourlyRates[uid]! : DEFAULT_HOURLY;
+  return hrs * rate;
+}
+
 function ProfitabilitySection({
   job,
   lineItems,
   expenses,
   timeEntries,
+  hourlyRates,
+  defaultOpen,
 }: {
   job: Job;
   lineItems: JobLineItem[];
   expenses: JobExpense[];
   timeEntries: JobTimeEntry[];
+  hourlyRates: Record<string, number>;
+  defaultOpen: boolean;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
   const revenue = job.total_price;
-  const lineItemCost = lineItems.reduce((sum, item) => sum + item.quantity * item.unit_price, 0);
-  const labourCost = (timeEntries.reduce((sum, entry) => sum + (entry.duration_minutes ?? 0), 0) / 60) * 45;
-  const expenseCost = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+  const lineItemCost = lineItems.reduce(
+    (sum, item) => sum + item.quantity * (item.unit_cost ?? 0),
+    0
+  );
+  const labourCost = timeEntries.reduce((sum, entry) => sum + labourLineCost(entry, hourlyRates), 0);
+  const expenseCost = expenses
+    .filter((exp) => !(exp.billable ?? false))
+    .reduce((sum, exp) => sum + exp.amount, 0);
+  const totalHours = timeEntries.reduce((sum, entry) => sum + (entry.duration_minutes ?? 0), 0) / 60;
   const totalCost = lineItemCost + labourCost + expenseCost;
   const profit = revenue - totalCost;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
 
   const isPositive = profit >= 0;
+  const cad = (n: number) => new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(n);
+
+  const inner = (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div className="rounded-lg border border-green-200 bg-green-50 p-6">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="font-medium text-slate-900">Revenue (job total)</h3>
+            <DollarSign className="h-5 w-5 text-green-600" />
+          </div>
+          <p className="text-3xl font-bold text-green-600">{cad(revenue)}</p>
+        </div>
+
+        <div className="rounded-lg border border-orange-200 bg-orange-50 p-6">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="font-medium text-slate-900">Total internal cost</h3>
+            <DollarSign className="h-5 w-5 text-orange-600" />
+          </div>
+          <p className="text-3xl font-bold text-orange-600">{cad(totalCost)}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p className="mb-1 text-sm text-slate-600">Line item cost (catalog unit cost × qty)</p>
+          <p className="text-xl font-bold text-slate-900">{cad(lineItemCost)}</p>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p className="mb-1 text-sm text-slate-600">Labour cost</p>
+          <p className="text-xl font-bold text-slate-900">{cad(labourCost)}</p>
+          <p className="mt-1 text-xs text-slate-500">
+            {totalHours.toFixed(2)} hrs · blended from team hourly rates (default ${DEFAULT_HOURLY}/hr)
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p className="mb-1 text-sm text-slate-600">Non-billable expenses</p>
+          <p className="text-xl font-bold text-slate-900">{cad(expenseCost)}</p>
+          <p className="mt-1 text-xs text-slate-500">Billable pass-through expenses are excluded.</p>
+        </div>
+
+        <div
+          className={`rounded-lg border p-4 ${isPositive ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}
+        >
+          <p className="mb-1 text-sm text-slate-600">Profit</p>
+          <p className={`text-xl font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>{cad(profit)}</p>
+        </div>
+      </div>
+
+      <div
+        className={`rounded-lg border p-6 ${isPositive ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}
+      >
+        <div className="text-center">
+          <p className={`text-sm font-medium ${isPositive ? 'text-green-600' : 'text-red-600'}`}>Profit margin</p>
+          <p className={`text-4xl font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>{margin.toFixed(2)}%</p>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Revenue */}
-        <div className="bg-green-50 p-6 rounded-lg border border-green-200">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-medium text-slate-900">Revenue</h3>
-            <DollarSign className="w-5 h-5 text-green-600" />
-          </div>
-          <p className="text-3xl font-bold text-green-600">
-            {new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(revenue)}
-          </p>
-        </div>
-
-        {/* Total Costs */}
-        <div className="bg-orange-50 p-6 rounded-lg border border-orange-200">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-medium text-slate-900">Total Costs</h3>
-            <DollarSign className="w-5 h-5 text-orange-600" />
-          </div>
-          <p className="text-3xl font-bold text-orange-600">
-            {new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(totalCost)}
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-          <p className="text-sm text-slate-600 mb-1">Line Items Cost</p>
-          <p className="text-xl font-bold text-slate-900">
-            {new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(lineItemCost)}
-          </p>
-        </div>
-
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-          <p className="text-sm text-slate-600 mb-1">Labour Cost</p>
-          <p className="text-xl font-bold text-slate-900">
-            {new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(labourCost)}
-          </p>
-          <p className="text-xs text-slate-500 mt-1">
-            {(timeEntries.reduce((sum, entry) => sum + (entry.duration_minutes ?? 0), 0) / 60).toFixed(2)} hours @ $45/hr
-          </p>
-        </div>
-
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-          <p className="text-sm text-slate-600 mb-1">Expenses</p>
-          <p className="text-xl font-bold text-slate-900">
-            {new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(expenseCost)}
-          </p>
-        </div>
-
-        <div className={`p-4 rounded-lg border ${isPositive ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-          <p className="text-sm text-slate-600 mb-1">Profit</p>
-          <p className={`text-xl font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
-            {new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(profit)}
-          </p>
-        </div>
-      </div>
-
-      <div className={`p-6 rounded-lg border ${isPositive ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-        <div className="text-center">
-          <p className={`text-sm font-medium ${isPositive ? 'text-green-600' : 'text-red-600'}`}>Profit Margin</p>
-          <p className={`text-4xl font-bold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
-            {margin.toFixed(2)}%
-          </p>
-        </div>
-      </div>
+    <div className="rounded-lg border border-slate-200 bg-white">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-900"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span>Profitability</span>
+        {open ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+      </button>
+      {open ? <div className="border-t border-slate-200 px-4 pb-4 pt-2">{inner}</div> : null}
     </div>
   );
 }

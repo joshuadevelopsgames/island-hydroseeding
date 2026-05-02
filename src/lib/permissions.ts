@@ -17,6 +17,7 @@ export const PAGE_OPTIONS: { path: string; label: string }[] = [
   { path: '/jobs', label: 'Jobs' },
   { path: '/invoices', label: 'Invoices' },
   { path: '/schedule', label: 'Schedule' },
+  { path: '/reports', label: 'Reports' },
 ];
 
 export const ALL_ASSIGNABLE_PATHS = PAGE_OPTIONS.map((p) => p.path);

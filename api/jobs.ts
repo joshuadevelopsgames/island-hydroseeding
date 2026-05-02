@@ -3,6 +3,10 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from './_auth';
 import { resolveTenantId } from './_tenant';
 
+function isUuid(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
+}
+
 function supabase(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -118,12 +122,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? db.from('crm_properties').select('*').eq('id', propertyId).eq('tenant_id', tenantId).maybeSingle()
           : Promise.resolve({ data: null, error: null }),
       ]);
+      const entries = timeEntries.data ?? [];
+      const userIds = [...new Set(entries.map((e: { user_id?: string | null }) => e.user_id).filter(Boolean))] as string[];
+      const uuidIds = userIds.filter((u) => isUuid(u));
+      let hourly_rates: Record<string, number> = {};
+      if (uuidIds.length > 0) {
+        const permRes = await db.from('user_permissions').select('user_id, hourly_rate').in('user_id', uuidIds);
+        const DEFAULT_RATE = 45;
+        hourly_rates = Object.fromEntries(
+          (permRes.data ?? []).map((p: { user_id: string; hourly_rate: unknown }) => [
+            p.user_id,
+            Number(p.hourly_rate ?? DEFAULT_RATE),
+          ])
+        );
+        for (const uid of uuidIds) {
+          if (hourly_rates[uid] === undefined) hourly_rates[uid] = DEFAULT_RATE;
+        }
+      }
       res.status(200).json({
         job: jobRes.data,
         line_items: lineItems.data ?? [],
         visits: visits.data ?? [],
         expenses: expenses.data ?? [],
         time_entries: timeEntries.data ?? [],
+        hourly_rates,
         account: account.data ?? null,
         property: property.data ?? null,
       });
@@ -157,13 +179,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'account_id and title are required' });
       return;
     }
+    const jobTypeStr = body.job_type != null ? String(body.job_type) : 'One-off';
     const row = {
       tenant_id: tenantId,
       account_id: accountId,
       property_id: body.property_id != null ? String(body.property_id) : null,
       quote_id: body.quote_id != null ? String(body.quote_id) : null,
       title,
-      job_type: body.job_type != null ? String(body.job_type) : null,
+      job_type: jobTypeStr,
+      is_recurring:
+        body.is_recurring != null ? Boolean(body.is_recurring) : jobTypeStr === 'Recurring',
       status: String(body.status ?? 'New'),
       billing_frequency: body.billing_frequency != null ? String(body.billing_frequency) : null,
       automatic_payments: Boolean(body.automatic_payments),
@@ -217,15 +242,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const jobId = createdJob.id as string;
     const quoteLineItems = lineItemsRes.data ?? [];
     if (quoteLineItems.length > 0) {
-      const lineItemsToInsert = quoteLineItems.map((item: Record<string, unknown>) => ({
-        tenant_id: tenantId,
-        job_id: jobId,
-        product_service_name: String(item.product_service_name ?? item.description ?? ''),
-        quantity: Number(item.quantity ?? 1),
-        unit_price: Number(item.unit_price ?? 0),
-        total: Number(item.total ?? 0),
-        updated_at: NOW_ISO(),
-      }));
+      const lineItemsToInsert = await Promise.all(
+        quoteLineItems.map(async (item: Record<string, unknown>) => {
+          const product_service_name = String(item.product_service_name ?? item.description ?? '');
+          const psRes = await db
+            .from('products_services')
+            .select('default_unit_cost')
+            .eq('tenant_id', tenantId)
+            .eq('name', product_service_name)
+            .maybeSingle();
+          const unit_cost = Number(psRes.data?.default_unit_cost ?? 0);
+          return {
+            tenant_id: tenantId,
+            job_id: jobId,
+            product_service_name,
+            quantity: Number(item.quantity ?? 1),
+            unit_price: Number(item.unit_price ?? 0),
+            unit_cost,
+            total: Number(item.total ?? 0),
+            updated_at: NOW_ISO(),
+          };
+        })
+      );
       await db.from('job_line_items').insert(lineItemsToInsert);
     }
     await db
@@ -268,6 +306,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         else patch[k] = String(v);
       }
     }
+    if (Object.prototype.hasOwnProperty.call(body, 'is_recurring')) {
+      patch.is_recurring = Boolean(body.is_recurring);
+    }
     const { data, error } = await db
       .from('jobs')
       .update(patch)
@@ -297,7 +338,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (action === 'job.recalculate') {
-    const jobId = String(body.job_id ?? '');
+    const jobId = String(body.job_id ?? body.jobId ?? '');
     if (!jobId) {
       res.status(400).json({ error: 'job_id is required' });
       return;
@@ -319,13 +360,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (action === 'line_item.create') {
-    const jobId = String(body.job_id ?? '');
+    const jobId = String(body.job_id ?? body.jobId ?? '');
     const productServiceName = String(body.product_service_name ?? '').trim();
     const quantity = Number(body.quantity ?? 1);
     const unitPrice = Number(body.unit_price ?? 0);
     if (!jobId || !productServiceName) {
       res.status(400).json({ error: 'job_id and product_service_name are required' });
       return;
+    }
+    let unitCost = body.unit_cost != null ? Number(body.unit_cost) : NaN;
+    if (Number.isNaN(unitCost)) {
+      const psRes = await db
+        .from('products_services')
+        .select('default_unit_cost')
+        .eq('tenant_id', tenantId)
+        .eq('name', productServiceName)
+        .maybeSingle();
+      unitCost = Number(psRes.data?.default_unit_cost ?? 0);
     }
     const total = quantity * unitPrice;
     const row = {
@@ -334,6 +385,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       product_service_name: productServiceName,
       quantity,
       unit_price: unitPrice,
+      unit_cost: unitCost,
       total,
       updated_at: NOW_ISO(),
     };
@@ -370,6 +422,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (Object.prototype.hasOwnProperty.call(body, 'unit_price')) {
       patch.unit_price = Number(body.unit_price);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'unit_cost')) {
+      patch.unit_cost = Number(body.unit_cost);
     }
     const newQuantity = Object.prototype.hasOwnProperty.call(patch, 'quantity') ? Number(patch.quantity) : Number(existing.quantity ?? 1);
     const newUnitPrice = Object.prototype.hasOwnProperty.call(patch, 'unit_price') ? Number(patch.unit_price) : Number(existing.unit_price ?? 0);
@@ -418,7 +473,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (action === 'visit.create') {
-    const jobId = String(body.job_id ?? '');
+    const jobId = String(body.job_id ?? body.jobId ?? '');
     const scheduledAt = String(body.scheduled_at ?? '');
     if (!jobId || !scheduledAt) {
       res.status(400).json({ error: 'job_id and scheduled_at are required' });
@@ -491,7 +546,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (action === 'expense.create') {
-    const jobId = String(body.job_id ?? '');
+    const jobId = String(body.job_id ?? body.jobId ?? '');
     const description = String(body.description ?? '').trim();
     const amount = Number(body.amount ?? 0);
     if (!jobId || !description) {
@@ -505,6 +560,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       amount,
       category: body.category != null ? String(body.category) : null,
       receipt_url: body.receipt_url != null ? String(body.receipt_url) : null,
+      billable: body.billable != null ? Boolean(body.billable) : false,
+      vendor: body.vendor != null ? String(body.vendor).trim() || null : null,
+      expense_date: body.expense_date != null ? String(body.expense_date) : null,
+      entered_by: body.entered_by != null ? String(body.entered_by) : null,
       updated_at: NOW_ISO(),
     };
     const { data, error } = await db.from('job_expenses').insert(row).select('*').single();
@@ -526,7 +585,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (action === 'time_entry.create') {
-    const jobId = String(body.job_id ?? '');
+    const jobId = String(body.job_id ?? body.jobId ?? '');
     const startedAt = String(body.started_at ?? '');
     if (!jobId || !startedAt) {
       res.status(400).json({ error: 'job_id and started_at are required' });

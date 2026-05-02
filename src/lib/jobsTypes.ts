@@ -10,6 +10,8 @@ export type Job = {
   job_number: number;
   title: string;
   job_type: string;
+  /** Present after migration 020; infer from job_type when missing. */
+  is_recurring?: boolean;
   status: string;
   billing_frequency: string;
   automatic_payments: boolean;
@@ -29,6 +31,7 @@ export type JobLineItem = {
   description: string | null;
   quantity: number;
   unit_price: number;
+  unit_cost?: number;
   total: number;
   sort_order: number;
   created_at: string;
@@ -53,6 +56,10 @@ export type JobExpense = {
   amount: number;
   category: string | null;
   receipt_url: string | null;
+  billable?: boolean;
+  vendor: string | null;
+  expense_date: string | null;
+  entered_by: string | null;
   created_at: string;
 };
 
@@ -73,6 +80,8 @@ export type JobBundle = {
   visits: JobVisit[];
   expenses: JobExpense[];
   time_entries: JobTimeEntry[];
+  /** user_id (UUID) → default hourly rate for labour cost */
+  hourly_rates: Record<string, number>;
   account: { id: string; name: string; company: string | null; phone: string | null; email: string | null } | null;
   property: { id: string; address: string; city: string | null; province: string | null; postal_code: string | null } | null;
 };

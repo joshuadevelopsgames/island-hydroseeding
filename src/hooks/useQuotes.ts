@@ -122,6 +122,13 @@ export function useQuotesMutations() {
     onSettled: offlineQueuedSettled(invalidate),
   });
 
+  const sendQuoteSms = useMutation({
+    mutationFn: (payload: Record<string, unknown>) =>
+      quotesPost<{ ok: boolean; quote: Quote }>({ action: 'quote.send_sms', ...payload }),
+    onSuccess: invalidate,
+    onSettled: offlineQueuedSettled(invalidate),
+  });
+
   const convertQuote = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       quotesPost<{ quote: Quote }>({ action: 'quote.convert_to_job', ...payload }),
@@ -149,6 +156,7 @@ export function useQuotesMutations() {
     updateLineItem,
     deleteLineItem,
     sendQuote,
+    sendQuoteSms,
     convertQuote,
     convertQuoteToInvoice,
   };

@@ -1,11 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { crmPost, fetchCrmAccountBundle, fetchCrmAccounts, importLegacyLeads } from '@/lib/crmApi';
-import type { CrmAccount, LegacyLead } from '@/lib/crmTypes';
+import {
+  crmPost,
+  fetchCrmAccountBundle,
+  fetchCrmAccounts,
+  fetchCrmLeadSources,
+  fetchCrmTagList,
+  importLegacyLeads,
+} from '@/lib/crmApi';
+import type { CrmAccount, CrmCommLog, LegacyLead } from '@/lib/crmTypes';
 
 export const crmKeys = {
   all: ['crm'] as const,
   accounts: () => [...crmKeys.all, 'accounts'] as const,
   account: (id: string) => [...crmKeys.all, 'account', id] as const,
+  leadSources: () => [...crmKeys.all, 'lead_sources'] as const,
+  tagList: () => [...crmKeys.all, 'tags'] as const,
 };
 
 export function useCrmAccounts() {
@@ -20,6 +29,20 @@ export function useCrmAccountDetail(accountId: string | undefined) {
     queryKey: crmKeys.account(accountId ?? ''),
     queryFn: () => fetchCrmAccountBundle(accountId!),
     enabled: Boolean(accountId),
+  });
+}
+
+export function useCrmLeadSources() {
+  return useQuery({
+    queryKey: crmKeys.leadSources(),
+    queryFn: fetchCrmLeadSources,
+  });
+}
+
+export function useCrmTagList() {
+  return useQuery({
+    queryKey: crmKeys.tagList(),
+    queryFn: fetchCrmTagList,
   });
 }
 
@@ -59,6 +82,26 @@ export function useCrmMutations() {
     onSuccess: invalidate,
   });
 
+  const createProperty = useMutation({
+    mutationFn: (payload: Record<string, unknown>) => crmPost({ action: 'property.create', ...payload }),
+    onSuccess: invalidate,
+  });
+
+  const updateProperty = useMutation({
+    mutationFn: (payload: Record<string, unknown>) => crmPost({ action: 'property.update', ...payload }),
+    onSuccess: invalidate,
+  });
+
+  const setDefaultProperty = useMutation({
+    mutationFn: (id: string) => crmPost({ action: 'property.set_default', id }),
+    onSuccess: invalidate,
+  });
+
+  const deleteProperty = useMutation({
+    mutationFn: (id: string) => crmPost({ action: 'property.delete', id }),
+    onSuccess: invalidate,
+  });
+
   const createInteraction = useMutation({
     mutationFn: (payload: Record<string, unknown>) => crmPost({ action: 'interaction.create', ...payload }),
     onSuccess: invalidate,
@@ -89,6 +132,37 @@ export function useCrmMutations() {
     onSuccess: invalidate,
   });
 
+  const setAccountTags = useMutation({
+    mutationFn: (p: { account_id: string; tag_ids: string[] }) =>
+      crmPost({ action: 'account.tags.set', account_id: p.account_id, tag_ids: p.tag_ids }),
+    onSuccess: invalidate,
+  });
+
+  const createLeadSource = useMutation({
+    mutationFn: (payload: Record<string, unknown>) => crmPost({ action: 'lead_source.create', ...payload }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: crmKeys.leadSources() });
+      invalidate();
+    },
+  });
+
+  const createCrmTag = useMutation({
+    mutationFn: (payload: Record<string, unknown>) => crmPost({ action: 'tag.create', ...payload }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: crmKeys.tagList() });
+      invalidate();
+    },
+  });
+
+  const createCommLog = useMutation({
+    mutationFn: (payload: Record<string, unknown>) =>
+      crmPost<{ comm_log: CrmCommLog }>({ action: 'comm_log.create', ...payload }),
+    onSuccess: (_data, vars) => {
+      const aid = vars.account_id != null ? String(vars.account_id) : '';
+      if (aid) void qc.invalidateQueries({ queryKey: crmKeys.account(aid) });
+    },
+  });
+
   return {
     createAccount,
     updateAccount,
@@ -96,11 +170,19 @@ export function useCrmMutations() {
     createContact,
     updateContact,
     deleteContact,
+    createProperty,
+    updateProperty,
+    setDefaultProperty,
+    deleteProperty,
     createInteraction,
     deleteInteraction,
     createResearchNote,
     updateResearchNote,
     deleteResearchNote,
     legacyImport,
+    setAccountTags,
+    createLeadSource,
+    createCrmTag,
+    createCommLog,
   };
 }

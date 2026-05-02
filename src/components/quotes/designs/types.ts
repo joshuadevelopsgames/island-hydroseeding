@@ -72,6 +72,8 @@ export type DesignLineItem = {
   rate: number;
   amount: number;
   isOptional: boolean;
+  /** First row of a section block — render a heading above this line */
+  sectionHeading?: string | null;
 };
 
 export type TenantBrand = {
@@ -122,9 +124,16 @@ export const isVisible = (sv: QuoteSectionVisibility, key: keyof QuoteSectionVis
 export function toDesignItems(
   items: (QuoteLineItem | (QuoteLineItemDraft & { is_optional?: boolean }))[]
 ): DesignLineItem[] {
+  let prevSectionKey = '';
   return items.map((it, i) => {
     const qty = Number(it.quantity) || 0;
     const rate = Number(it.unit_price) || 0;
+    const st = (it as QuoteLineItem).section_title;
+    const raw = st != null ? String(st).trim() : '';
+    const sectionKey = raw;
+    const sectionHeading =
+      sectionKey && sectionKey !== prevSectionKey ? raw : null;
+    if (sectionKey) prevSectionKey = sectionKey;
     return {
       id: 'id' in it && it.id ? it.id : i,
       code: synthCode(i),
@@ -135,6 +144,7 @@ export function toDesignItems(
       rate,
       amount: qty * rate,
       isOptional: 'is_optional' in it ? Boolean((it as { is_optional?: boolean }).is_optional) : false,
+      sectionHeading,
     };
   });
 }
