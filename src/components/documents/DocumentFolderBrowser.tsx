@@ -121,7 +121,7 @@ function FolderRow({
           </button>
           {menuOpen && (
             <div
-              className="absolute right-0 top-full z-30 mt-1 w-44 overflow-hidden rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--popup-bg)] py-1 shadow-lg"
+              className="absolute right-0 top-full z-[200] mt-1 w-44 overflow-hidden rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--popup-bg)] py-1 shadow-lg"
               role="menu"
             >
               <button

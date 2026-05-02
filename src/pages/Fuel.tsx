@@ -44,8 +44,10 @@ export default function Fuel() {
     const assetId = String(fd.get('assetId') || '');
     const a = assets.find((x) => x.id === assetId);
     const unit = String(fd.get('unit') || 'L') as FuelVolumeUnit;
+    const now = new Date().toISOString();
     const row: FuelEntry = {
       id: uuidv4(),
+      updatedAt: now,
       assetId: a?.id ?? null,
       assetLabel: a ? assetDisplayName(a) : String(fd.get('assetLabel') || '').trim() || '—',
       date: vancouverDateInputToIso(String(fd.get('date') || '')),
@@ -68,8 +70,10 @@ export default function Fuel() {
     const assetId = String(fd.get('assetId') || '');
     const a = assets.find((x) => x.id === assetId);
     const t = String(fd.get('type') || 'toll') as RoadCostType;
+    const now = new Date().toISOString();
     const row: RoadCost = {
       id: uuidv4(),
+      updatedAt: now,
       assetId: a?.id ?? null,
       assetLabel: a ? assetDisplayName(a) : String(fd.get('assetLabel') || '').trim() || '—',
       type: ['toll', 'citation', 'parking', 'other'].includes(t) ? t : 'other',

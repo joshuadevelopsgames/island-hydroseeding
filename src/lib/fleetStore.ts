@@ -6,6 +6,7 @@ import type {
   RoadCost,
   FleetIssue,
   PurchaseOrder,
+  InventoryStockItem,
 } from './fleetTypes';
 
 const ASSETS_KEY = 'fleetAssets_v1';
@@ -15,6 +16,8 @@ const FUEL_KEY = 'fleetFuelEntries_v1';
 const ROAD_KEY = 'fleetRoadCosts_v1';
 const ISSUES_KEY = 'fleetIssues_v1';
 const PO_KEY = 'fleetPurchaseOrders_v1';
+/** @deprecated import from fleetStore — use loadInventory/saveInventory */
+export const INVENTORY_STATE_KEY = 'inventoryState';
 
 type LegacyMaint = {
   id: string;
@@ -28,6 +31,7 @@ export function emptyAsset(partial: Partial<FleetAsset> & Pick<FleetAsset, 'name
   const now = new Date().toISOString();
   return {
     id: partial.id ?? uuidv4(),
+    updatedAt: partial.updatedAt ?? now,
     name: partial.name,
     type: partial.type ?? 'truck',
     unitNumber: partial.unitNumber ?? '',
@@ -54,6 +58,40 @@ export function emptyAsset(partial: Partial<FleetAsset> & Pick<FleetAsset, 'name
   };
 }
 
+let fleetMutationSuppress = 0;
+
+/** Avoid sync loops when applying a merged bundle from the server */
+export function suppressFleetMutationEvents<T>(fn: () => T): T {
+  fleetMutationSuppress++;
+  try {
+    return fn();
+  } finally {
+    fleetMutationSuppress--;
+  }
+}
+
+function notifyFleetLocalMutation() {
+  if (fleetMutationSuppress > 0) return;
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('fleet-local-mutated'));
+}
+
+export function loadInventory(): InventoryStockItem[] {
+  const raw = localStorage.getItem(INVENTORY_STATE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as InventoryStockItem[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveInventory(next: InventoryStockItem[]) {
+  localStorage.setItem(INVENTORY_STATE_KEY, JSON.stringify(next));
+  notifyFleetLocalMutation();
+}
+
 export function loadAssets(): FleetAsset[] {
   const raw = localStorage.getItem(ASSETS_KEY);
   if (!raw) return [];
@@ -67,6 +105,7 @@ export function loadAssets(): FleetAsset[] {
 
 export function saveAssets(next: FleetAsset[]) {
   localStorage.setItem(ASSETS_KEY, JSON.stringify(next));
+  notifyFleetLocalMutation();
 }
 
 const MIGRATED_FLAG = 'fleetMigratedLegacyMaint_v1';
@@ -130,6 +169,7 @@ function migrateLegacyMaintenance(): WorkOrder[] {
 
 export function saveWorkOrders(next: WorkOrder[]) {
   localStorage.setItem(WORK_ORDERS_KEY, JSON.stringify(next));
+  notifyFleetLocalMutation();
 }
 
 export function loadFuelEntries(): FuelEntry[] {
@@ -145,6 +185,7 @@ export function loadFuelEntries(): FuelEntry[] {
 
 export function saveFuelEntries(next: FuelEntry[]) {
   localStorage.setItem(FUEL_KEY, JSON.stringify(next));
+  notifyFleetLocalMutation();
 }
 
 export function loadRoadCosts(): RoadCost[] {
@@ -160,6 +201,7 @@ export function loadRoadCosts(): RoadCost[] {
 
 export function saveRoadCosts(next: RoadCost[]) {
   localStorage.setItem(ROAD_KEY, JSON.stringify(next));
+  notifyFleetLocalMutation();
 }
 
 export function loadIssues(): FleetIssue[] {
@@ -175,6 +217,7 @@ export function loadIssues(): FleetIssue[] {
 
 export function saveIssues(next: FleetIssue[]) {
   localStorage.setItem(ISSUES_KEY, JSON.stringify(next));
+  notifyFleetLocalMutation();
 }
 
 export function loadPurchaseOrders(): PurchaseOrder[] {
@@ -190,6 +233,7 @@ export function loadPurchaseOrders(): PurchaseOrder[] {
 
 export function savePurchaseOrders(next: PurchaseOrder[]) {
   localStorage.setItem(PO_KEY, JSON.stringify(next));
+  notifyFleetLocalMutation();
 }
 
 /** Keys we include in a full workspace export */

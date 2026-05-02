@@ -4,24 +4,13 @@ import { Plus, AlertTriangle, Save, FileText } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { parseISO } from 'date-fns';
 import { formatInVancouver, vancouverDateInputToIso } from '../lib/vancouverTime';
-import type { PurchaseOrder, PurchaseOrderStatus } from '../lib/fleetTypes';
-import { loadPurchaseOrders, savePurchaseOrders } from '../lib/fleetStore';
+import type { InventoryStockItem, PurchaseOrder, PurchaseOrderStatus } from '../lib/fleetTypes';
+import { loadInventory, loadPurchaseOrders, saveInventory, savePurchaseOrders } from '../lib/fleetStore';
 import { MorphingPlusX } from '../components/MorphingPlusX';
-
-type InventoryItem = {
-  id: string;
-  name: string;
-  category: string;
-  quantity: number;
-  unit: string;
-  threshold: number;
-};
-
-const STORAGE_KEY = 'inventoryState';
 
 export default function Inventory() {
   const [invTab, setInvTab] = useState<'stock' | 'orders'>('stock');
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [inventory, setInventory] = useState<InventoryStockItem[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [dailyUsage, setDailyUsage] = useState<Record<string, number>>({});
   const [isUpdating, setIsUpdating] = useState(false);
@@ -37,22 +26,12 @@ export default function Inventory() {
   }, [refreshOrders]);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as InventoryItem[];
-        setInventory(Array.isArray(parsed) ? parsed : []);
-      } catch {
-        setInventory([]);
-      }
-    } else {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
-    }
+    setInventory(loadInventory());
   }, []);
 
-  const persist = (next: InventoryItem[]) => {
+  const persist = (next: InventoryStockItem[]) => {
     setInventory(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    saveInventory(next);
   };
 
   const handleAddItem = (e: React.FormEvent<HTMLFormElement>) => {
@@ -60,8 +39,10 @@ export default function Inventory() {
     const formData = new FormData(e.currentTarget);
     const qty = parseInt(String(formData.get('quantity')), 10) || 0;
     const thresh = parseInt(String(formData.get('threshold')), 10) || 0;
-    const item: InventoryItem = {
-      id: Math.random().toString(36).slice(2, 11),
+    const now = new Date().toISOString();
+    const item: InventoryStockItem = {
+      id: uuidv4(),
+      updatedAt: now,
       name: String(formData.get('name') || '').trim(),
       category: String(formData.get('category') || '').trim() || 'General',
       quantity: qty,
@@ -81,9 +62,15 @@ export default function Inventory() {
   };
 
   const processDailyUsage = () => {
+    const touch = new Date().toISOString();
     const updatedInventory = inventory.map((item) => {
       const used = dailyUsage[item.id] || 0;
-      return { ...item, quantity: Math.max(0, item.quantity - used) };
+      if (!used) return item;
+      return {
+        ...item,
+        updatedAt: touch,
+        quantity: Math.max(0, item.quantity - used),
+      };
     });
 
     persist(updatedInventory);
@@ -102,8 +89,10 @@ export default function Inventory() {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const st = String(fd.get('status') || 'draft') as PurchaseOrderStatus;
+    const ts = new Date().toISOString();
     const row: PurchaseOrder = {
       id: uuidv4(),
+      updatedAt: ts,
       vendor: String(fd.get('vendor') || '').trim(),
       orderedAt: vancouverDateInputToIso(String(fd.get('orderedAt') || '')),
       expectedAt: fd.get('expectedAt')

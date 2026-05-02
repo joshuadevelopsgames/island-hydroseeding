@@ -32,8 +32,10 @@ export default function Issues() {
     const assetId = String(fd.get('assetId') || '');
     const a = assets.find((x) => x.id === assetId);
     const sev = String(fd.get('severity') || 'medium') as FleetIssueSeverity;
+    const now = new Date().toISOString();
     const row: FleetIssue = {
       id: uuidv4(),
+      updatedAt: now,
       assetId: a?.id ?? null,
       assetLabel: a ? assetDisplayName(a) : String(fd.get('assetLabel') || '').trim() || '—',
       title: String(fd.get('title') || '').trim(),
@@ -41,7 +43,7 @@ export default function Issues() {
       severity: ['low', 'medium', 'high', 'down'].includes(sev) ? sev : 'medium',
       status: 'open',
       linkedWorkOrderId: null,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
       resolvedAt: null,
     };
     if (!row.title) return;
@@ -57,6 +59,7 @@ export default function Issues() {
         i.id === id
           ? {
               ...i,
+              updatedAt: now,
               status,
               resolvedAt: status === 'resolved' ? now : null,
             }

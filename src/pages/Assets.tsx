@@ -198,7 +198,12 @@ export default function Assets() {
 
     if (editingId) {
       const prev = assets.find((a) => a.id === editingId);
-      persist(assets.map((a) => (a.id === editingId ? { ...base, createdAt: prev?.createdAt ?? base.createdAt } : a)));
+      const touch = new Date().toISOString();
+      persist(
+        assets.map((a) =>
+          a.id === editingId ? { ...base, createdAt: prev?.createdAt ?? base.createdAt, updatedAt: touch } : a
+        )
+      );
     } else {
       persist([base, ...assets]);
     }

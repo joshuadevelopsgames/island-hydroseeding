@@ -1,3 +1,5 @@
+import type { QuoteDesign, QuoteSectionVisibility, QuoteCustomText } from '@/lib/quotesTypes';
+
 export type InvoiceStatus = 'Draft' | 'Sent' | 'Viewed' | 'Paid' | 'Overdue' | 'Bad Debt';
 
 export type Invoice = {
@@ -21,6 +23,10 @@ export type Invoice = {
   payment_terms: string | null;
   pay_token: string | null;
   stripe_payment_intent_id: string | null;
+  /** Visual design — one of editorial | technical | field | statement (mirrors quotes). */
+  template_design: QuoteDesign;
+  section_visibility: QuoteSectionVisibility;
+  custom_text: QuoteCustomText;
   created_at: string;
   updated_at: string;
 };

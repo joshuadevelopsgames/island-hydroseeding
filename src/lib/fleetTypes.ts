@@ -1,9 +1,11 @@
-/** Fleet ops model — local-first (localStorage). Excludes external integrations. */
+/** Fleet ops model — local-first (localStorage) with optional server sync via /api/fleet. */
 
 export type FleetAssetType = 'truck' | 'trailer' | 'heavy_equipment' | 'other';
 
 export type FleetAsset = {
   id: string;
+  /** ISO timestamp; used for last-write + stale hints when syncing */
+  updatedAt?: string;
   name: string;
   type: FleetAssetType;
   /** Fleet / unit number */
@@ -43,6 +45,7 @@ export type WorkOrderPartLine = {
 
 export type WorkOrder = {
   id: string;
+  updatedAt?: string;
   assetId: string | null;
   /** Fallback label when assetId missing (legacy import) */
   assetLabel: string;
@@ -64,6 +67,7 @@ export type FuelVolumeUnit = 'L' | 'gal_us';
 
 export type FuelEntry = {
   id: string;
+  updatedAt?: string;
   assetId: string | null;
   assetLabel: string;
   date: string;
@@ -78,6 +82,7 @@ export type RoadCostType = 'toll' | 'citation' | 'parking' | 'other';
 
 export type RoadCost = {
   id: string;
+  updatedAt?: string;
   assetId: string | null;
   assetLabel: string;
   type: RoadCostType;
@@ -93,6 +98,7 @@ export type FleetIssueStatus = 'open' | 'monitoring' | 'scheduled' | 'resolved';
 
 export type FleetIssue = {
   id: string;
+  updatedAt?: string;
   assetId: string | null;
   assetLabel: string;
   title: string;
@@ -104,10 +110,22 @@ export type FleetIssue = {
   resolvedAt: string | null;
 };
 
+/** Simple stock row (inventory page); synced via /api/fleet as inventory_items */
+export type InventoryStockItem = {
+  id: string;
+  updatedAt?: string;
+  name: string;
+  category: string;
+  quantity: number;
+  unit: string;
+  threshold: number;
+};
+
 export type PurchaseOrderStatus = 'draft' | 'ordered' | 'received' | 'cancelled';
 
 export type PurchaseOrder = {
   id: string;
+  updatedAt?: string;
   vendor: string;
   orderedAt: string;
   expectedAt: string | null;

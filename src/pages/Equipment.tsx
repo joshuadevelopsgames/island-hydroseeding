@@ -69,6 +69,7 @@ export default function Equipment() {
         o.id === id
           ? {
               ...o,
+              updatedAt: now,
               status,
               completedAt: status === 'completed' ? o.completedAt ?? now : null,
             }
@@ -86,8 +87,10 @@ export default function Equipment() {
     if (!title || !due) return;
 
     const a = assets.find((x) => x.id === assetId);
+    const ts = new Date().toISOString();
     const wo: WorkOrder = {
       id: uuidv4(),
+      updatedAt: ts,
       assetId: a ? a.id : null,
       assetLabel: a ? assetDisplayName(a) : String(fd.get('assetLabel') || '').trim() || 'Unassigned',
       title,
@@ -100,7 +103,7 @@ export default function Equipment() {
       odometerAtServiceKm: fd.get('odometerAtServiceKm') ? Number(fd.get('odometerAtServiceKm')) : null,
       warrantyFlag: fd.get('warrantyFlag') === 'on',
       notes: String(fd.get('notes') || '').trim(),
-      createdAt: new Date().toISOString(),
+      createdAt: ts,
       completedAt: null,
     };
     persist([wo, ...orders]);

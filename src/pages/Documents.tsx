@@ -585,9 +585,9 @@ export default function Documents() {
         )}
       </div>
 
-      <div className="card min-w-0 overflow-hidden p-0">
-        <div className="flex flex-col gap-4 border-b border-[var(--border-color)] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="documents-library-search w-full min-w-0 sm:max-w-md">
+      <div className="card min-w-0 overflow-visible p-0">
+        <div className="flex flex-row flex-wrap items-center gap-3 border-b border-[var(--border-color)] px-6 py-4 sm:gap-4">
+          <div className="documents-library-search min-w-0 flex-1 basis-[min(100%,24rem)] max-w-full sm:max-w-xl">
             <Search size={18} className="documents-library-search__icon shrink-0" aria-hidden />
             <input
               type="search"
@@ -597,7 +597,7 @@ export default function Documents() {
               aria-label="Search documents"
             />
           </div>
-          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <button
               type="button"
               className="btn btn-secondary inline-flex items-center gap-2"
@@ -614,7 +614,7 @@ export default function Documents() {
           </div>
         </div>
 
-        <div className="px-6 py-5">
+        <div className="relative overflow-visible px-6 py-5">
           <DocumentFolderBrowser
             folders={folders}
             documents={documents}
