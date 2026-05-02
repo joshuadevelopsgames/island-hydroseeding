@@ -36,7 +36,13 @@ import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useCrmAccountDetail, useCrmMutations } from '@/hooks/useCrm';
-import type { CrmAccountStatus, CrmAccountType } from '@/lib/crmTypes';
+import {
+  CRM_CONTACT_TIER_RANK,
+  type CrmAccountStatus,
+  type CrmAccountType,
+  type CrmContactTier,
+  type CrmProperty,
+} from '@/lib/crmTypes';
 import { useAuth } from '@/context/AuthContext';
 import { formatErrorForUi } from '@/lib/crmApi';
 import { formatPhone, normalizePhoneForSave } from '@/lib/phone';
@@ -290,6 +296,12 @@ export default function CrmAccountDetail() {
             Contacts
           </TabsTrigger>
           <TabsTrigger
+            value="properties"
+            className="rounded-none border-b-2 border-transparent px-3 py-2 data-[state=active]:border-[var(--primary-green)] data-[state=active]:bg-transparent"
+          >
+            Properties
+          </TabsTrigger>
+          <TabsTrigger
             value="quotes"
             className="rounded-none border-b-2 border-transparent px-3 py-2 data-[state=active]:border-[var(--primary-green)] data-[state=active]:bg-transparent"
           >
@@ -338,6 +350,9 @@ export default function CrmAccountDetail() {
         </TabsContent>
         <TabsContent value="contacts">
           <ContactsTab accountId={account.id} contacts={data?.contacts ?? []} m={m} />
+        </TabsContent>
+        <TabsContent value="properties">
+          <PropertiesTab properties={data?.properties ?? []} />
         </TabsContent>
         <TabsContent value="quotes">
           <AccountQuotesTab quotes={accountQuotes} loading={quotesQuery.isPending} />
@@ -853,13 +868,15 @@ function ContactsTab({
   const submit: React.FormEventHandler<HTMLFormElement> = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const tier = String(fd.get('tier') ?? 'other') as CrmContactTier;
     await m.createContact.mutateAsync({
       account_id: accountId,
       name: String(fd.get('name') ?? '').trim(),
       role: String(fd.get('role') ?? '') || null,
       phone: normalizePhoneForSave(String(fd.get('phone') ?? '')),
       email: String(fd.get('email') ?? '').trim() || null,
-      is_primary: fd.get('primary') === 'on',
+      tier,
+      is_primary: tier === 'primary',
       notes: String(fd.get('notes') ?? '') || null,
     });
     setOpen(false);
@@ -867,6 +884,20 @@ function ContactsTab({
   };
 
   const pending = contacts.find((c) => c.id === delId);
+
+  const sortedContacts = useMemo(
+    () =>
+      [...contacts].sort((a, b) => {
+        const ar = CRM_CONTACT_TIER_RANK[(a.tier ?? 'other') as CrmContactTier] ?? 3;
+        const br = CRM_CONTACT_TIER_RANK[(b.tier ?? 'other') as CrmContactTier] ?? 3;
+        if (ar !== br) return ar - br;
+        if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+        return a.created_at < b.created_at ? -1 : 1;
+      }),
+    [contacts]
+  );
+
+  const takenTiers = new Set(contacts.map((c) => (c.tier ?? 'other') as CrmContactTier));
 
   return (
     <Card>
@@ -904,10 +935,26 @@ function ContactsTab({
                   <Input id="c-email" name="email" type="email" />
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="primary" />
-                Primary contact
-              </label>
+              <div className="space-y-2">
+                <Label htmlFor="c-tier">Tier</Label>
+                <select
+                  id="c-tier"
+                  name="tier"
+                  defaultValue={takenTiers.has('primary') ? 'other' : 'primary'}
+                  className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-transparent px-3 text-sm"
+                >
+                  <option value="primary" disabled={takenTiers.has('primary')}>
+                    Primary{takenTiers.has('primary') ? ' (taken)' : ''}
+                  </option>
+                  <option value="secondary" disabled={takenTiers.has('secondary')}>
+                    Secondary{takenTiers.has('secondary') ? ' (taken)' : ''}
+                  </option>
+                  <option value="tertiary" disabled={takenTiers.has('tertiary')}>
+                    Tertiary{takenTiers.has('tertiary') ? ' (taken)' : ''}
+                  </option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="c-notes">Notes</Label>
                 <Textarea id="c-notes" name="notes" rows={2} />
@@ -939,7 +986,7 @@ function ContactsTab({
 
         <ScrollArea className="h-[min(50vh,400px)]">
           <ul className="space-y-3 pr-3">
-            {contacts.map((c) => (
+            {sortedContacts.map((c) => (
               <li key={c.id} className="rounded-[var(--radius-sm)] border border-[var(--border-color)] p-4">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
@@ -953,7 +1000,7 @@ function ContactsTab({
                     {c.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">{c.notes}</p>}
                   </div>
                   <div className="flex items-center gap-2">
-                    {c.is_primary && <Badge variant="default">Primary</Badge>}
+                    <ContactTierBadge tier={(c.tier ?? (c.is_primary ? 'primary' : 'other')) as CrmContactTier} />
                     <Button type="button" size="sm" variant="destructive" onClick={() => setDelId(c.id)}>
                       Remove
                     </Button>
@@ -961,9 +1008,64 @@ function ContactsTab({
                 </div>
               </li>
             ))}
-            {contacts.length === 0 && <p className="text-sm text-[var(--text-muted)]">No contacts yet.</p>}
+            {sortedContacts.length === 0 && <p className="text-sm text-[var(--text-muted)]">No contacts yet.</p>}
           </ul>
         </ScrollArea>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ContactTierBadge({ tier }: { tier: CrmContactTier }) {
+  if (tier === 'primary') return <Badge variant="default">Primary</Badge>;
+  if (tier === 'secondary') return <Badge variant="secondary">Secondary</Badge>;
+  if (tier === 'tertiary') return <Badge variant="outline">Tertiary</Badge>;
+  return null;
+}
+
+function PropertiesTab({ properties }: { properties: CrmProperty[] }) {
+  const sorted = useMemo(
+    () =>
+      [...properties].sort((a, b) => {
+        if (a.is_default !== b.is_default) return a.is_default ? -1 : 1;
+        return a.created_at < b.created_at ? -1 : 1;
+      }),
+    [properties]
+  );
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+        <div>
+          <CardTitle className="text-base">Properties</CardTitle>
+          <CardDescription>Service addresses tied to this account.</CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {sorted.length === 0 ? (
+          <p className="text-sm text-[var(--text-muted)]">No properties yet.</p>
+        ) : (
+          <ul className="space-y-3">
+            {sorted.map((p) => {
+              const cityLine = [p.city, p.province, p.postal_code].filter(Boolean).join(', ');
+              return (
+                <li key={p.id} className="rounded-[var(--radius-sm)] border border-[var(--border-color)] p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold">{p.label || p.address}</p>
+                      {p.label && <p className="text-sm text-[var(--text-secondary)]">{p.address}</p>}
+                      {cityLine && <p className="text-sm text-[var(--text-secondary)]">{cityLine}</p>}
+                      {p.notes && (
+                        <p className="mt-2 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">{p.notes}</p>
+                      )}
+                    </div>
+                    {p.is_default && <Badge variant="default">Default</Badge>}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </CardContent>
     </Card>
   );

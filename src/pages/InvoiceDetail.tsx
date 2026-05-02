@@ -4,7 +4,7 @@ import type { InvoiceStatus, InvoiceBundle } from '@/lib/invoicesTypes';
 import { useInvoiceDetail, useInvoicesMutations } from '@/hooks/useInvoices';
 import type { QuoteDesign } from '@/lib/quotesTypes';
 import InvoiceDesignPreview from '@/components/invoices/InvoiceDesignPreview';
-import { ctxFromInvoiceBundle } from '@/components/invoices/buildInvoiceDesignContext';
+import { ctxFromInvoiceBundle, ctxFromInvoiceDraft } from '@/components/invoices/buildInvoiceDesignContext';
 import QuoteDesignPicker from '@/components/quotes/QuoteDesignPicker';
 import { DESIGN_META } from '@/components/quotes/quoteDesignsMeta';
 import { Badge } from '@/components/ui/badge';
@@ -84,6 +84,8 @@ export default function InvoiceDetail() {
     payment_terms: '',
     notes: '',
   });
+  const [createDesign, setCreateDesign] = useState<QuoteDesign>('editorial');
+  const [createCustomText, setCreateCustomText] = useState<Record<string, unknown>>({});
 
   // Detail page state
   const [editingNotes, setEditingNotes] = useState(false);

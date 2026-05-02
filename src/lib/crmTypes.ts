@@ -22,6 +22,15 @@ export type CrmAccount = {
   updated_at: string;
 };
 
+export type CrmContactTier = 'primary' | 'secondary' | 'tertiary' | 'other';
+
+export const CRM_CONTACT_TIER_RANK: Record<CrmContactTier, number> = {
+  primary: 0,
+  secondary: 1,
+  tertiary: 2,
+  other: 3,
+};
+
 export type CrmContact = {
   id: string;
   account_id: string;
@@ -30,6 +39,22 @@ export type CrmContact = {
   phone: string | null;
   email: string | null;
   is_primary: boolean;
+  tier: CrmContactTier;
+  sort_order: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CrmProperty = {
+  id: string;
+  account_id: string;
+  label: string | null;
+  address: string;
+  city: string | null;
+  province: string | null;
+  postal_code: string | null;
+  is_default: boolean;
   notes: string | null;
   created_at: string;
   updated_at: string;

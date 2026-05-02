@@ -2,6 +2,7 @@ import type {
   CrmAccount,
   CrmContact,
   CrmInteraction,
+  CrmProperty,
   CrmResearchNote,
   LegacyLead,
 } from '@/lib/crmTypes';
@@ -47,6 +48,7 @@ export async function fetchCrmAccounts(): Promise<CrmAccount[]> {
 export async function fetchCrmAccountBundle(accountId: string): Promise<{
   account: CrmAccount;
   contacts: CrmContact[];
+  properties: CrmProperty[];
   interactions: CrmInteraction[];
   research_notes: CrmResearchNote[];
 }> {

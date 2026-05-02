@@ -25,6 +25,17 @@ function parseBody(req: VercelRequest): Record<string, unknown> {
 
 const NOW_ISO = () => new Date().toISOString();
 
+const CONTACT_TIERS = ['primary', 'secondary', 'tertiary', 'other'] as const;
+type ContactTier = (typeof CONTACT_TIERS)[number];
+
+function normalizeContactTier(raw: unknown, isPrimaryHint?: unknown): ContactTier {
+  if (typeof raw === 'string') {
+    const t = raw.toLowerCase();
+    if ((CONTACT_TIERS as readonly string[]).includes(t)) return t as ContactTier;
+  }
+  return isPrimaryHint ? 'primary' : 'other';
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const db = supabase();
   if (!db) {
@@ -60,9 +71,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ error: 'Missing id' });
         return;
       }
-      const [acc, contacts, interactions, research_notes] = await Promise.all([
+      const [acc, contacts, properties, interactions, research_notes] = await Promise.all([
         db.from('crm_accounts').select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle(),
-        db.from('crm_contacts').select('*').eq('account_id', id).eq('tenant_id', tenantId).order('created_at', { ascending: true }),
+        db
+          .from('crm_contacts')
+          .select('*')
+          .eq('account_id', id)
+          .eq('tenant_id', tenantId)
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true }),
+        db
+          .from('crm_properties')
+          .select('*')
+          .eq('account_id', id)
+          .eq('tenant_id', tenantId)
+          .order('is_default', { ascending: false })
+          .order('created_at', { ascending: true }),
         db.from('crm_interactions').select('*').eq('account_id', id).eq('tenant_id', tenantId).order('occurred_at', { ascending: false }),
         db.from('crm_research_notes').select('*').eq('account_id', id).eq('tenant_id', tenantId).order('created_at', { ascending: false }),
       ]);
@@ -77,6 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(200).json({
         account: acc.data,
         contacts: contacts.data ?? [],
+        properties: properties.data ?? [],
         interactions: interactions.data ?? [],
         research_notes: research_notes.data ?? [],
       });
@@ -177,6 +202,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'account_id and name are required' });
       return;
     }
+    const tier = normalizeContactTier(body.tier, body.is_primary);
     const row = {
       tenant_id: tenantId,
       account_id,
@@ -184,7 +210,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       role: body.role != null ? String(body.role) : null,
       phone: body.phone != null ? String(body.phone).trim() || null : null,
       email: body.email != null ? String(body.email).trim() || null : null,
-      is_primary: Boolean(body.is_primary),
+      is_primary: tier === 'primary',
+      tier,
+      sort_order: Number.isFinite(Number(body.sort_order)) ? Number(body.sort_order) : 0,
       notes: body.notes != null ? String(body.notes) : null,
       updated_at: NOW_ISO(),
     };
@@ -207,8 +235,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         patch[k] = v === null ? null : String(v);
       }
     }
-    if (Object.prototype.hasOwnProperty.call(body, 'is_primary')) {
+    if (Object.prototype.hasOwnProperty.call(body, 'tier')) {
+      const tier = normalizeContactTier(body.tier, body.is_primary);
+      patch.tier = tier;
+      patch.is_primary = tier === 'primary';
+    } else if (Object.prototype.hasOwnProperty.call(body, 'is_primary')) {
       patch.is_primary = Boolean(body.is_primary);
+      if (Boolean(body.is_primary)) patch.tier = 'primary';
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'sort_order')) {
+      const n = Number(body.sort_order);
+      patch.sort_order = Number.isFinite(n) ? n : 0;
     }
     const { data, error } = await db
       .from('crm_contacts')

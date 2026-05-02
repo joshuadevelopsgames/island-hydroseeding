@@ -24,6 +24,10 @@ export const CLOUD_SYNC_KEYS = [
 const SYNC_KEY_SET = new Set<string>(CLOUD_SYNC_KEYS);
 const META_SERVER_AT = 'cloudSync_lastServerAt';
 const PENDING_PUSH_KEY = 'workspace_sync_pending_v1';
+/** sessionStorage: stop infinite merge→reload if timestamps never “match” string-wise */
+const MERGE_RELOAD_BREAKER_KEY = 'ih_ws_merge_reload_breaker';
+const MERGE_RELOAD_WINDOW_MS = 20_000;
+const MERGE_RELOAD_MAX = 3;
 
 const API = '/api/workspace';
 
@@ -93,6 +97,54 @@ function clearWorkspacePushPending() {
 
 function canReachNetwork(): boolean {
   return typeof navigator !== 'undefined' && navigator.onLine;
+}
+
+/** Supabase / JSON may differ in ISO formatting; avoid perpetual merge: true. */
+function workspaceTimestampsMatch(stored: string | null, server: string | null): boolean {
+  if (stored == null || server == null) return false;
+  if (stored === server) return true;
+  const a = Date.parse(stored);
+  const b = Date.parse(server);
+  if (Number.isFinite(a) && Number.isFinite(b)) return a === b;
+  return false;
+}
+
+function mergeReloadCircuitOpen(): boolean {
+  if (typeof sessionStorage === 'undefined') return false;
+  try {
+    const raw = sessionStorage.getItem(MERGE_RELOAD_BREAKER_KEY);
+    const now = Date.now();
+    if (!raw) return false;
+    const [t0, count] = raw.split(':').map(Number);
+    if (!Number.isFinite(t0) || now - t0 > MERGE_RELOAD_WINDOW_MS) {
+      sessionStorage.removeItem(MERGE_RELOAD_BREAKER_KEY);
+      return false;
+    }
+    return count >= MERGE_RELOAD_MAX;
+  } catch {
+    return false;
+  }
+}
+
+function recordMergeReloadAttempt(): void {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    const now = Date.now();
+    const raw = sessionStorage.getItem(MERGE_RELOAD_BREAKER_KEY);
+    let t0 = now;
+    let count = 0;
+    if (raw) {
+      const parts = raw.split(':').map(Number);
+      if (Number.isFinite(parts[0]) && now - parts[0] <= MERGE_RELOAD_WINDOW_MS) {
+        t0 = parts[0];
+        count = parts[1] ?? 0;
+      }
+    }
+    count += 1;
+    sessionStorage.setItem(MERGE_RELOAD_BREAKER_KEY, `${t0}:${count}`);
+  } catch {
+    /* ignore */
+  }
 }
 
 function schedulePush() {
@@ -168,7 +220,7 @@ async function pullFromServerImpl(): Promise<{ merge: boolean; updated_at: strin
 
     // Re-read after network: another serialized pull may have updated META while we awaited.
     const localAt = localStorage.getItem(META_SERVER_AT);
-    if (localAt === updated_at) return { merge: false, updated_at };
+    if (workspaceTimestampsMatch(localAt, updated_at)) return { merge: false, updated_at };
 
     const serverKeys = data.payload && typeof data.payload === 'object' ? Object.keys(data.payload) : [];
     const hasPayload = serverKeys.some((k) => SYNC_KEY_SET.has(k));
@@ -199,13 +251,25 @@ function pullFromServer(): Promise<{ merge: boolean; updated_at: string | null }
 
 let mergeReloadCoalesced = false;
 
-/** One full reload after merging server workspace into localStorage (coalesces parallel triggers). */
-export function reloadAfterWorkspaceMerge() {
-  if (mergeReloadCoalesced) return;
+/**
+ * Full reload after merging server workspace into localStorage (coalesces parallel triggers).
+ * Returns false if a reload loop circuit breaker trips — caller should continue as “ready”.
+ */
+export function reloadAfterWorkspaceMerge(): boolean {
+  if (mergeReloadCoalesced) return false;
+  if (mergeReloadCircuitOpen()) {
+    console.warn(
+      '[cloudSync] Skipping workspace merge reload (loop breaker). Data is already in localStorage; refresh manually if the UI looks stale.'
+    );
+    mergeReloadCoalesced = true;
+    return false;
+  }
   mergeReloadCoalesced = true;
+  recordMergeReloadAttempt();
   queueMicrotask(() => {
     window.location.reload();
   });
+  return true;
 }
 
 let bootstrapOnce: Promise<'reload' | 'ready'> | null = null;
@@ -217,10 +281,8 @@ export function runAppBootstrap(): Promise<'reload' | 'ready'> {
       installVisibilitySync();
       window.addEventListener('online', () => {
         void pullFromServer().then(({ merge }) => {
-          if (merge) {
-            reloadAfterWorkspaceMerge();
-            return;
-          }
+          // applyServerPayload already ran; avoid reload — online often flaps and caused reload storms.
+          if (merge) return;
           void pushToServer();
         });
       });
@@ -230,7 +292,7 @@ export function runAppBootstrap(): Promise<'reload' | 'ready'> {
       } = await supabase.auth.getSession();
       if (session) {
         const { merge } = await pullFromServer();
-        if (merge) return 'reload';
+        if (merge && reloadAfterWorkspaceMerge()) return 'reload';
         void pushToServer();
       }
       return 'ready';
@@ -257,7 +319,8 @@ export async function syncWorkspaceOnAuth(): Promise<void> {
   if (!session) return;
   const { merge } = await pullFromServer();
   if (merge) {
-    reloadAfterWorkspaceMerge();
+    if (reloadAfterWorkspaceMerge()) return;
+    await pushToServer();
     return;
   }
   await pushToServer();
@@ -271,15 +334,20 @@ function installVisibilitySync() {
   if (visHookInstalled || typeof document === 'undefined') return;
   visHookInstalled = true;
 
+  let visDebounce: ReturnType<typeof setTimeout> | null = null;
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
-    // App just came back to the foreground — pull latest data
-    void pullFromServer().then(({ merge }) => {
-      if (merge) {
-        // Most stores read localStorage once on mount, so a reload is the
-        // simplest way to guarantee every component picks up fresh data.
-        reloadAfterWorkspaceMerge();
-      }
-    });
+    if (visDebounce) clearTimeout(visDebounce);
+    // Debounce: Safari / PWAs can fire visibility repeatedly; pull still applies server data to localStorage.
+    visDebounce = setTimeout(() => {
+      visDebounce = null;
+      void pullFromServer().then(({ merge }) => {
+        if (merge) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('workspace-merged-no-reload'));
+          }
+        }
+      });
+    }, 600);
   });
 }
