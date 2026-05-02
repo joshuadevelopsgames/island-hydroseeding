@@ -242,23 +242,15 @@ export default function Jobs() {
         </button>
       </div>
 
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="mb-0.5 flex items-center gap-2 text-lg font-semibold">
-            <Briefcase size={20} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
-            {listTab === 'archived' ? 'Archived jobs' : 'All jobs'}
-          </h2>
-          <p className="mb-0 text-sm text-[var(--text-secondary)]">
-            {isLoading
-              ? 'Loading…'
-              : listTab === 'archived'
-                ? `${filtered.length} shown · ${archivedJobs.length} archived`
-                : `${filtered.length} shown · ${activeListJobs.length} active`}
-          </p>
-        </div>
-      </div>
+      <p className="mb-2 text-left text-sm text-[var(--text-secondary)]">
+        {isLoading
+          ? 'Loading…'
+          : listTab === 'archived'
+            ? `${filtered.length} shown · ${archivedJobs.length} archived`
+            : `${filtered.length} shown · ${activeListJobs.length} active`}
+      </p>
 
-      <Card className="mb-4 min-w-0 p-4">
+      <Card className="mb-2 min-w-0 p-4">
         <div className="flex w-full min-w-0 flex-row flex-wrap items-center gap-3">
           <div className="relative min-w-0 flex-1 max-w-md">
             <Search

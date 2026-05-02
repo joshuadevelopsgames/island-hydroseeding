@@ -468,8 +468,6 @@ const INVOICES_QUERY = `
           nodes {
             id
             amount
-            createdAt
-            updatedAt
           }
         }
       }
@@ -908,11 +906,9 @@ async function migrateInvoices(token, accountIdMap, propertyIdMap, jobIdMap) {
     });
 
     (inv.paymentRecords?.nodes ?? []).forEach(p => {
+      // PaymentRecord has no createdAt/updatedAt in current Jobber schema — use invoice issue date.
       const payDate =
-        p.createdAt?.slice(0, 10) ??
-        p.updatedAt?.slice(0, 10) ??
-        inv.issuedDate?.slice(0, 10) ??
-        new Date().toISOString().slice(0, 10);
+        inv.issuedDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
       paymentRows.push({
         tenant_id:        TENANT_ID,
         invoice_id:       invoiceId,

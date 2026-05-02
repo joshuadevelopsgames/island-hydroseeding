@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Loader2, Trash2, MoreVertical, Send, Pencil, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Loader2, Trash2, MoreVertical, Send, Pencil, ChevronDown, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -25,6 +25,15 @@ import { QUOTE_STATUS_OPTIONS, type Quote, type QuoteBundle, type QuoteLineItem,
 import { apiFetch } from '@/lib/apiClient';
 import { resolveClientBranding, type TenantBrandingApi } from '@/lib/tenantBranding';
 import { TenantBrandPreview } from '@/components/TenantBrandPreview';
+import QuoteDesignPreview from '@/components/quotes/QuoteDesignPreview';
+import QuoteDesignPicker, { DESIGN_META } from '@/components/quotes/QuoteDesignPicker';
+import { ctxFromBundle, ctxFromDraft } from '@/components/quotes/buildDesignContext';
+import {
+  QUOTE_DESIGNS,
+  type QuoteDesign,
+  type QuoteSectionVisibility,
+  type QuoteCustomText,
+} from '@/lib/quotesTypes';
 
 const CAD = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' });
 const TAX_RATE = 0.05;

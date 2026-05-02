@@ -156,5 +156,11 @@ export function useTemplateMutations() {
     onSuccess: invalidate,
   });
 
-  return { createTemplate, updateTemplate, deleteTemplate };
+  const setDefaultTemplate = useMutation({
+    mutationFn: (id: string) =>
+      productsPost<{ template: QuoteTemplate }>({ action: 'template.set_default', id }),
+    onSuccess: invalidate,
+  });
+
+  return { createTemplate, updateTemplate, deleteTemplate, setDefaultTemplate };
 }
