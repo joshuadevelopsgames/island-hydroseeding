@@ -56,19 +56,38 @@ function accountsToCsv(accounts: { name: string; company: string | null; account
   return lines.join('\n');
 }
 
+/** Status column: pill + dot (reference: mint Active, sky Lead) */
 function statusBadge(status: string) {
-  const s = status as CrmAccountStatus;
-  const map: Partial<Record<CrmAccountStatus, 'default' | 'secondary' | 'outline'>> = {
-    'New Lead': 'outline',
-    Contacted: 'secondary',
-    'Estimate Sent': 'secondary',
-    'Won / Closed': 'default',
-    Lost: 'outline',
-  };
+  const s = status as CrmAccountStatus | 'Active';
+  const pill = cn(
+    'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium',
+    s === 'Active' &&
+      'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-100',
+    s === 'New Lead' &&
+      'bg-sky-50 text-blue-950 dark:bg-sky-950/45 dark:text-sky-100',
+    s === 'Contacted' &&
+      'bg-amber-50 text-amber-900 dark:bg-amber-950/45 dark:text-amber-100',
+    s === 'Estimate Sent' &&
+      'bg-violet-50 text-violet-900 dark:bg-violet-950/45 dark:text-violet-100',
+    s === 'Won / Closed' &&
+      'bg-emerald-100 text-emerald-950 dark:bg-emerald-950/55 dark:text-emerald-100',
+    s === 'Lost' &&
+      'bg-slate-100 text-slate-700 dark:bg-slate-800/80 dark:text-slate-200',
+    ![
+      'Active',
+      'New Lead',
+      'Contacted',
+      'Estimate Sent',
+      'Won / Closed',
+      'Lost',
+    ].includes(status) &&
+      'border border-[var(--border-color)] bg-[var(--surface-raised)] text-[var(--text-secondary)]',
+  );
   return (
-    <Badge variant={map[s] ?? 'secondary'} className="whitespace-nowrap">
+    <span className={pill}>
+      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current opacity-90" />
       {status}
-    </Badge>
+    </span>
   );
 }
 
