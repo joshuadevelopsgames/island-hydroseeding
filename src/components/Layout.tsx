@@ -56,6 +56,7 @@ const primaryNavItems: { name: string; path: string; icon: typeof LayoutDashboar
   { name: 'Invoices', path: '/invoices', icon: Receipt },
   { name: 'Payments', path: '/payments', icon: CreditCard },
   { name: 'Reports', path: '/reports', icon: BarChart3 },
+  { name: 'Insights', path: '/insights', icon: BarChart3 },
   { name: 'Schedule', path: '/schedule', icon: Calendar },
   { name: 'Time Tracking', path: '/time', icon: Clock },
   { name: 'Pre-trips', path: '/pre-trips', icon: ClipboardCheck },

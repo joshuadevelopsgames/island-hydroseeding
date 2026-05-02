@@ -32,6 +32,7 @@ import Time from './pages/Time';
 import Team from './pages/Team';
 import Account from './pages/Account';
 import Reports from './pages/Reports';
+import Insights from './pages/Insights';
 
 function App() {
   return (
@@ -237,6 +238,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Reports />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/insights"
+            element={
+              <ProtectedRoute>
+                <Insights />
               </ProtectedRoute>
             }
           />
