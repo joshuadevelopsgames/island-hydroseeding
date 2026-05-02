@@ -13,6 +13,9 @@ export type TenantBrandingApi = {
 
 const COMPANY_NAME = 'Island Hydroseeding Ltd.';
 
+/** Public app asset; used when no tenant-specific logo is set (quotes, invoices, /pay). */
+export const DEFAULT_BRAND_LOGO_URL = '/island-hydroseeding-logo.png';
+
 const envStr = (k: string) =>
   ((import.meta.env as Record<string, string | undefined>)[k] ?? '').trim();
 
@@ -34,7 +37,10 @@ export function resolveClientBranding(b: TenantBrandingApi | null | undefined): 
     companyName: b?.display_name?.trim() || COMPANY_NAME,
     tagline:
       b?.public_tagline?.trim() || 'Professional Hydroseeding & Site Restoration',
-    logoUrl: (b?.public_brand_logo_url?.trim() || INVOICE_LOGO_URL_FALLBACK || null) as string | null,
+    logoUrl: (b?.public_brand_logo_url?.trim() ||
+      INVOICE_LOGO_URL_FALLBACK ||
+      DEFAULT_BRAND_LOGO_URL ||
+      null) as string | null,
     gst: b?.public_gst_registration?.trim() || GST_REGISTRATION_FALLBACK || '',
     etransfer: b?.public_etransfer_email?.trim() || ETRANSFER_EMAIL_FALLBACK || '',
     footerNote: b?.public_footer_note?.trim() || null,

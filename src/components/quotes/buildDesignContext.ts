@@ -8,6 +8,7 @@ import type {
   CrmProperty,
 } from '@/lib/quotesTypes';
 import type { TenantBrandingApi, ResolvedClientBranding } from '@/lib/tenantBranding';
+import { DEFAULT_BRAND_LOGO_URL } from '@/lib/tenantBranding';
 import type { DesignContext, TenantBrand } from './designs/types';
 import { fmtDate, toDesignItems } from './designs/types';
 
@@ -135,7 +136,8 @@ function tenantBrandFromApi(
   return {
     name: branding?.companyName || api?.display_name || 'Your Company',
     tagline: branding?.tagline || api?.public_tagline || null,
-    logoUrl: branding?.logoUrl ?? api?.public_brand_logo_url ?? null,
+    logoUrl:
+      branding?.logoUrl?.trim() || api?.public_brand_logo_url?.trim() || DEFAULT_BRAND_LOGO_URL,
     phone: envStr('VITE_TENANT_PHONE'),
     email: envStr('VITE_TENANT_EMAIL') ?? branding?.etransfer ?? null,
     website: envStr('VITE_TENANT_WEBSITE'),

@@ -27,6 +27,7 @@ import {
 import './invoicePayPrint.css';
 import {
   resolveClientBranding,
+  DEFAULT_BRAND_LOGO_URL,
   INVOICE_LOGO_URL_FALLBACK,
   type TenantBrandingApi,
 } from '@/lib/tenantBranding';
@@ -140,7 +141,7 @@ function taxAmountFor(invoice: PublicInvoice): number {
 // ── brand mark (optional custom logo URL) ─────────────────────────────────────
 
 function BrandMark({ logoUrl, className }: { logoUrl?: string | null; className?: string }) {
-  const src = logoUrl?.trim() || INVOICE_LOGO_URL_FALLBACK;
+  const src = logoUrl?.trim() || INVOICE_LOGO_URL_FALLBACK || DEFAULT_BRAND_LOGO_URL;
   if (src) {
     return (
       <img

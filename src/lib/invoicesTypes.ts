@@ -23,6 +23,8 @@ export type Invoice = {
   payment_terms: string | null;
   pay_token: string | null;
   stripe_payment_intent_id: string | null;
+  /** Set when the invoice first reaches a zero balance; cleared on reopen. */
+  paid_at: string | null;
   /** Visual design — one of editorial | technical | field | statement (mirrors quotes). */
   template_design: QuoteDesign;
   section_visibility: QuoteSectionVisibility;

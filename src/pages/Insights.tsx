@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { BarChart3, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { downloadXlsxWorkbook, type SheetSpec } from '@/lib/xlsxExport';
+import { apiFetch } from '@/lib/apiClient';
 import { useQuotes } from '@/hooks/useQuotes';
 import { useInvoices } from '@/hooks/useInvoices';
 import { useJobs } from '@/hooks/useJobs';
@@ -91,6 +93,18 @@ export default function Insights() {
   const { data: accounts = [] } = useCrmAccounts();
 
   const { from, to } = useMemo(() => rangeBounds(range), [range]);
+
+  // Server-aggregated payment-method breakdown (uses range params).
+  const { data: paymentMethods } = useQuery({
+    queryKey: ['insights-payment-methods', from.toISOString().slice(0, 10), to.toISOString().slice(0, 10)],
+    queryFn: async (): Promise<{ rows: { method: string; count: number; total: number }[] }> => {
+      const r = await apiFetch(
+        `/api/invoices?action=payment_method_summary&from=${encodeURIComponent(from.toISOString().slice(0, 10))}&to=${encodeURIComponent(to.toISOString().slice(0, 10))}`,
+      );
+      if (!r.ok) return { rows: [] };
+      return r.json();
+    },
+  });
   const prior = useMemo(() => priorRange(range), [range]);
 
   const accountName = useMemo(() => {
@@ -194,11 +208,20 @@ export default function Insights() {
     const unpaid = invoices.filter((i) => i.status !== 'Paid' && Number(i.balance_due) > 0);
     const outstanding = unpaid.reduce((s, i) => s + Number(i.balance_due), 0);
 
-    const closedInRange = invoices.filter((i) => i.status === 'Paid' && inRange(i.updated_at, from, to));
+    // Use paid_at when present (precise — set by syncInvoiceFinancials on the
+    // Paid transition). Fall back to updated_at for invoices created before
+    // migration 023 was backfilled.
+    const closedInRange = invoices.filter(
+      (i) => i.status === 'Paid' && inRange(i.paid_at ?? i.updated_at, from, to)
+    );
     const avgDaysToPaid =
       closedInRange.length === 0
         ? null
-        : closedInRange.reduce((s, i) => s + (new Date(i.updated_at).getTime() - new Date(i.issue_date).getTime()) / 86400000, 0) / closedInRange.length;
+        : closedInRange.reduce((s, i) => {
+            const cleared = new Date(i.paid_at ?? i.updated_at).getTime();
+            const issued = new Date(i.issue_date).getTime();
+            return s + (cleared - issued) / 86400000;
+          }, 0) / closedInRange.length;
 
     const invoicedQuoteIds = new Set(invoices.map((i) => i.quote_id).filter(Boolean));
     const projected = quotes
@@ -267,12 +290,14 @@ export default function Insights() {
     };
   }, [invoices, quotes, jobs, from, to, accountName]);
 
-  // ─── Lead conversion ──────────────────────────────────────
+  // ─── Lead conversion (with stacked-by-source breakdown) ──
   const leadConv = useMemo(() => {
-    // Quotes whose origin request can be matched via converted_quote_id
     const quoteIdToCreated = new Map<string, string>();
     for (const q of quotes) quoteIdToCreated.set(q.id, q.created_at);
+    const quoteIdToAccount = new Map<string, string | null>();
+    for (const q of quotes) quoteIdToAccount.set(q.id, q.account_id ?? null);
 
+    // Avg-days metrics
     const requestStarts: string[] = [];
     const requestToQuote: string[] = [];
     for (const r of requests) {
@@ -284,7 +309,6 @@ export default function Insights() {
     }
     const reqToQuoteDays = avgDaysBetween(requestStarts, requestToQuote);
 
-    // Quote sent → approved
     const sent: string[] = [];
     const approved: string[] = [];
     for (const q of quotes) {
@@ -295,13 +319,69 @@ export default function Insights() {
     }
     const quoteToApprovedDays = avgDaysBetween(sent, approved);
 
-    // Funnel counts in range
-    const reqIn = requests.filter((r) => inRange(r.created_at, from, to)).length;
-    const sentIn = quotes.filter((q) => q.sent_at && inRange(q.sent_at, from, to)).length;
-    type J = { created_at?: string };
-    const jobsIn = (jobs as J[]).filter((j) => inRange(j.created_at, from, to)).length;
+    // Per-source funnel counts. Source is taken from the request; for a quote
+    // or job created without an originating request, we bucket as 'direct'.
+    const SOURCES = ['website', 'phone', 'email', 'referral', 'other', 'direct'] as const;
+    type SourceKey = (typeof SOURCES)[number];
+    const norm = (s: string | null | undefined): SourceKey => {
+      const v = String(s ?? '').toLowerCase().trim();
+      if (v === 'website' || v === 'phone' || v === 'email' || v === 'referral') return v;
+      if (v === '' || v === 'direct') return 'direct';
+      return 'other';
+    };
 
-    return { reqToQuoteDays, quoteToApprovedDays, funnel: { requests: reqIn, quotes: sentIn, jobs: jobsIn } };
+    const requestSourceById = new Map<string, SourceKey>();
+    const requestQuoteIds = new Set<string>();
+    let requestsInRange = 0;
+    const reqBySrc: Record<SourceKey, number> = { website: 0, phone: 0, email: 0, referral: 0, other: 0, direct: 0 };
+    for (const r of requests) {
+      requestSourceById.set(r.id, norm(r.source));
+      if (r.converted_quote_id) requestQuoteIds.add(r.converted_quote_id);
+      if (inRange(r.created_at, from, to)) {
+        requestsInRange += 1;
+        reqBySrc[norm(r.source)] += 1;
+      }
+    }
+
+    // Map quote → source via the request that produced it (when there is one)
+    const quoteSrcById = new Map<string, SourceKey>();
+    for (const r of requests) {
+      if (r.converted_quote_id) quoteSrcById.set(r.converted_quote_id, norm(r.source));
+    }
+    let quotesSentInRange = 0;
+    const quoteBySrc: Record<SourceKey, number> = { website: 0, phone: 0, email: 0, referral: 0, other: 0, direct: 0 };
+    for (const q of quotes) {
+      if (!q.sent_at || !inRange(q.sent_at, from, to)) continue;
+      quotesSentInRange += 1;
+      const src = quoteSrcById.get(q.id) ?? 'direct';
+      quoteBySrc[src] += 1;
+    }
+
+    type J = { id?: string; created_at?: string; quote_id?: string | null };
+    let jobsInRange = 0;
+    const jobBySrc: Record<SourceKey, number> = { website: 0, phone: 0, email: 0, referral: 0, other: 0, direct: 0 };
+    for (const j of jobs as J[]) {
+      if (!inRange(j.created_at, from, to)) continue;
+      jobsInRange += 1;
+      const src = j.quote_id ? quoteSrcById.get(j.quote_id) ?? 'direct' : 'direct';
+      jobBySrc[src] += 1;
+    }
+
+    // Per-source conversion rate: jobs / requests in range. When request count
+    // is too small to be meaningful (< 3) we suppress the rate.
+    const conversionBySrc: { source: SourceKey; requests: number; jobs: number; rate: number | null }[] = SOURCES.map((s) => ({
+      source: s,
+      requests: reqBySrc[s],
+      jobs: jobBySrc[s],
+      rate: reqBySrc[s] >= 3 ? (jobBySrc[s] / reqBySrc[s]) * 100 : null,
+    }));
+
+    return {
+      reqToQuoteDays,
+      quoteToApprovedDays,
+      funnel: { requests: requestsInRange, quotes: quotesSentInRange, jobs: jobsInRange },
+      bySource: { requests: reqBySrc, quotes: quoteBySrc, jobs: jobBySrc, conversion: conversionBySrc, sources: SOURCES, requestSourceById },
+    };
   }, [requests, quotes, jobs, from, to]);
 
   // ─── Quotes funnel + value-over-time ──────────────────────
@@ -497,7 +577,7 @@ export default function Insights() {
         <YoYBars current={revenueYoY.current} prev={revenueYoY.prev} />
       </Section>
 
-      <Section title="Lead conversion" subtitle="From request to job">
+      <Section title="Lead conversion" subtitle="From request to job — stacked by source">
         <div className="ins-lead-grid">
           <div className="ins-lead-times">
             <KpiTile
@@ -511,38 +591,72 @@ export default function Insights() {
               sub="Sent to approved"
             />
           </div>
-          <div className="ins-funnel-card">
-            <div className="ins-funnel-step">
-              <div className="ins-funnel-num">{leadConv.funnel.requests}</div>
-              <div className="ins-funnel-lbl">Requests</div>
-            </div>
-            <div className="ins-funnel-arrow">→</div>
-            <div className="ins-funnel-step">
-              <div className="ins-funnel-num">{leadConv.funnel.quotes}</div>
-              <div className="ins-funnel-lbl">Quotes sent</div>
-            </div>
-            <div className="ins-funnel-arrow">→</div>
-            <div className="ins-funnel-step">
-              <div className="ins-funnel-num">{leadConv.funnel.jobs}</div>
-              <div className="ins-funnel-lbl">Jobs created</div>
-            </div>
+          <div className="ins-source-funnel">
+            <SourceFunnelStage
+              label="Requests"
+              total={leadConv.funnel.requests}
+              counts={leadConv.bySource.requests}
+              sources={leadConv.bySource.sources as readonly string[]}
+            />
+            <SourceFunnelStage
+              label="Quotes sent"
+              total={leadConv.funnel.quotes}
+              counts={leadConv.bySource.quotes}
+              sources={leadConv.bySource.sources as readonly string[]}
+            />
+            <SourceFunnelStage
+              label="Jobs created"
+              total={leadConv.funnel.jobs}
+              counts={leadConv.bySource.jobs}
+              sources={leadConv.bySource.sources as readonly string[]}
+              showLegend
+            />
           </div>
+        </div>
+
+        {/* Per-source conversion: jobs / requests for each source. Suppressed
+            for sources with too few requests to be meaningful. */}
+        <div className="ins-source-conv">
+          <div className="ins-source-conv-head">
+            <span>Source</span>
+            <span>Requests</span>
+            <span>Jobs</span>
+            <span>Conversion</span>
+          </div>
+          {leadConv.bySource.conversion
+            .filter((row) => row.requests > 0 || row.jobs > 0)
+            .map((row) => (
+              <div key={row.source} className="ins-source-conv-row">
+                <span>
+                  <span className={`ins-source-dot ins-source-dot--${row.source}`} />{' '}
+                  {row.source.charAt(0).toUpperCase() + row.source.slice(1)}
+                </span>
+                <span>{row.requests}</span>
+                <span>{row.jobs}</span>
+                <span className="ins-source-conv-rate">
+                  {row.rate == null ? <em style={{ color: 'var(--text-muted)' }}>n&lt;3</em> : `${row.rate.toFixed(0)}%`}
+                </span>
+              </div>
+            ))}
         </div>
       </Section>
 
       <Section title="Cashflow" subtitle="Outstanding, projected, and how fast you're paid">
-        <div className="ins-kpi-grid ins-kpi-grid--3">
-          <KpiTile
-            label="Outstanding"
-            value={CAD.format(cashflow.outstanding)}
-            sub={cashflow.unpaidCount === 1 ? '1 unpaid invoice' : `${cashflow.unpaidCount} unpaid invoices`}
-          />
-          <KpiTile
-            label="Avg time to paid"
-            value={cashflow.avgDaysToPaid == null ? '—' : `${cashflow.avgDaysToPaid.toFixed(1)} days`}
-            sub="Issued → cleared"
-          />
-          <KpiTile label="Projected income" value={CAD.format(cashflow.projected)} sub="Accepted quotes not yet invoiced" />
+        <div className="ins-cashflow-grid">
+          <div className="ins-kpi-grid ins-kpi-grid--3 ins-cashflow-tiles">
+            <KpiTile
+              label="Outstanding"
+              value={CAD.format(cashflow.outstanding)}
+              sub={cashflow.unpaidCount === 1 ? '1 unpaid invoice' : `${cashflow.unpaidCount} unpaid invoices`}
+            />
+            <KpiTile
+              label="Avg time to paid"
+              value={cashflow.avgDaysToPaid == null ? '—' : `${cashflow.avgDaysToPaid.toFixed(1)} days`}
+              sub="Issued → cleared"
+            />
+            <KpiTile label="Projected income" value={CAD.format(cashflow.projected)} sub="Accepted quotes not yet invoiced" />
+          </div>
+          <PaymentMethodsDonut rows={paymentMethods?.rows ?? []} />
         </div>
 
         {/* Projected income split by horizon (uses linked job's start_date) */}
@@ -680,6 +794,130 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
       </div>
       {children}
     </section>
+  );
+}
+
+/**
+ * One stage of the lead-conversion funnel — a horizontal stacked bar segmented
+ * by source, with the total count above. The bar widths are the per-source
+ * proportions so adjacent stages naturally narrow as leads drop off.
+ */
+function SourceFunnelStage({
+  label,
+  total,
+  counts,
+  sources,
+  showLegend,
+}: {
+  label: string;
+  total: number;
+  counts: Record<string, number>;
+  sources: readonly string[];
+  showLegend?: boolean;
+}) {
+  const safeTotal = Math.max(1, total);
+  return (
+    <div className="ins-funnel-stage">
+      <div className="ins-funnel-stage-head">
+        <span className="ins-funnel-num">{total}</span>
+        <span className="ins-funnel-lbl">{label}</span>
+      </div>
+      <div className="ins-source-bar" role="img" aria-label={`${label} broken down by source`}>
+        {sources.map((s) => {
+          const c = counts[s] ?? 0;
+          if (c === 0) return null;
+          const widthPct = (c / safeTotal) * 100;
+          return (
+            <span
+              key={s}
+              className={`ins-source-bar-seg ins-source-dot--${s}`}
+              style={{ width: `${widthPct}%` }}
+              title={`${s}: ${c}`}
+            />
+          );
+        })}
+        {total === 0 && <span className="ins-source-bar-empty">—</span>}
+      </div>
+      {showLegend && (
+        <div className="ins-source-legend">
+          {sources.map((s) => (
+            <span key={s} className="ins-source-legend-item">
+              <span className={`ins-source-dot ins-source-dot--${s}`} />
+              {s.charAt(0).toUpperCase() + s.slice(1)}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Donut showing how the user gets paid — e-Transfer / Stripe / cheque etc.
+ * Pulled from /api/invoices?action=payment_method_summary, so it includes
+ * payments inside the selected range only.
+ */
+function PaymentMethodsDonut({
+  rows,
+}: {
+  rows: { method: string; count: number; total: number }[];
+}) {
+  const total = rows.reduce((s, r) => s + r.total, 0);
+  if (total === 0) {
+    return (
+      <div className="ins-conv-card">
+        <div className="ins-conv-lbl">Payment methods</div>
+        <div style={{ marginTop: '12px', color: 'var(--text-muted)', fontSize: '13px' }}>
+          No payments in this period.
+        </div>
+      </div>
+    );
+  }
+  // Render the donut as a series of arc segments using stroke-dasharray.
+  const r = 36;
+  const c = 2 * Math.PI * r;
+  let consumed = 0;
+  const COLORS = ['var(--primary-green, #2a7a3a)', '#d97706', '#1d4ed8', '#9333ea', '#0891b2', '#475569'];
+
+  return (
+    <div className="ins-conv-card">
+      <div className="ins-conv-lbl">Payment methods</div>
+      <svg viewBox="0 0 100 100" width="92" height="92" className="ins-donut">
+        <circle cx="50" cy="50" r={r} fill="none" stroke="var(--border-color)" strokeWidth="10" />
+        {rows.map((row, i) => {
+          const portion = row.total / total;
+          const dash = portion * c;
+          const offset = c / 4 - consumed;
+          consumed += dash;
+          return (
+            <circle
+              key={row.method}
+              cx="50"
+              cy="50"
+              r={r}
+              fill="none"
+              stroke={COLORS[i % COLORS.length]}
+              strokeWidth="10"
+              strokeDasharray={`${dash} ${c - dash}`}
+              strokeDashoffset={offset}
+              transform="rotate(-90 50 50)"
+            />
+          );
+        })}
+      </svg>
+      <div className="ins-method-legend">
+        {rows.map((row, i) => (
+          <div key={row.method} className="ins-method-row">
+            <span className="ins-method-swatch" style={{ background: COLORS[i % COLORS.length] }} />
+            <span className="ins-method-name">{row.method}</span>
+            <span className="ins-method-total">
+              ${row.total.toLocaleString('en-CA', { maximumFractionDigits: 0 })}
+            </span>
+            <span className="ins-method-pct">{((row.total / total) * 100).toFixed(0)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
