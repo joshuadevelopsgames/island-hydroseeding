@@ -120,19 +120,30 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const allNavItems = [...primaryNavItems, ...secondaryNavItems];
   const hiddenSet = new Set(sidebarPrefs.hidden);
 
+  type NavItem = (typeof primaryNavItems)[number];
+
   // Build a section from user prefs (or defaults), filtered by permissions + hidden.
+  // When the user has a saved order, append any *new* default routes they are missing
+  // (so items like /reports appear after app updates without resetting sidebar prefs).
   // excludePaths prevents the same item appearing in both primary and More.
   const buildSection = (
-    defaults: typeof primaryNavItems,
+    defaults: NavItem[],
     customPaths: string[],
     excludePaths: Set<string> = new Set()
-  ) => {
-    const base =
-      customPaths.length > 0
-        ? (customPaths
-            .map((p) => allNavItems.find((i) => i.path === p))
-            .filter(Boolean) as typeof primaryNavItems)
-        : defaults;
+  ): NavItem[] => {
+    let base: NavItem[];
+    if (customPaths.length === 0) {
+      base = defaults;
+    } else {
+      const fromCustom = customPaths
+        .map((p) => allNavItems.find((i) => i.path === p))
+        .filter(Boolean) as NavItem[];
+      const seen = new Set(fromCustom.map((i) => i.path));
+      base = [...fromCustom];
+      for (const d of defaults) {
+        if (!seen.has(d.path)) base.push(d);
+      }
+    }
     return base.filter(
       (item) =>
         currentUser &&
