@@ -208,7 +208,7 @@ export default function CrmAccountDetail() {
         <Link to="/crm" className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-[var(--primary-green)]">
           <ArrowLeft className="h-4 w-4" /> Accounts
         </Link>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 flex-1 gap-4">
             <div
               className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-green)] text-lg font-bold text-white"
@@ -226,11 +226,11 @@ export default function CrmAccountDetail() {
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            <label className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
-              <Calendar className="h-4 w-4 shrink-0" />
+          <div className="flex min-w-0 flex-wrap items-center gap-2 overflow-x-auto overscroll-x-contain py-1.5 [-webkit-overflow-scrolling:touch] [scrollbar-width:thin] lg:justify-end lg:overflow-visible lg:py-0.5">
+            <label className="inline-flex shrink-0 items-center gap-2 text-sm text-[var(--text-muted)]">
+              <Calendar className="h-4 w-4 shrink-0 self-center" aria-hidden />
               <select
-                className="h-9 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-2 text-sm"
+                className="box-border h-9 min-h-9 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-2 py-1.5 text-sm leading-normal"
                 value={metricsYear}
                 onChange={(e) => setMetricsYear(Number(e.target.value))}
               >

@@ -25,6 +25,8 @@ function parseBody(req: VercelRequest): Record<string, unknown> {
 
 const NOW_ISO = () => new Date().toISOString();
 
+const ALLOWED_DESIGNS = new Set(['editorial', 'technical', 'field', 'statement']);
+
 /** Drop duplicate catalog rows (same id or same display name); preserves first row in sort order. */
 function dedupeCatalogList<T extends { id: string; name: string }>(rows: T[]): T[] {
   const seenId = new Set<string>();
@@ -183,12 +185,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: 'name is required' });
       return;
     }
+    const designRaw = body.template_design != null ? String(body.template_design) : 'editorial';
+    const design = ALLOWED_DESIGNS.has(designRaw) ? designRaw : 'editorial';
     const row = {
       tenant_id: tenantId,
       name,
       introduction_text: body.introduction_text != null ? String(body.introduction_text) : null,
       contract_text: body.contract_text != null ? String(body.contract_text) : null,
       line_items_json: body.line_items_json != null ? body.line_items_json : null,
+      template_design: design,
+      section_visibility: body.section_visibility ?? {},
+      custom_text: body.custom_text ?? {},
       updated_at: NOW_ISO(),
     };
     const { data, error } = await db.from('quote_templates').insert(row).select('*').single();
@@ -204,11 +211,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     const patch: Record<string, unknown> = { updated_at: NOW_ISO() };
-    const keys = ['name', 'introduction_text', 'contract_text', 'line_items_json'] as const;
+    const keys = [
+      'name',
+      'introduction_text',
+      'contract_text',
+      'line_items_json',
+      'template_design',
+      'section_visibility',
+      'custom_text',
+    ] as const;
     for (const k of keys) {
       if (Object.prototype.hasOwnProperty.call(body, k)) {
         const v = body[k];
-        patch[k] = v;
+        if (k === 'template_design') {
+          const d = String(v ?? '');
+          if (!ALLOWED_DESIGNS.has(d)) {
+            res.status(400).json({ error: `Invalid template_design: ${d}` });
+            return;
+          }
+          patch[k] = d;
+        } else {
+          patch[k] = v;
+        }
       }
     }
     const { data, error } = await db
@@ -222,6 +246,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!data) {
       res.status(404).json({ error: 'Template not found' });
       return;
+    }
+    res.status(200).json({ template: data });
+    return;
+  }
+
+  if (action === 'template.set_default') {
+    const id = String(body.id ?? '');
+    if (!id) {
+      res.status(400).json({ error: 'id is required' });
+      return;
+    }
+    // Confirm template belongs to this tenant before flipping defaults.
+    const { data: target, error: fetchErr } = await db
+      .from('quote_templates')
+      .select('id, tenant_id')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (await errTable(fetchErr)) return;
+    if (!target) {
+      res.status(404).json({ error: 'Template not found' });
+      return;
+    }
+    const clearErr = (
+      await db
+        .from('quote_templates')
+        .update({ is_default: false, updated_at: NOW_ISO() })
+        .eq('tenant_id', tenantId)
+        .neq('id', id)
+    ).error;
+    if (await errTable(clearErr)) return;
+    const { data, error } = await db
+      .from('quote_templates')
+      .update({ is_default: true, updated_at: NOW_ISO() })
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .select('*')
+      .single();
+    if (await errTable(error)) return;
+    const tenantUpdErr = (
+      await db.from('tenants').update({ default_quote_template_id: id }).eq('id', tenantId)
+    ).error;
+    if (tenantUpdErr) {
+      // tenant pointer is a convenience; don't fail the whole request if it doesn't update.
+      console.warn('tenant default_quote_template_id update failed:', tenantUpdErr.message);
     }
     res.status(200).json({ template: data });
     return;

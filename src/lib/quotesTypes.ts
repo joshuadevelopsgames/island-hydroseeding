@@ -21,12 +21,44 @@ export type ProductService = {
   updated_at: string;
 };
 
+export const QUOTE_DESIGNS = ['editorial', 'technical', 'field', 'statement'] as const;
+export type QuoteDesign = typeof QUOTE_DESIGNS[number];
+
+export type QuoteSectionVisibility = {
+  header?: boolean;
+  parties?: boolean;
+  stats_banner?: boolean;
+  scope_table?: boolean;
+  terms?: boolean;
+  summary?: boolean;
+  deposit?: boolean;
+  accept_block?: boolean;
+  footer_quote?: boolean;
+  footer_meta?: boolean;
+  optional_addons?: boolean;
+};
+
+/** Overridable copy for the chosen design. All fields optional — renderer falls back to stock text. */
+export type QuoteCustomText = {
+  footer_quote?: string;
+  accept_heading?: string;
+  accept_body?: string;
+  issued_by_heading?: string;
+  issued_by_body?: string;
+  terms_paragraphs?: string[];
+  banner_stats?: { label: string; value: string; sub?: string }[];
+};
+
 export type QuoteTemplate = {
   id: string;
   name: string;
   introduction_text: string | null;
   contract_text: string | null;
   line_items_json: QuoteLineItemDraft[];
+  template_design: QuoteDesign;
+  is_default: boolean;
+  section_visibility: QuoteSectionVisibility;
+  custom_text: QuoteCustomText;
   created_at: string;
   updated_at: string;
 };
@@ -82,6 +114,10 @@ export type Quote = {
   metadata: Record<string, unknown>;
   approval_token: string | null;
   notes: string | null;
+  template_id: string | null;
+  template_design: QuoteDesign;
+  section_visibility: QuoteSectionVisibility;
+  custom_text: QuoteCustomText;
   created_at: string;
   updated_at: string;
   sent_at: string | null;

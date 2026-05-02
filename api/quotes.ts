@@ -303,6 +303,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       typeof body.metadata === 'object' && body.metadata !== null && !Array.isArray(body.metadata)
         ? (body.metadata as Record<string, unknown>)
         : {};
+    const ALLOWED_DESIGNS_LOCAL = new Set(['editorial', 'technical', 'field', 'statement']);
+    const designRaw = body.template_design != null ? String(body.template_design) : 'editorial';
+    const template_design = ALLOWED_DESIGNS_LOCAL.has(designRaw) ? designRaw : 'editorial';
     const row = {
       tenant_id: tenantId,
       account_id,
@@ -318,6 +321,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       require_payment_method_on_file: Boolean(body.require_payment_method_on_file ?? false),
       metadata: meta,
       approval_token,
+      template_id: body.template_id != null ? String(body.template_id) : null,
+      template_design,
+      section_visibility: body.section_visibility ?? {},
+      custom_text: body.custom_text ?? {},
       status: 'Draft',
       subtotal: 0,
       tax_amount: 0,
@@ -347,12 +354,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'deposit_required',
       'deposit_amount',
       'notes',
+      'template_id',
+      'section_visibility',
+      'custom_text',
     ] as const;
     for (const k of keys) {
       if (Object.prototype.hasOwnProperty.call(body, k)) {
         const v = body[k];
         patch[k] = v;
       }
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'template_design')) {
+      const ALLOWED_DESIGNS_LOCAL = new Set(['editorial', 'technical', 'field', 'statement']);
+      const d = String(body.template_design ?? '');
+      if (!ALLOWED_DESIGNS_LOCAL.has(d)) {
+        res.status(400).json({ error: `Invalid template_design: ${d}` });
+        return;
+      }
+      patch.template_design = d;
     }
     if (Object.prototype.hasOwnProperty.call(body, 'status')) {
       const { data: cur, error: curErr } = await db

@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Receipt, Loader2, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { useInvoices } from '@/hooks/useInvoices';
 import { formatInVancouver } from '@/lib/vancouverTime';
 import type { Invoice, InvoiceStatus } from '@/lib/invoicesTypes';
@@ -19,6 +21,9 @@ const STATUS_COLORS: Record<InvoiceStatus, 'default' | 'secondary' | 'outline'> 
 function getStatusBadgeVariant(status: string): 'default' | 'secondary' | 'outline' {
   return STATUS_COLORS[status as InvoiceStatus] ?? 'outline';
 }
+
+const INVOICE_FILTER_SELECT_CLASS =
+  'h-10 w-full min-w-0 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm text-[var(--text-primary)]';
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-CA', {
@@ -185,35 +190,38 @@ export default function Invoices() {
         />
       </div>
 
-      <div className="card min-w-0 overflow-hidden p-0">
-        <div className="flex flex-col gap-4 border-b border-[var(--border-color)] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h3 className="mb-1 flex items-center gap-2 text-[1.125rem] font-semibold">
-              <Receipt size={20} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
-              All Invoices
-            </h3>
-            <p className="mb-0 text-sm text-secondary">
-              {isLoading ? 'Loading…' : `${filtered.length} shown · ${invoices.length} total`}
-            </p>
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="mb-0.5 flex items-center gap-2 text-lg font-semibold">
+            <Receipt size={20} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
+            All Invoices
+          </h2>
+          <p className="mb-0 text-sm text-[var(--text-secondary)]">
+            {isLoading ? 'Loading…' : `${filtered.length} shown · ${invoices.length} total`}
+          </p>
+        </div>
+      </div>
+
+      <Card className="mb-4 min-w-0 p-4">
+        <div className="flex w-full min-w-0 flex-row flex-wrap items-center gap-3">
+          <div className="relative min-w-0 flex-1 max-w-md">
+            <Search
+              size={18}
+              aria-hidden
+              className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[var(--text-muted)]"
+            />
+            <Input
+              type="search"
+              className="w-full min-w-0 pl-10"
+              placeholder="Invoice #, title…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search invoices"
+            />
           </div>
-          <div className="flex w-full min-w-0 flex-row flex-wrap items-center gap-3 sm:w-auto sm:max-w-[min(100%,42rem)] sm:justify-end">
-            <div className="relative min-w-0 flex-1 max-w-md">
-              <Search
-                size={18}
-                aria-hidden
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
-              />
-              <input
-                type="search"
-                className="w-full pl-10 h-10"
-                placeholder="Invoice #, title…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                aria-label="Search invoices"
-              />
-            </div>
+          <div className="w-44 shrink-0 min-w-0 sm:w-48">
             <select
-              className="h-10 w-44 shrink-0 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm sm:w-48"
+              className={INVOICE_FILTER_SELECT_CLASS}
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               aria-label="Filter by status"
@@ -228,62 +236,80 @@ export default function Invoices() {
             </select>
           </div>
         </div>
+      </Card>
 
-        <div className="max-h-[min(60vh,520px)] overflow-y-auto">
-          <div className="divide-y divide-[var(--border-color)]">
-            {isLoading && invoices.length === 0 && (
-              <div className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-secondary">
-                <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
-                <span>Loading invoices…</span>
-              </div>
-            )}
-            {filtered.map((invoice) => (
-              <div
-                key={invoice.id}
-                onClick={() => navigate(`/invoices/${invoice.id}`)}
-                className="flex flex-col gap-3 px-6 py-4 transition-colors hover:bg-[var(--surface-hover)] cursor-pointer sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <p className="font-semibold text-[var(--text-primary)]">
-                      Invoice #{String(invoice.invoice_number).padStart(4, '0')}
-                    </p>
-                    {invoice.title && (
-                      <p className="text-sm text-[var(--text-muted)] truncate">— {invoice.title}</p>
-                    )}
-                  </div>
-                  {invoice.property_id && (
-                    <p className="text-sm text-[var(--text-muted)] truncate">Property: TBD</p>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-3 justify-between sm:gap-4">
-                  <p className="text-sm text-secondary">
-                    {formatInVancouver(new Date(invoice.issue_date), 'MMM d, yyyy')}
-                  </p>
-                  <Badge variant={getStatusBadgeVariant(invoice.status)}>{invoice.status}</Badge>
-                  <div className="text-right">
-                    <p className="font-semibold text-[var(--text-primary)]">
-                      {formatCurrency(invoice.total)}
-                    </p>
-                    {invoice.balance_due > 0 && (
-                      <p className="text-xs text-[var(--text-muted)]">
-                        Due: {formatCurrency(invoice.balance_due)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-            {!isLoading && filtered.length === 0 && (
-              <div className="px-6 py-16 text-center text-sm text-secondary">
-                {invoices.length === 0
-                  ? 'No invoices yet. Create one with New Invoice.'
-                  : 'No invoices match your search or filter.'}
-              </div>
-            )}
-          </div>
+      <Card className="min-w-0 overflow-hidden p-0">
+        <div className="max-h-[min(70vh,640px)] overflow-auto">
+          {isLoading && invoices.length === 0 ? (
+            <div className="flex items-center justify-center gap-3 px-6 py-20 text-sm text-[var(--text-secondary)]">
+              <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
+              <span>Loading invoices…</span>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="px-6 py-16 text-center text-sm text-[var(--text-secondary)]">
+              {invoices.length === 0
+                ? 'No invoices yet. Create one with New Invoice.'
+                : 'No invoices match your search or filter.'}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] table-fixed border-collapse text-sm">
+                <thead className="sticky top-0 z-[1] border-b border-[var(--border-color)] bg-[var(--surface-raised)]">
+                  <tr className="text-left text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                    <th className="px-4 py-3 sm:px-6 w-[42%]">Invoice</th>
+                    <th className="px-3 py-3 w-[16%]">Status</th>
+                    <th className="px-3 py-3 w-[18%]">Issued</th>
+                    <th className="px-4 py-3 text-right sm:px-6 w-[24%]">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border-color)] bg-[var(--surface-color)]">
+                  {filtered.map((invoice) => (
+                    <tr
+                      key={invoice.id}
+                      tabIndex={0}
+                      role="button"
+                      onClick={() => navigate(`/invoices/${invoice.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          navigate(`/invoices/${invoice.id}`);
+                        }
+                      }}
+                      className="cursor-pointer transition-colors hover:bg-[var(--surface-hover)] focus-visible:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-green)] focus-visible:ring-inset"
+                    >
+                      <td className="px-4 py-3 sm:px-6 align-middle">
+                        <div className="min-w-0 font-semibold text-[var(--text-primary)]">
+                          Invoice #{String(invoice.invoice_number).padStart(4, '0')}
+                        </div>
+                        {invoice.title ? (
+                          <div className="mt-0.5 truncate text-[var(--text-secondary)]">{invoice.title}</div>
+                        ) : null}
+                        {invoice.property_id ? (
+                          <div className="mt-0.5 truncate text-xs text-[var(--text-muted)]">Property: TBD</div>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-3 align-middle">
+                        <Badge variant={getStatusBadgeVariant(invoice.status)}>{invoice.status}</Badge>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 align-middle text-[var(--text-secondary)]">
+                        {formatInVancouver(new Date(invoice.issue_date), 'MMM d, yyyy')}
+                      </td>
+                      <td className="px-4 py-3 text-right align-middle sm:px-6">
+                        <div className="font-semibold text-[var(--text-primary)]">{formatCurrency(invoice.total)}</div>
+                        {invoice.balance_due > 0 ? (
+                          <div className="mt-0.5 text-xs text-[var(--text-muted)]">
+                            Due: {formatCurrency(invoice.balance_due)}
+                          </div>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

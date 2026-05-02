@@ -1,8 +1,19 @@
-import { Search, Upload, ShieldAlert, ChevronRight, FolderPlus, Trash2 } from 'lucide-react';
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Search, Upload, ShieldAlert, ChevronRight, FolderPlus } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import AlertDialog from '../components/AlertDialog';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { DocumentFolderBrowser } from '../components/documents/DocumentFolderBrowser';
 import { useAuth } from '../context/AuthContext';
 import { userCanAccessPath } from '../lib/permissions';
@@ -88,9 +99,10 @@ export default function Documents() {
 
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
-
-  const [manageFolderId, setManageFolderId] = useState<string>('');
-  const [renameValue, setRenameValue] = useState('');
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [renameFolder, setRenameFolder] = useState<DocFolder | null>(null);
+  const [renameName, setRenameName] = useState('');
+  const [folderToDelete, setFolderToDelete] = useState<DocFolder | null>(null);
   const [docToDelete, setDocToDelete] = useState<DocRecord | null>(null);
 
   const persist = useCallback((nextFolders: DocFolder[], nextDocs: DocRecord[]) => {
@@ -168,29 +180,29 @@ export default function Documents() {
     persist(next, documents);
     setNewFolderName('');
     setNewFolderParentId(null);
+    setCreateFolderOpen(false);
   };
 
-  const handleRenameFolder = (e: React.FormEvent) => {
+  const submitRenameFolder = (e: React.FormEvent) => {
     e.preventDefault();
-    const id = manageFolderId;
-    const name = renameValue.trim();
-    if (!id || !name) {
-      setAlert({ title: 'Rename', message: 'Choose a folder and enter a new name.' });
+    if (!renameFolder) return;
+    const name = renameName.trim();
+    if (!name) {
+      setAlert({ title: 'Name required', message: 'Enter a folder name.' });
       return;
     }
+    const id = renameFolder.id;
     const nextFolders = folders.map((f) => (f.id === id ? { ...f, name } : f));
     const nextDocs = documents.map((d) =>
       d.folderId === id ? { ...d, category: name } : d
     );
     persist(nextFolders, nextDocs);
+    setRenameFolder(null);
   };
 
-  const handleDeleteFolder = () => {
-    const id = manageFolderId;
-    if (!id) {
-      setAlert({ title: 'Delete folder', message: 'Choose a folder to delete.' });
-      return;
-    }
+  const confirmDeleteFolder = useCallback(() => {
+    if (!folderToDelete) return;
+    const id = folderToDelete.id;
     const hasChildFolders = folders.some((f) => f.parentId === id);
     const hasDocs = documents.some((d) => d.folderId === id);
     if (hasChildFolders || hasDocs) {
@@ -198,25 +210,23 @@ export default function Documents() {
         title: 'Folder not empty',
         message: 'Remove or move files and subfolders before deleting this folder.',
       });
+      setFolderToDelete(null);
       return;
     }
-    if (!window.confirm('Delete this empty folder?')) return;
     persist(
       folders.filter((f) => f.id !== id),
       documents
     );
-    setManageFolderId('');
-    setRenameValue('');
-  };
+    if (browseFolderId === id) {
+      const gone = folders.find((f) => f.id === id);
+      setBrowseFolderId(gone?.parentId ?? null);
+    }
+    setFolderToDelete(null);
+  }, [folderToDelete, folders, documents, persist, browseFolderId]);
 
   useEffect(() => {
-    if (!manageFolderId) {
-      setRenameValue('');
-      return;
-    }
-    const f = folders.find((x) => x.id === manageFolderId);
-    setRenameValue(f?.name ?? '');
-  }, [manageFolderId, folders]);
+    if (renameFolder) setRenameName(renameFolder.name);
+  }, [renameFolder]);
 
   const handleAdd = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -349,6 +359,95 @@ export default function Documents() {
         onConfirm={confirmDeleteDocument}
         onCancel={() => setDocToDelete(null)}
       />
+
+      <ConfirmDialog
+        open={folderToDelete !== null}
+        title="Delete this folder?"
+        message={
+          folderToDelete
+            ? `Delete “${folderToDelete.name}”? This only works if the folder is empty (no files and no subfolders).`
+            : ''
+        }
+        confirmLabel="Delete folder"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={confirmDeleteFolder}
+        onCancel={() => setFolderToDelete(null)}
+      />
+
+      <Dialog open={createFolderOpen} onOpenChange={setCreateFolderOpen}>
+        <DialogContent className="max-w-md" onOpenAutoFocus={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle>Create folder</DialogTitle>
+            <DialogDescription>Add a folder, optionally nested inside another.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAddFolder} className="flex flex-col gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="new-folder-name-dlg">Name</Label>
+              <Input
+                id="new-folder-name-dlg"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="e.g. SDS, Safety manuals"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-folder-parent-dlg">Nest inside</Label>
+              <select
+                id="new-folder-parent-dlg"
+                className="flex h-10 w-full rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm"
+                value={newFolderParentId ?? ''}
+                onChange={(e) => setNewFolderParentId(e.target.value === '' ? null : e.target.value)}
+              >
+                {parentOptions.map((o) => (
+                  <option key={o.id ?? 'root'} value={o.id ?? ''}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setCreateFolderOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">Create folder</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={renameFolder !== null}
+        onOpenChange={(open) => {
+          if (!open) setRenameFolder(null);
+        }}
+      >
+        <DialogContent className="max-w-md" onOpenAutoFocus={(e) => e.preventDefault()}>
+          <form onSubmit={submitRenameFolder}>
+            <DialogHeader>
+              <DialogTitle>Rename folder</DialogTitle>
+              <DialogDescription>Change how this folder appears in your library.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-4">
+              <Label htmlFor="rename-folder-input">Name</Label>
+              <Input
+                id="rename-folder-input"
+                value={renameName}
+                onChange={(e) => setRenameName(e.target.value)}
+                placeholder="Folder name"
+                autoComplete="off"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setRenameFolder(null)}>
+                Cancel
+              </Button>
+              <Button type="submit">Save</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <div className="space-y-6 mb-8">
         <div className="flex justify-between items-center flex-wrap gap-4">
@@ -486,113 +585,36 @@ export default function Documents() {
         )}
       </div>
 
-      <div className="documents-library-grid">
-        <aside className="card documents-library-grid__aside documents-folders-aside">
-          <header className="documents-folders-aside__intro">
-            <h3 className="flex items-center gap-2 text-base">
-              <FolderPlus size={18} className="text-[var(--primary-green)]" aria-hidden />
-              Folders
-            </h3>
-            <p className="mt-2 text-sm text-[var(--text-muted)]">
-              Add folders here, then open them in the library to upload files.
-            </p>
-          </header>
-
-          <section className="documents-folders-panel documents-folders-panel--create" aria-labelledby="folders-new-heading">
-            <h4 id="folders-new-heading" className="documents-folders-panel__title">
-              Add a folder
-            </h4>
-            <form onSubmit={handleAddFolder} className="flex flex-col gap-4">
-              <div>
-                <label htmlFor="new-folder-name">Name</label>
-                <input
-                  id="new-folder-name"
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  placeholder="e.g. SDS, Safety manuals"
-                  autoComplete="off"
-                />
-              </div>
-              <div>
-                <label htmlFor="new-folder-parent">Nest inside</label>
-                <select
-                  id="new-folder-parent"
-                  value={newFolderParentId ?? ''}
-                  onChange={(e) => setNewFolderParentId(e.target.value === '' ? null : e.target.value)}
-                >
-                  {parentOptions.map((o) => (
-                    <option key={o.id ?? 'root'} value={o.id ?? ''}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button type="submit" className="btn btn-primary w-full">
-                Create folder
-              </button>
-            </form>
-          </section>
-
-          <section className="documents-folders-panel documents-folders-panel--manage" aria-labelledby="folders-edit-heading">
-            <h4 id="folders-edit-heading" className="documents-folders-panel__title">
-              Rename or remove
-            </h4>
-            <div className="flex flex-col gap-4">
-              <div>
-                <label htmlFor="manage-folder-select">Folder</label>
-                <select
-                  id="manage-folder-select"
-                  value={manageFolderId}
-                  onChange={(e) => setManageFolderId(e.target.value)}
-                >
-                  <option value="">Choose a folder…</option>
-                  {folders.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="folder-rename-input">New name</label>
-                <input
-                  id="folder-rename-input"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  placeholder="Type a new name"
-                />
-              </div>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <button type="button" className="btn btn-secondary flex-1" onClick={handleRenameFolder}>
-                  Save name
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary flex-1 gap-1 text-[var(--color-danger)]"
-                  onClick={handleDeleteFolder}
-                >
-                  <Trash2 size={14} aria-hidden /> Delete
-                </button>
-              </div>
-            </div>
-          </section>
-        </aside>
-
-        <div className="card documents-library-grid__main">
-          <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="documents-library-search w-full min-w-0 sm:max-w-md">
-              <Search size={18} className="documents-library-search__icon shrink-0" aria-hidden />
-              <input
-                type="search"
-                placeholder="Search folders & files…"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                aria-label="Search documents"
-              />
-            </div>
-            <span className="badge badge-gray shrink-0 self-start sm:self-center">{documents.length} files</span>
+      <div className="card min-w-0 overflow-hidden p-0">
+        <div className="flex flex-col gap-4 border-b border-[var(--border-color)] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="documents-library-search w-full min-w-0 sm:max-w-md">
+            <Search size={18} className="documents-library-search__icon shrink-0" aria-hidden />
+            <input
+              type="search"
+              placeholder="Search folders & files…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              aria-label="Search documents"
+            />
           </div>
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <button
+              type="button"
+              className="btn btn-secondary inline-flex items-center gap-2"
+              onClick={() => {
+                setNewFolderParentId(browseFolderId);
+                setNewFolderName('');
+                setCreateFolderOpen(true);
+              }}
+            >
+              <FolderPlus size={16} aria-hidden />
+              Create folder
+            </button>
+            <span className="badge badge-gray shrink-0">{documents.length} files</span>
+          </div>
+        </div>
 
+        <div className="px-6 py-5">
           <DocumentFolderBrowser
             folders={folders}
             documents={documents}
@@ -602,6 +624,8 @@ export default function Documents() {
             onNavigateFromSearch={() => setSearchTerm('')}
             onDownload={downloadDoc}
             onDeleteDocument={requestDeleteDocument}
+            onRenameFolder={(f) => setRenameFolder(f)}
+            onDeleteFolder={(f) => setFolderToDelete(f)}
           />
         </div>
       </div>

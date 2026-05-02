@@ -1,13 +1,13 @@
 import {
   ArrowLeft,
-  ChevronRight,
   FileArchive,
   FileText,
   Folder,
+  MoreVertical,
   ShieldCheck,
   Trash2,
 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { cn } from '@/lib/utils';
 import type { DocFolder, DocRecord } from '@/lib/documentsTypes';
@@ -52,7 +52,109 @@ export type DocumentFolderBrowserProps = {
   onNavigateFromSearch: () => void;
   onDownload: (doc: DocRecord) => void;
   onDeleteDocument?: (doc: DocRecord) => void;
+  onRenameFolder?: (folder: DocFolder) => void;
+  onDeleteFolder?: (folder: DocFolder) => void;
 };
+
+function FolderRow({
+  folder,
+  documents,
+  onOpen,
+  onRename,
+  onDelete,
+  subtitle,
+}: {
+  folder: DocFolder;
+  documents: DocRecord[];
+  onOpen: (id: string) => void;
+  onRename?: (f: DocFolder) => void;
+  onDelete?: (f: DocFolder) => void;
+  subtitle?: string;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuWrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const el = menuWrapRef.current;
+    const onDoc = (e: MouseEvent) => {
+      if (el && !el.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [menuOpen]);
+
+  const hasMenu = Boolean(onRename && onDelete);
+  const count = countFilesInFolder(documents, folder.id);
+
+  return (
+    <div className="group flex min-h-[3.75rem] w-full items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-raised)] py-4 pl-8 pr-3 transition-colors hover:bg-[var(--surface-hover)]">
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left"
+        onClick={() => onOpen(folder.id)}
+      >
+        <Folder className="size-6 shrink-0 text-[var(--primary-green)]" strokeWidth={2} aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium">{folder.name}</span>
+          {subtitle ? (
+            <span className="block truncate text-xs text-[var(--text-muted)]">{subtitle}</span>
+          ) : null}
+        </span>
+        <span className="badge badge-gray shrink-0">{count}</span>
+      </button>
+      {hasMenu && (
+        <div ref={menuWrapRef} className="relative shrink-0">
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-sm)] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+            aria-label={`Actions for ${folder.name}`}
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setMenuOpen((m) => !m);
+            }}
+          >
+            <MoreVertical className="size-4" strokeWidth={2} aria-hidden />
+          </button>
+          {menuOpen && (
+            <div
+              className="absolute right-0 top-full z-30 mt-1 w-44 overflow-hidden rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--popup-bg)] py-1 shadow-lg"
+              role="menu"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--surface-hover)]"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRename?.(folder);
+                  setMenuOpen(false);
+                }}
+              >
+                Rename…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="block w-full px-3 py-2 text-left text-sm text-[var(--color-danger)] hover:bg-[var(--surface-hover)]"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete?.(folder);
+                  setMenuOpen(false);
+                }}
+              >
+                Delete…
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function DocumentFolderBrowser({
   folders,
@@ -63,6 +165,8 @@ export function DocumentFolderBrowser({
   onNavigateFromSearch,
   onDownload,
   onDeleteDocument,
+  onRenameFolder,
+  onDeleteFolder,
 }: DocumentFolderBrowserProps) {
   const q = searchQuery.trim().toLowerCase();
 
@@ -76,9 +180,6 @@ export function DocumentFolderBrowser({
       .sort((a, b) => a.name.localeCompare(b.name));
     return { matchingFolders: mf, matchingDocs: md };
   }, [q, folders, documents]);
-
-  const rowClass =
-    'flex min-h-[3.75rem] w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-raised)] py-4 pl-8 pr-6 text-left transition-colors hover:bg-[var(--surface-hover)]';
 
   const fileRowClass =
     'flex min-h-[3.75rem] w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-raised)] py-4 pl-8 pr-6';
@@ -100,23 +201,17 @@ export function DocumentFolderBrowser({
             <ul className="flex flex-col gap-3">
               {matchingFolders.map((f) => (
                 <li key={f.id}>
-                  <button
-                    type="button"
-                    className={cn(rowClass, 'cursor-pointer')}
-                    onClick={() => {
-                      onBrowseFolder(f.id);
+                  <FolderRow
+                    folder={f}
+                    documents={documents}
+                    onOpen={(id) => {
+                      onBrowseFolder(id);
                       onNavigateFromSearch();
                     }}
-                  >
-                    <Folder className="size-6 shrink-0 text-[var(--primary-green)]" strokeWidth={2} aria-hidden />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">{f.name}</span>
-                      <span className="block truncate text-xs text-[var(--text-muted)]">
-                        {folderPathLabel(folders, f.id)}
-                      </span>
-                    </span>
-                    <ChevronRight className="size-4 shrink-0 text-[var(--text-muted)]" aria-hidden />
-                  </button>
+                    onRename={onRenameFolder}
+                    onDelete={onDeleteFolder}
+                    subtitle={folderPathLabel(folders, f.id)}
+                  />
                 </li>
               ))}
             </ul>
@@ -176,7 +271,7 @@ export function DocumentFolderBrowser({
     if (folders.length === 0) {
       return (
         <p className="py-10 text-center text-sm text-[var(--text-muted)]">
-          No folders yet. Use the sidebar to create one.
+          No folders yet. Use <strong className="font-semibold text-[var(--text-primary)]">Create folder</strong> above.
         </p>
       );
     }
@@ -184,7 +279,8 @@ export function DocumentFolderBrowser({
     if (topFolders.length === 0) {
       return (
         <p className="py-8 text-center text-sm text-[var(--text-muted)]">
-          No top-level folders. Create one in the sidebar with &quot;Inside: Top level&quot;, or move existing folders.
+          No top-level folders. Create one with <strong className="font-semibold text-[var(--text-primary)]">Create folder</strong>{' '}
+          (nest: Top level), or move existing folders under the root.
         </p>
       );
     }
@@ -195,12 +291,13 @@ export function DocumentFolderBrowser({
         <ul className="flex flex-col gap-3">
           {topFolders.map((f) => (
             <li key={f.id}>
-              <button type="button" className={cn(rowClass, 'cursor-pointer')} onClick={() => onBrowseFolder(f.id)}>
-                <Folder className="size-6 shrink-0 text-[var(--primary-green)]" strokeWidth={2} aria-hidden />
-                <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
-                <span className="badge badge-gray shrink-0">{countFilesInFolder(documents, f.id)}</span>
-                <ChevronRight className="size-4 shrink-0 text-[var(--text-muted)]" aria-hidden />
-              </button>
+              <FolderRow
+                folder={f}
+                documents={documents}
+                onOpen={(id) => onBrowseFolder(id)}
+                onRename={onRenameFolder}
+                onDelete={onDeleteFolder}
+              />
             </li>
           ))}
         </ul>
@@ -251,12 +348,13 @@ export function DocumentFolderBrowser({
           <ul className="flex flex-col gap-3">
             {subfolders.map((f) => (
               <li key={f.id}>
-                <button type="button" className={cn(rowClass, 'cursor-pointer')} onClick={() => onBrowseFolder(f.id)}>
-                  <Folder className="size-6 shrink-0 text-[var(--primary-green)]" strokeWidth={2} aria-hidden />
-                  <span className="min-w-0 flex-1 truncate font-medium">{f.name}</span>
-                  <span className="badge badge-gray shrink-0">{countFilesInFolder(documents, f.id)}</span>
-                  <ChevronRight className="size-4 shrink-0 text-[var(--text-muted)]" aria-hidden />
-                </button>
+                <FolderRow
+                  folder={f}
+                  documents={documents}
+                  onOpen={(id) => onBrowseFolder(id)}
+                  onRename={onRenameFolder}
+                  onDelete={onDeleteFolder}
+                />
               </li>
             ))}
           </ul>
