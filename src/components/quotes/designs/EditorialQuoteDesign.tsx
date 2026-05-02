@@ -9,6 +9,7 @@ const STYLE = `
     box-shadow:0 1px 0 rgba(0,0,0,.04),0 30px 60px -20px rgba(60,40,20,.25);
   }
   .eq-quote *{box-sizing:border-box;}
+  .eq-quote h1,.eq-quote h2,.eq-quote h3,.eq-quote h4,.eq-quote h5,.eq-quote h6{color:inherit;font-weight:inherit;letter-spacing:inherit;}
   .eq-accept-stamp{position:absolute;top:110px;right:80px;transform:rotate(-12deg);border:4px double var(--accent);color:var(--accent);padding:8px 22px;font-family:'Inter',sans-serif;font-weight:800;font-size:24px;letter-spacing:3px;opacity:.85;pointer-events:none;text-transform:uppercase;border-radius:4px;}
   .eq-accept-stamp small{display:block;font-style:italic;font-family:'Fraunces',serif;font-weight:400;font-size:11px;letter-spacing:1px;text-transform:none;margin-top:2px;}
   .eq-head{display:grid;grid-template-columns:1fr auto;gap:40px;align-items:start;padding-bottom:24px;border-bottom:1px solid var(--ink);}
@@ -70,7 +71,7 @@ const STYLE = `
   .eq-accept{margin-top:36px;padding:24px;background:var(--paper-2);display:grid;grid-template-columns:1fr 1fr;gap:32px;border-top:3px solid var(--accent);}
   .eq-accept h3{font-family:'Fraunces',serif;font-style:italic;font-weight:400;font-size:24px;margin:0 0 8px;}
   .eq-accept p{font-family:'Inter',sans-serif;font-size:11.5px;color:var(--muted);margin:0 0 14px;line-height:1.5;}
-  .eq-sig-line{border-bottom:1px solid var(--ink);height:48px;display:flex;align-items:flex-end;padding-bottom:4px;font-family:'Fraunces',serif;font-style:italic;font-size:22px;color:var(--accent);}
+  .eq-sig-line{border-bottom:1px solid var(--ink);min-height:48px;max-height:48px;overflow:hidden;display:flex;align-items:flex-end;padding-bottom:4px;font-family:'Fraunces',serif;font-style:italic;font-size:22px;color:var(--accent);white-space:nowrap;text-overflow:ellipsis;}
   .eq-sig-cap{font-family:'Inter',sans-serif;font-size:9px;letter-spacing:1.8px;text-transform:uppercase;color:var(--muted);margin-top:4px;display:flex;justify-content:space-between;}
   .eq-foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--ink);display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end;}
   .eq-foot-q{font-family:'Fraunces',serif;font-style:italic;font-weight:300;font-size:15px;color:var(--muted);max-width:380px;line-height:1.4;}

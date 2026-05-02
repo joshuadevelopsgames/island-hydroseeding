@@ -6,6 +6,7 @@ const STYLE = `
     background-image:linear-gradient(to right,var(--grid) 1px,transparent 1px),linear-gradient(to bottom,var(--grid) 1px,transparent 1px);background-size:24px 24px;
     box-shadow:0 1px 0 rgba(0,0,0,.04),0 30px 60px -20px rgba(20,30,20,.2);position:relative;}
   .tq-quote *{box-sizing:border-box;}
+  .tq-quote h1,.tq-quote h2,.tq-quote h3,.tq-quote h4,.tq-quote h5,.tq-quote h6{color:inherit;font-weight:inherit;letter-spacing:inherit;}
   .tq-accept-stamp{position:absolute;top:220px;right:60px;transform:rotate(-6deg);background:var(--accent);color:var(--bg);padding:12px 26px;font-family:'Space Grotesk',sans-serif;font-weight:800;font-size:28px;letter-spacing:5px;opacity:.92;pointer-events:none;text-transform:uppercase;border-radius:2px;box-shadow:6px 6px 0 var(--ink);z-index:5;}
   .tq-tape{background:var(--ink);color:var(--bg);padding:8px 32px;display:flex;justify-content:space-between;font-size:10px;letter-spacing:2.5px;text-transform:uppercase;}
   .tq-tape b{color:var(--accent-soft);font-weight:400;margin-right:6px;}
@@ -65,7 +66,7 @@ const STYLE = `
   .tq-accept{margin-top:24px;background:var(--ink);color:var(--bg);padding:22px 24px;display:grid;grid-template-columns:1fr 1fr;gap:32px;}
   .tq-accept h3{font-family:'Space Grotesk',sans-serif;font-size:14px;margin:0 0 8px;letter-spacing:-.005em;color:var(--accent-soft);}
   .tq-accept p{font-size:10px;color:rgba(246,245,242,.6);margin:0 0 12px;line-height:1.5;letter-spacing:.5px;}
-  .tq-accept-line{border-bottom:1px solid var(--bg);height:42px;display:flex;align-items:flex-end;padding-bottom:4px;font-family:'Space Grotesk',sans-serif;font-style:italic;font-size:20px;color:var(--accent-soft);}
+  .tq-accept-line{border-bottom:1px solid var(--bg);min-height:42px;max-height:42px;overflow:hidden;display:flex;align-items:flex-end;padding-bottom:4px;font-family:'Space Grotesk',sans-serif;font-style:italic;font-size:20px;color:var(--accent-soft);white-space:nowrap;text-overflow:ellipsis;}
   .tq-accept-cap{font-size:9px;letter-spacing:1.8px;text-transform:uppercase;color:rgba(246,245,242,.55);margin-top:4px;display:flex;justify-content:space-between;}
   .tq-foot{margin-top:20px;padding:14px 20px;background:var(--bg);border:1px solid var(--ink);display:grid;grid-template-columns:1fr auto;gap:24px;align-items:center;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);}
   .tq-foot b{color:var(--ink);}

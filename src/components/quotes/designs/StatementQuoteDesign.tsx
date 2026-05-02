@@ -5,6 +5,7 @@ const STYLE = `
     box-sizing:border-box;width:850px;max-width:850px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:'Inter',sans-serif;position:relative;
     display:grid;grid-template-columns:200px 1fr;box-shadow:0 1px 0 rgba(0,0,0,.04),0 30px 80px -20px rgba(60,40,20,.25);}
   .sq-quote *{box-sizing:border-box;}
+  .sq-quote h1,.sq-quote h2,.sq-quote h3,.sq-quote h4,.sq-quote h5,.sq-quote h6{color:inherit;font-weight:inherit;letter-spacing:inherit;}
   .sq-side{background:var(--accent);color:#fff;padding:32px 22px 28px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden;}
   .sq-side::before{content:'';position:absolute;top:0;right:0;bottom:0;width:1px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.2) 20%,rgba(255,255,255,.2) 80%,transparent);}
   .sq-side-mark{font-family:'Fraunces',serif;font-style:italic;font-size:52px;font-weight:400;letter-spacing:-.04em;line-height:.85;}
@@ -76,7 +77,7 @@ const STYLE = `
   .sq-accept-cell{padding:20px;border-right:1px solid var(--line);}
   .sq-accept-cell:last-child{border-right:0;}
   .sq-accept-cell h4{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin:0 0 10px;font-weight:600;}
-  .sq-sig{border-bottom:1px solid var(--line-2);height:42px;display:flex;align-items:flex-end;padding-bottom:4px;font-family:'Fraunces',serif;font-style:italic;font-size:24px;color:var(--accent);}
+  .sq-sig{border-bottom:1px solid var(--line-2);min-height:42px;max-height:42px;overflow:hidden;display:flex;align-items:flex-end;padding-bottom:4px;font-family:'Fraunces',serif;font-style:italic;font-size:24px;color:var(--accent);white-space:nowrap;text-overflow:ellipsis;}
   .sq-sig-cap{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-top:4px;display:flex;justify-content:space-between;}
   .sq-foot{margin-top:22px;padding-top:14px;border-top:1px solid var(--line);display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);}
   .sq-foot b{color:var(--ink);}

@@ -6,6 +6,7 @@ const STYLE = `
     box-shadow:0 1px 0 rgba(0,0,0,.04),0 30px 60px -20px rgba(60,40,20,.25);
     background-image:radial-gradient(circle at 20% 30%,rgba(91,79,58,.04) 0,transparent 40%),radial-gradient(circle at 80% 70%,rgba(91,79,58,.05) 0,transparent 50%);}
   .fq-quote *{box-sizing:border-box;}
+  .fq-quote h1,.fq-quote h2,.fq-quote h3,.fq-quote h4,.fq-quote h5,.fq-quote h6{color:inherit;font-weight:inherit;letter-spacing:inherit;}
   .fq-stamp{position:absolute;top:30px;right:60px;transform:rotate(8deg);color:var(--accent);border:3px solid var(--accent);padding:8px 14px 6px;font-family:'Inter',sans-serif;font-weight:800;font-size:13px;letter-spacing:3px;text-transform:uppercase;opacity:.85;z-index:5;background:rgba(247,241,225,.7);}
   .fq-stamp::before{content:'';position:absolute;inset:-4px;border:1px dashed var(--accent);border-radius:2px;opacity:.5;}
   .fq-stamp small{display:block;font-family:'Fraunces',serif;font-style:italic;font-weight:400;font-size:9px;letter-spacing:1px;text-transform:none;margin-top:2px;}
@@ -81,7 +82,7 @@ const STYLE = `
   .fq-accept-head small{font-family:'Inter',sans-serif;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);font-weight:600;}
   .fq-accept-grid{display:grid;grid-template-columns:1fr 1fr;gap:32px;}
   .fq-accept-grid p{font-family:'Inter',sans-serif;font-size:11px;color:var(--ink-soft);line-height:1.5;margin:0 0 12px;}
-  .fq-sig{border-bottom:1px solid var(--ink);height:48px;display:flex;align-items:flex-end;padding-bottom:4px;font-family:'Fraunces',serif;font-style:italic;font-size:24px;color:var(--accent);}
+  .fq-sig{border-bottom:1px solid var(--ink);min-height:48px;max-height:48px;overflow:hidden;display:flex;align-items:flex-end;padding-bottom:4px;font-family:'Fraunces',serif;font-style:italic;font-size:24px;color:var(--accent);white-space:nowrap;text-overflow:ellipsis;}
   .fq-sig-cap{font-family:'Inter',sans-serif;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--ink-soft);margin-top:4px;display:flex;justify-content:space-between;}
 `;
 
