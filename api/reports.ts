@@ -223,10 +223,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'products_services_usage') {
-      const { data: jli, error } = await db
+      const from = String(req.query.from ?? '').trim();
+      const to = String(req.query.to ?? '').trim();
+      let jq = db
         .from('job_line_items')
-        .select('product_service_name, quantity, total')
+        .select('product_service_name, quantity, total, created_at')
         .eq('tenant_id', tenantId);
+      if (from) jq = jq.gte('created_at', from);
+      if (to) jq = jq.lte('created_at', to);
+      const { data: jli, error } = await jq;
       if (error) {
         res.status(500).json({ error: error.message });
         return;
@@ -240,6 +245,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         agg.set(name, cur);
       }
       const rows = [...agg.values()].sort((a, b) => b.revenue - a.revenue);
+      res.status(200).json({ rows });
+      return;
+    }
+
+    if (action === 'revenue_by_service') {
+      // Sum paid invoice line items, grouped by the linked product/service's
+      // category (e.g., Hydroseeding, Erosion control, Materials). Falls back
+      // to "Uncategorized" when the line item references a name not present
+      // in products_services or has no category.
+      const from = String(req.query.from ?? '').trim();
+      const to = String(req.query.to ?? '').trim();
+      let invQ = db
+        .from('invoices')
+        .select('id, status, issue_date, account_id')
+        .eq('tenant_id', tenantId)
+        .in('status', ['Paid', 'Sent', 'Overdue']);
+      if (from) invQ = invQ.gte('issue_date', from);
+      if (to) invQ = invQ.lte('issue_date', to);
+      const { data: invs, error: invErr } = await invQ;
+      if (invErr) {
+        res.status(500).json({ error: invErr.message });
+        return;
+      }
+      const invoiceIds = (invs ?? []).map((i: { id: string }) => i.id);
+      if (invoiceIds.length === 0) {
+        res.status(200).json({ rows: [] });
+        return;
+      }
+      const { data: lis, error: liErr } = await db
+        .from('invoice_line_items')
+        .select('invoice_id, product_service_name, total')
+        .eq('tenant_id', tenantId)
+        .in('invoice_id', invoiceIds);
+      if (liErr) {
+        res.status(500).json({ error: liErr.message });
+        return;
+      }
+      const { data: prods } = await db
+        .from('products_services')
+        .select('name, category')
+        .eq('tenant_id', tenantId);
+      const catByName = new Map(
+        (prods ?? []).map((p: { name: string; category: string | null }) => [p.name, p.category ?? 'Uncategorized'])
+      );
+      const totals = new Map<string, { category: string; revenue: number; line_items: number }>();
+      for (const r of lis ?? []) {
+        const name = String((r as { product_service_name?: string }).product_service_name ?? '');
+        const category = catByName.get(name) ?? 'Uncategorized';
+        const cur = totals.get(category) ?? { category, revenue: 0, line_items: 0 };
+        cur.revenue += Number((r as { total?: number }).total ?? 0);
+        cur.line_items += 1;
+        totals.set(category, cur);
+      }
+      const rows = [...totals.values()].sort((a, b) => b.revenue - a.revenue);
       res.status(200).json({ rows });
       return;
     }

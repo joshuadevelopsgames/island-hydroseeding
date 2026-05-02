@@ -41,24 +41,35 @@ export async function syncInvoiceFinancials(db: SupabaseClient, invoiceId: strin
   const amountPaid = roundMoney((payments ?? []).reduce((sum, p) => sum + Number(p.amount ?? 0), 0));
   const balanceDue = Math.max(roundMoney(total - amountPaid), 0);
 
-  let status = String(inv?.status ?? 'Draft');
+  const prevStatus = String(inv?.status ?? 'Draft');
+  let status = prevStatus;
   if (balancesMatch(balanceDue, 0)) {
     status = 'Paid';
   } else if (status === 'Paid' && !balancesMatch(balanceDue, 0)) {
     status = 'Sent';
   }
 
+  // Stamp paid_at on the Paid transition; clear it on reopen so the next
+  // clear restamps cleanly. Lets Insights compute "avg time to paid" without
+  // relying on updated_at as a proxy (which gets touched by unrelated edits).
+  const updates: Record<string, unknown> = {
+    subtotal,
+    tax_amount,
+    total,
+    amount_paid: amountPaid,
+    balance_due: balanceDue,
+    status,
+    updated_at: NOW_ISO(),
+  };
+  if (status === 'Paid' && prevStatus !== 'Paid') {
+    updates.paid_at = NOW_ISO();
+  } else if (status !== 'Paid' && prevStatus === 'Paid') {
+    updates.paid_at = null;
+  }
+
   const { error: updateErr } = await db
     .from('invoices')
-    .update({
-      subtotal,
-      tax_amount,
-      total,
-      amount_paid: amountPaid,
-      balance_due: balanceDue,
-      status,
-      updated_at: NOW_ISO(),
-    })
+    .update(updates)
     .eq('id', invoiceId)
     .eq('tenant_id', tenantId);
 

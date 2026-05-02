@@ -166,6 +166,40 @@ async function handleGet(req: VercelRequest, res: VercelResponse, db: SupabaseCl
     });
   }
 
+  if (action === 'payment_method_summary') {
+    // Aggregate invoice_payments by method within an optional [from, to]
+    // window. Used by Insights' Cashflow donut. Range params are ISO strings.
+    const fromStr = String(req.query.from ?? '').trim();
+    const toStr = String(req.query.to ?? '').trim();
+
+    let q = db
+      .from('invoice_payments')
+      .select('amount, payment_method, payment_date')
+      .eq('tenant_id', tenantId);
+    if (fromStr) q = q.gte('payment_date', fromStr.slice(0, 10));
+    if (toStr) q = q.lte('payment_date', toStr.slice(0, 10));
+
+    const { data, error } = await q;
+    if (error) {
+      return res.status(400).json({ error: errTable('invoice_payments', error) });
+    }
+
+    const byMethod = new Map<string, { count: number; total: number }>();
+    for (const p of data ?? []) {
+      const raw = String((p as { payment_method?: string | null }).payment_method ?? '').trim();
+      const method = raw === '' ? 'Other' : raw;
+      const cur = byMethod.get(method) ?? { count: 0, total: 0 };
+      cur.count += 1;
+      cur.total += Number((p as { amount?: number }).amount ?? 0);
+      byMethod.set(method, cur);
+    }
+    const rows = [...byMethod.entries()]
+      .map(([method, v]) => ({ method, count: v.count, total: Math.round(v.total * 100) / 100 }))
+      .sort((a, b) => b.total - a.total);
+
+    return res.status(200).json({ rows });
+  }
+
   return res.status(400).json({ error: 'Unknown GET action' });
 }
 
