@@ -127,14 +127,17 @@ export default function CrmAccountDetail() {
         onSave={(patch) => m.updateAccount.mutateAsync({ id: account.id, ...patch })}
       />
 
-      <Tabs defaultValue="contacts">
+      <Tabs defaultValue="overview">
         <TabsList className="w-full flex-wrap justify-start sm:w-auto">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="contacts">Contacts</TabsTrigger>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
           <TabsTrigger value="research">Research</TabsTrigger>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
         </TabsList>
 
+        <TabsContent value="overview">
+          <OverviewCard account={account} />
+        </TabsContent>
         <TabsContent value="contacts">
           <ContactsTab accountId={account.id} contacts={data?.contacts ?? []} m={m} />
         </TabsContent>
@@ -148,9 +151,6 @@ export default function CrmAccountDetail() {
         </TabsContent>
         <TabsContent value="research">
           <ResearchTab accountId={account.id} notes={data?.research_notes ?? []} m={m} />
-        </TabsContent>
-        <TabsContent value="overview">
-          <OverviewCard account={account} />
         </TabsContent>
       </Tabs>
     </div>
