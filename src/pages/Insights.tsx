@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart3, Download } from 'lucide-react';
@@ -562,6 +562,17 @@ export default function Insights() {
         </div>
       </div>
 
+      <SectionNav
+        sections={[
+          { id: 'overview', label: 'Overview' },
+          { id: 'revenue', label: 'Revenue' },
+          { id: 'leads', label: 'Leads' },
+          { id: 'cashflow', label: 'Cashflow' },
+          { id: 'quotes', label: 'Quotes' },
+          { id: 'jobs', label: 'Jobs' },
+        ]}
+      />
+
       {/* Sticky hero strip — three numbers the user looks at most. */}
       <div className="ins-hero">
         <HeroTile label="Outstanding A/R" value={CAD.format(cashflow.outstanding)} tone="warn" />
@@ -569,7 +580,7 @@ export default function Insights() {
         <HeroTile label={`Collected · ${rangeLabel(range)}`} value={CAD.format(overview.collected.curr)} tone="ok" />
       </div>
 
-      <Section title="Overview" subtitle={rangeLabel(range)}>
+      <Section id="overview" title="Overview" subtitle={rangeLabel(range)}>
         <div className="ins-kpi-grid">
           <KpiTile label="New quotes" value={String(overview.newQuotes.curr)} change={overview.newQuotes.change} />
           <KpiTile label="Converted" value={String(overview.converted.curr)} change={overview.converted.change} />
@@ -580,6 +591,7 @@ export default function Insights() {
       </Section>
 
       <Section
+        id="revenue"
         title="Revenue"
         subtitle={`${revenueYoY.periodLabel} vs ${revenueYoY.priorLabel}`}
         drillTo={`/reports?report=revenue_by_service&range=${range}`}
@@ -592,13 +604,14 @@ export default function Insights() {
           </div>
           <div>
             <div className="ins-yoy-num ins-yoy-num--muted">{CAD.format(revenueYoY.priorTotal)}</div>
-            <div className="ins-yoy-lbl"><span className="ins-swatch ins-swatch--prev" /> {revenueYoY.priorLabel}</div>
+            <div className="ins-yoy-lbl"><span className="ins-swatch ins-swatch--amber" /> {revenueYoY.priorLabel}</div>
           </div>
         </div>
         <YoYBars current={revenueYoY.current} prev={revenueYoY.prev} />
       </Section>
 
       <Section
+        id="leads"
         title="Lead conversion"
         subtitle="From request to job — stacked by source"
         drillTo={`/reports?report=lead_source_revenue&range=${range}`}
@@ -668,6 +681,7 @@ export default function Insights() {
       </Section>
 
       <Section
+        id="cashflow"
         title="Cashflow"
         subtitle="Outstanding, projected, and how fast you're paid"
         drillTo={`/reports?report=aged_receivables&range=${range}`}
@@ -729,7 +743,7 @@ export default function Insights() {
         )}
       </Section>
 
-      <Section title="Quotes" subtitle="Sent, accepted, converted to invoice">
+      <Section id="quotes" title="Quotes" subtitle="Sent, accepted, converted to invoice">
         <div className="ins-funnel-row">
           <div className="ins-funnel-card">
             <div className="ins-funnel-step">
@@ -764,6 +778,7 @@ export default function Insights() {
       </Section>
 
       <Section
+        id="jobs"
         title="Jobs"
         subtitle="Work in progress"
         drillTo={`/reports?report=products_services_usage&range=${range}`}
@@ -822,12 +837,15 @@ function RangePicker({ value, onChange }: { value: RangeKey; onChange: (v: Range
 }
 
 function Section({
+  id,
   title,
   subtitle,
   drillTo,
   drillLabel = 'Open in Reports',
   children,
 }: {
+  /** Anchor id used by the sticky section nav and IntersectionObserver. */
+  id?: string;
   title: string;
   subtitle?: string;
   /** When set, renders a small "Open in Reports →" anchor in the header. */
@@ -836,7 +854,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="ins-section">
+    <section id={id} className="ins-section">
       <div className="ins-section-head">
         <h2 className="ins-section-title">{title}</h2>
         {subtitle && <span className="ins-section-sub">{subtitle}</span>}
@@ -848,6 +866,63 @@ function Section({
       </div>
       {children}
     </section>
+  );
+}
+
+/**
+ * Sticky horizontal nav at the top of Insights — pills for each major
+ * section. Watches sections via IntersectionObserver and highlights the one
+ * the user is currently looking at; clicking a pill scrolls smoothly there.
+ */
+function SectionNav({ sections }: { sections: { id: string; label: string }[] }) {
+  const [active, setActive] = useState(sections[0]?.id ?? '');
+  const ticking = useRef(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // Pick the entry closest to the top of the viewport that's intersecting.
+        if (ticking.current) return;
+        ticking.current = true;
+        requestAnimationFrame(() => {
+          const visible = entries
+            .filter((e) => e.isIntersecting)
+            .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+          if (visible[0]) setActive(visible[0].target.id);
+          ticking.current = false;
+        });
+      },
+      { rootMargin: '-120px 0px -60% 0px', threshold: 0 }
+    );
+    for (const s of sections) {
+      const el = document.getElementById(s.id);
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [sections]);
+
+  const scrollTo = (id: string) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const top = el.getBoundingClientRect().top + window.scrollY - 90;
+    window.scrollTo({ top, behavior: 'smooth' });
+    setActive(id);
+  };
+
+  return (
+    <nav className="ins-section-nav" aria-label="Insights sections">
+      {sections.map((s) => (
+        <button
+          key={s.id}
+          type="button"
+          onClick={() => scrollTo(s.id)}
+          className={`ins-section-nav-pill ${active === s.id ? 'is-active' : ''}`}
+          aria-current={active === s.id ? 'true' : undefined}
+        >
+          {s.label}
+        </button>
+      ))}
+    </nav>
   );
 }
 
@@ -1034,7 +1109,7 @@ function YoYBars({
         const showLabel = i % labelEvery === 0;
         return (
           <g key={c.key || i}>
-            <rect x={x} y={padY + innerH - pH} width={barW} height={pH} fill="var(--accent-soft, #d9e9dd)" rx="2" />
+            <rect x={x} y={padY + innerH - pH} width={barW} height={pH} fill="var(--insights-amber-soft, #fbe0a6)" rx="2" />
             <rect
               x={x + barW + 2}
               y={padY + innerH - cH}
@@ -1075,7 +1150,7 @@ function SentVsApprovedBars({ weeks }: { weeks: { label: string; sent: number; a
         const aH = (w.approved / max) * innerH;
         return (
           <g key={i}>
-            <rect x={x} y={padY + innerH - sH} width={barW} height={sH} fill="var(--accent-soft, #d9e9dd)" rx="2" />
+            <rect x={x} y={padY + innerH - sH} width={barW} height={sH} fill="var(--insights-amber-soft, #fbe0a6)" rx="2" />
             <rect x={x + barW + 2} y={padY + innerH - aH} width={barW} height={aH} fill="var(--primary-green, #2a7a3a)" rx="2" />
             <text x={x + barW + 1} y={H - 6} textAnchor="middle" fontSize="9" fill="var(--text-muted)">{w.label}</text>
           </g>
@@ -1142,6 +1217,37 @@ const INSIGHTS_CSS = `
   .ins-range-btn.is-active { background: var(--primary-green); color: #fff; }
   .ins-range-btn:hover:not(.is-active) { background: var(--surface-hover); color: var(--text-primary); }
 
+  /* Two-color accent. Green = current / good. Amber = prior / needs attention. */
+  .ins-section { --insights-amber: #d97706; --insights-amber-soft: rgba(217, 119, 6, 0.18); }
+  .ins-section-nav { --insights-amber: #d97706; }
+
+  /* Sticky horizontal section nav. Sits below the page's header and above
+     the hero strip. IntersectionObserver bumps the .is-active pill as the
+     user scrolls between sections. */
+  .ins-section-nav {
+    position: sticky; top: 0; z-index: 6;
+    display: flex; flex-wrap: wrap; gap: 4px;
+    padding: 8px 4px;
+    margin-bottom: 8px;
+    background: var(--bg-color, #fafafa);
+    border-bottom: 1px solid var(--border-color);
+    backdrop-filter: blur(8px);
+  }
+  .ins-section-nav-pill {
+    background: transparent; border: 0;
+    padding: 6px 12px; border-radius: 999px;
+    font-size: 12px; font-weight: 500;
+    color: var(--text-muted); cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.12s;
+  }
+  .ins-section-nav-pill:hover { color: var(--text-primary); background: var(--surface-hover); }
+  .ins-section-nav-pill.is-active {
+    color: var(--primary-green, #2a7a3a);
+    background: rgba(42, 122, 58, 0.08);
+    border-color: rgba(42, 122, 58, 0.28);
+  }
+
   .ins-hero {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -1152,7 +1258,7 @@ const INSIGHTS_CSS = `
     border: 1px solid var(--border-color);
     border-radius: 12px;
     position: sticky;
-    top: 0;
+    top: 56px; /* below the section nav pill bar */
     z-index: 5;
     backdrop-filter: blur(8px);
   }
@@ -1190,6 +1296,7 @@ const INSIGHTS_CSS = `
   .ins-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
   .ins-swatch--curr { background: var(--primary-green, #2a7a3a); }
   .ins-swatch--prev { background: var(--accent-soft, #d9e9dd); }
+  .ins-swatch--amber { background: var(--insights-amber-soft, #fbe0a6); border: 1px solid var(--insights-amber, #d97706); }
   .ins-yoy-svg { width: 100%; height: auto; max-height: 240px; }
 
   .ins-lead-grid { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 16px; align-items: stretch; }
