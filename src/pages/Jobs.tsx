@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Briefcase, Loader2, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -67,6 +67,7 @@ function StatusBreakdownCard({ jobs, isLoading }: { jobs: Job[]; isLoading: bool
       Late: jobs.filter((j) => j.status === 'Late').length,
       'Requires Invoicing': jobs.filter((j) => j.status === 'Requires Invoicing').length,
       Completed: jobs.filter((j) => j.status === 'Completed').length,
+      Archived: jobs.filter((j) => j.status === 'Archived').length,
     };
     return counts;
   }, [jobs, isLoading]);
@@ -83,6 +84,7 @@ function StatusBreakdownCard({ jobs, isLoading }: { jobs: Job[]; isLoading: bool
             { status: 'Late', count: stats.Late, color: 'bg-red-500' },
             { status: 'Requires Invoicing', count: stats['Requires Invoicing'], color: 'bg-amber-400' },
             { status: 'Completed', count: stats.Completed, color: 'bg-emerald-700' },
+            { status: 'Archived', count: stats.Archived, color: 'bg-slate-400' },
           ].map((item) => (
             <div key={item.status} className="flex items-center gap-3 text-sm">
               <div className={`w-2.5 h-2.5 rounded-full ${item.color}`} />
@@ -96,16 +98,28 @@ function StatusBreakdownCard({ jobs, isLoading }: { jobs: Job[]; isLoading: bool
   );
 }
 
+type JobsListTab = 'active' | 'archived';
+
 export default function Jobs() {
   const navigate = useNavigate();
   const { data: jobs = [], isLoading, error } = useJobs();
+  const [listTab, setListTab] = useState<JobsListTab>('active');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
 
-  const filtered = useMemo(() => {
-    let result = jobs;
+  const archivedJobs = useMemo(() => jobs.filter((j) => j.status === 'Archived'), [jobs]);
+  const activeListJobs = useMemo(() => jobs.filter((j) => j.status !== 'Archived'), [jobs]);
 
-    if (statusFilter !== 'All') {
+  useEffect(() => {
+    if (listTab === 'active' && statusFilter === 'Archived') setStatusFilter('All');
+  }, [listTab, statusFilter]);
+
+  const poolForTab = listTab === 'archived' ? archivedJobs : activeListJobs;
+
+  const filtered = useMemo(() => {
+    let result = poolForTab;
+
+    if (listTab === 'active' && statusFilter !== 'All') {
       result = result.filter((j) => j.status === statusFilter);
     }
 
@@ -117,7 +131,7 @@ export default function Jobs() {
         String(job.job_number).toLowerCase().includes(q) ||
         (job.title?.toLowerCase().includes(q) ?? false)
     );
-  }, [jobs, search, statusFilter]);
+  }, [poolForTab, search, statusFilter, listTab]);
 
   const stats = useMemo(() => {
     const active = jobs.filter((j) => j.status === 'Active');
@@ -188,14 +202,58 @@ export default function Jobs() {
         />
       </div>
 
+      <div
+        className="mb-4 flex flex-wrap gap-1 border-b border-[var(--border-color)]"
+        role="tablist"
+        aria-label="Job lists"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={listTab === 'active'}
+          id="jobs-tab-active"
+          aria-controls="jobs-panel"
+          className={
+            listTab === 'active'
+              ? 'border-b-2 border-[var(--primary-green)] px-3 py-2 text-sm font-medium text-[var(--primary-green)]'
+              : 'border-b-2 border-transparent px-3 py-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+          }
+          onClick={() => setListTab('active')}
+        >
+          Jobs
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={listTab === 'archived'}
+          id="jobs-tab-archived"
+          aria-controls="jobs-panel"
+          className={
+            listTab === 'archived'
+              ? 'border-b-2 border-[var(--primary-green)] px-3 py-2 text-sm font-medium text-[var(--primary-green)]'
+              : 'border-b-2 border-transparent px-3 py-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+          }
+          onClick={() => setListTab('archived')}
+        >
+          Archived
+          {!isLoading && archivedJobs.length > 0 ? (
+            <span className="ml-1.5 tabular-nums text-[var(--text-muted)]">({archivedJobs.length})</span>
+          ) : null}
+        </button>
+      </div>
+
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="mb-0.5 flex items-center gap-2 text-lg font-semibold">
             <Briefcase size={20} aria-hidden className="shrink-0 text-[var(--primary-green)]" />
-            All Jobs
+            {listTab === 'archived' ? 'Archived jobs' : 'All jobs'}
           </h2>
           <p className="mb-0 text-sm text-[var(--text-secondary)]">
-            {isLoading ? 'Loading…' : `${filtered.length} shown · ${jobs.length} total`}
+            {isLoading
+              ? 'Loading…'
+              : listTab === 'archived'
+                ? `${filtered.length} shown · ${archivedJobs.length} archived`
+                : `${filtered.length} shown · ${activeListJobs.length} active`}
           </p>
         </div>
       </div>
@@ -214,28 +272,29 @@ export default function Jobs() {
               placeholder="Job #, title…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              aria-label="Search jobs"
+              aria-label={listTab === 'archived' ? 'Search archived jobs' : 'Search jobs'}
             />
           </div>
-          <div className="w-44 shrink-0 min-w-0 sm:w-48">
-            <select
-              className={FILTER_SELECT_CLASS}
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              aria-label="Filter by status"
-            >
-              <option>All</option>
-              <option>Active</option>
-              <option>Late</option>
-              <option>Requires Invoicing</option>
-              <option>Completed</option>
-              <option>Archived</option>
-            </select>
-          </div>
+          {listTab === 'active' ? (
+            <div className="w-44 shrink-0 min-w-0 sm:w-48">
+              <select
+                className={FILTER_SELECT_CLASS}
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                aria-label="Filter by status"
+              >
+                <option>All</option>
+                <option>Active</option>
+                <option>Late</option>
+                <option>Requires Invoicing</option>
+                <option>Completed</option>
+              </select>
+            </div>
+          ) : null}
         </div>
       </Card>
 
-      <Card className="min-w-0 overflow-hidden p-0">
+      <Card id="jobs-panel" role="tabpanel" aria-labelledby={listTab === 'archived' ? 'jobs-tab-archived' : 'jobs-tab-active'} className="min-w-0 overflow-hidden p-0">
         <div className="max-h-[min(70vh,640px)] overflow-auto">
           {isLoading && jobs.length === 0 ? (
             <div className="flex items-center justify-center gap-3 px-6 py-20 text-sm text-[var(--text-secondary)]">
@@ -246,7 +305,13 @@ export default function Jobs() {
             <div className="px-6 py-16 text-center text-sm text-[var(--text-secondary)]">
               {jobs.length === 0
                 ? 'No jobs yet. Create one with New Job.'
-                : 'No jobs match your search or filter.'}
+                : listTab === 'archived'
+                  ? archivedJobs.length === 0
+                    ? 'No archived jobs.'
+                    : 'No archived jobs match your search.'
+                  : activeListJobs.length === 0
+                    ? 'No active jobs — they may all be archived. Check the Archived tab.'
+                    : 'No jobs match your search or filter.'}
             </div>
           ) : (
             <div className="overflow-x-auto">
