@@ -1,7 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import type { InvoiceStatus } from '@/lib/invoicesTypes';
+import type { InvoiceStatus, InvoiceBundle } from '@/lib/invoicesTypes';
 import { useInvoiceDetail, useInvoicesMutations } from '@/hooks/useInvoices';
+import type { QuoteDesign } from '@/lib/quotesTypes';
+import InvoiceDesignPreview from '@/components/invoices/InvoiceDesignPreview';
+import { ctxFromInvoiceBundle } from '@/components/invoices/buildInvoiceDesignContext';
+import QuoteDesignPicker from '@/components/quotes/QuoteDesignPicker';
+import { DESIGN_META } from '@/components/quotes/quoteDesignsMeta';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { formatInVancouver } from '@/lib/vancouverTime';
@@ -524,6 +529,8 @@ export default function InvoiceDetail() {
         </div>
       </div>
 
+      <InvoicePreviewCard bundle={bundle} mutations={mutations} />
+
       {/* Action Buttons */}
       <div className="mb-6 flex flex-wrap items-center gap-2">
         {invoice.status === 'Draft' && (
@@ -911,3 +918,40 @@ export default function InvoiceDetail() {
     </div>
   );
 }
+
+/**
+ * Live design preview + design picker card. Shown on the existing-invoice view.
+ * Updates the invoice's template_design via the same updateInvoice mutation; the
+ * preview re-renders with the chosen design.
+ */
+function InvoicePreviewCard({
+  bundle,
+  mutations,
+}: {
+  bundle: InvoiceBundle;
+  mutations: ReturnType<typeof useInvoicesMutations>;
+}) {
+  const ctx = useMemo(() => ctxFromInvoiceBundle(bundle), [bundle]);
+  const design = (bundle.invoice.template_design || 'editorial') as QuoteDesign;
+  const handlePick = (next: QuoteDesign) => {
+    if (next === design) return;
+    void mutations.updateInvoice.mutateAsync({ id: bundle.invoice.id, template_design: next });
+  };
+  return (
+    <div className="mb-6 rounded-xl border border-border bg-card p-6 shadow-sm">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h3 className="text-lg font-semibold">Design preview</h3>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {DESIGN_META.find((m) => m.id === design)?.label ?? design} — what the client sees on the public pay link.
+          </p>
+        </div>
+      </div>
+      <div className="mb-4">
+        <QuoteDesignPicker value={design} onChange={handlePick} />
+      </div>
+      <InvoiceDesignPreview design={design} ctx={ctx} />
+    </div>
+  );
+}
+

@@ -325,7 +325,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       template_design,
       section_visibility: body.section_visibility ?? {},
       custom_text: body.custom_text ?? {},
-      status: 'Draft',
+      status: typeof body.status === 'string' && body.status ? String(body.status) : 'Draft',
       subtotal: 0,
       tax_amount: 0,
       total: 0,
@@ -333,6 +333,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
     const { data, error } = await db.from('quotes').insert(row).select('*').single();
     if (await errTable(error)) return;
+
+    // Persist line items if the client sent them with the create call. Without this
+    // the parent quote saves but the items are silently dropped, so reopening the
+    // quote shows an empty scope of work.
+    const rawItems = Array.isArray(body.line_items_json) ? body.line_items_json : [];
+    if (data && rawItems.length > 0) {
+      const toInsert = rawItems.map((it: unknown, i: number) => {
+        const item = (it ?? {}) as Record<string, unknown>;
+        const qty = Number(item.quantity) || 0;
+        const unit = Number(item.unit_price) || 0;
+        return {
+          tenant_id: tenantId,
+          quote_id: data.id,
+          product_service_name: String(item.product_service_name ?? '').trim() || 'Item',
+          description: item.description != null ? String(item.description) : null,
+          section_title: item.section_title != null ? String(item.section_title).trim() || null : null,
+          quantity: qty,
+          unit_price: unit,
+          total: qty * unit,
+          sort_order: typeof item.sort_order === 'number' ? item.sort_order : i,
+        };
+      });
+      const lineErr = (await db.from('quote_line_items').insert(toInsert)).error;
+      if (lineErr) {
+        // Non-fatal: parent quote already saved. Surface the error so the client knows.
+        res.status(207).json({ quote: data, warning: `Line items not saved: ${lineErr.message}` });
+        return;
+      }
+      // Recompute totals on the parent row so subtotal/tax/total reflect the items.
+      const sub = toInsert.reduce((s, r) => s + r.total, 0);
+      const taxRate = Number(row.tax_rate) || 0.05;
+      const taxAmount = sub * taxRate;
+      const total = sub + taxAmount;
+      const upd = (
+        await db
+          .from('quotes')
+          .update({ subtotal: sub, tax_amount: taxAmount, total, updated_at: NOW_ISO() })
+          .eq('id', data.id)
+          .eq('tenant_id', tenantId)
+          .select('*')
+          .single()
+      );
+      if (upd.data) {
+        res.status(200).json({ quote: upd.data });
+        return;
+      }
+    }
+
     res.status(200).json({ quote: data });
     return;
   }

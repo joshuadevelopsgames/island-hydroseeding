@@ -181,7 +181,11 @@ const INVOICE_PATCH_KEYS = [
   'payment_terms',
   'tax_rate',
   'status',
+  'section_visibility',
+  'custom_text',
 ] as const;
+
+const ALLOWED_INVOICE_DESIGNS = new Set(['editorial', 'technical', 'field', 'statement']);
 
 async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseClient, tenantId: string) {
   const body = parseBody(req);
@@ -206,6 +210,8 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
     const issue = (issue_date as string) || todayDate();
     const due = (due_date as string) || defaultDueDate();
     const tr = tax_rate != null ? Number(tax_rate) : 0.05;
+    const designRaw = body.template_design != null ? String(body.template_design) : 'editorial';
+    const template_design = ALLOWED_INVOICE_DESIGNS.has(designRaw) ? designRaw : 'editorial';
 
     const { data, error } = await db
       .from('invoices')
@@ -223,6 +229,9 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
         notes,
         payment_terms,
         tax_rate: tr,
+        template_design,
+        section_visibility: body.section_visibility ?? {},
+        custom_text: body.custom_text ?? {},
         subtotal: 0,
         tax_amount: 0,
         total: 0,
@@ -252,6 +261,13 @@ async function handlePost(req: VercelRequest, res: VercelResponse, db: SupabaseC
       if (Object.prototype.hasOwnProperty.call(raw, k)) {
         updates[k] = raw[k as keyof typeof raw];
       }
+    }
+    if (Object.prototype.hasOwnProperty.call(raw, 'template_design')) {
+      const d = String((raw as Record<string, unknown>).template_design ?? '');
+      if (!ALLOWED_INVOICE_DESIGNS.has(d)) {
+        return res.status(400).json({ error: `Invalid template_design: ${d}` });
+      }
+      updates.template_design = d;
     }
 
     const { data, error } = await db
