@@ -47,7 +47,8 @@ function sidebarUserInitials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-const primaryNavItems: { name: string; path: string; icon: typeof LayoutDashboard }[] = [
+type NavChild = { name: string; path: string };
+const primaryNavItems: { name: string; path: string; icon: typeof LayoutDashboard; children?: NavChild[] }[] = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
   { name: 'Accounts', path: '/crm', icon: Users },
   { name: 'Requests', path: '/requests', icon: Inbox },
@@ -55,8 +56,12 @@ const primaryNavItems: { name: string; path: string; icon: typeof LayoutDashboar
   { name: 'Jobs', path: '/jobs', icon: Briefcase },
   { name: 'Invoices', path: '/invoices', icon: Receipt },
   { name: 'Payments', path: '/payments', icon: CreditCard },
-  { name: 'Reports', path: '/reports', icon: BarChart3 },
-  { name: 'Insights', path: '/insights', icon: BarChart3 },
+  {
+    name: 'Insights',
+    path: '/insights',
+    icon: BarChart3,
+    children: [{ name: 'Reports', path: '/reports' }],
+  },
   { name: 'Schedule', path: '/schedule', icon: Calendar },
   { name: 'Time Tracking', path: '/time', icon: Clock },
   { name: 'Pre-trips', path: '/pre-trips', icon: ClipboardCheck },
@@ -214,21 +219,42 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         {visiblePrimary.map((item) => {
           const isActive = isNavPathActive(item.path);
           const Icon = item.icon;
+          const childActive = item.children?.some((c) => isNavPathActive(c.path));
+          const showChildren = (isActive || childActive) && item.children && item.children.length > 0;
           return (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={`nav-link${isActive ? ' nav-link--active' : ''}`}
-              onClick={() => setDrawerOpen(false)}
-            >
-              <Icon size={20} strokeWidth={isActive ? 2.25 : 1.75} />
-              {item.name}
-              {item.path === '/tasks' && taskInboxCount > 0 && (
-                <span className="nav-link__badge" aria-label={`${taskInboxCount} unseen task assignments`}>
-                  {taskInboxCount > 99 ? '99+' : taskInboxCount}
-                </span>
+            <div key={item.path}>
+              <Link
+                to={item.path}
+                className={`nav-link${isActive ? ' nav-link--active' : ''}`}
+                onClick={() => setDrawerOpen(false)}
+              >
+                <Icon size={20} strokeWidth={isActive ? 2.25 : 1.75} />
+                {item.name}
+                {item.path === '/tasks' && taskInboxCount > 0 && (
+                  <span className="nav-link__badge" aria-label={`${taskInboxCount} unseen task assignments`}>
+                    {taskInboxCount > 99 ? '99+' : taskInboxCount}
+                  </span>
+                )}
+              </Link>
+              {showChildren && (
+                <div className="sidebar__nav-children">
+                  {item.children!.map((child) => {
+                    const cActive = isNavPathActive(child.path);
+                    return (
+                      <Link
+                        key={child.path}
+                        to={child.path}
+                        className={`nav-link nav-link--child${cActive ? ' nav-link--active' : ''}`}
+                        onClick={() => setDrawerOpen(false)}
+                      >
+                        <span style={{ width: 20 }} aria-hidden />
+                        {child.name}
+                      </Link>
+                    );
+                  })}
+                </div>
               )}
-            </Link>
+            </div>
           );
         })}
 

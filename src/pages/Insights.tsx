@@ -3,6 +3,8 @@ import { BarChart3 } from 'lucide-react';
 import { useQuotes } from '@/hooks/useQuotes';
 import { useInvoices } from '@/hooks/useInvoices';
 import { useJobs } from '@/hooks/useJobs';
+import { useRequests } from '@/hooks/useRequests';
+import { useCrmAccounts } from '@/hooks/useCrm';
 
 const CAD = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD', maximumFractionDigits: 0 });
 
@@ -28,7 +30,7 @@ function rangeBounds(r: RangeKey): { from: Date; to: Date } {
     from.setMonth(0);
     from.setDate(1);
   } else if (r === 'last_year') from.setFullYear(now.getFullYear() - 1);
-  else from.setFullYear(2000); // 'all'
+  else from.setFullYear(2000);
   from.setHours(0, 0, 0, 0);
   return { from, to };
 }
@@ -47,8 +49,21 @@ function inRange(iso: string | null | undefined, from: Date, to: Date): boolean 
 
 function pct(curr: number, prev: number): number | null {
   if (prev === 0 && curr === 0) return 0;
-  if (prev === 0) return null; // can't compute % from a zero base
+  if (prev === 0) return null;
   return ((curr - prev) / prev) * 100;
+}
+
+function avgDaysBetween(starts: (string | null | undefined)[], ends: (string | null | undefined)[]): number | null {
+  const pairs: number[] = [];
+  for (let i = 0; i < starts.length; i++) {
+    const s = starts[i];
+    const e = ends[i];
+    if (!s || !e) continue;
+    const a = new Date(s).getTime();
+    const b = new Date(e).getTime();
+    if (Number.isFinite(a) && Number.isFinite(b) && b >= a) pairs.push((b - a) / 86400000);
+  }
+  return pairs.length === 0 ? null : pairs.reduce((s, n) => s + n, 0) / pairs.length;
 }
 
 export default function Insights() {
@@ -56,28 +71,30 @@ export default function Insights() {
   const { data: quotes = [] } = useQuotes();
   const { data: invoices = [] } = useInvoices();
   const { data: jobs = [] } = useJobs();
+  const { data: requests = [] } = useRequests();
+  const { data: accounts = [] } = useCrmAccounts();
 
   const { from, to } = useMemo(() => rangeBounds(range), [range]);
   const prior = useMemo(() => priorRange(range), [range]);
 
-  // ─── Overview KPIs ─────────────────────────────────────────
+  const accountName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of accounts) m.set(a.id, a.name);
+    return (id: string | null) => (id ? m.get(id) ?? 'Unknown' : 'Unknown');
+  }, [accounts]);
+
+  // ─── Overview ─────────────────────────────────────────────
   const overview = useMemo(() => {
     const newQuotesCurr = quotes.filter((q) => inRange(q.created_at, from, to)).length;
     const newQuotesPrev = quotes.filter((q) => inRange(q.created_at, prior.from, prior.to)).length;
 
-    const convertedCurr = quotes.filter(
-      (q) => q.converted_at && inRange(q.converted_at, from, to)
-    ).length;
-    const convertedPrev = quotes.filter(
-      (q) => q.converted_at && inRange(q.converted_at, prior.from, prior.to)
-    ).length;
+    const convertedCurr = quotes.filter((q) => q.converted_at && inRange(q.converted_at, from, to)).length;
+    const convertedPrev = quotes.filter((q) => q.converted_at && inRange(q.converted_at, prior.from, prior.to)).length;
 
     const newInvoicesCurr = invoices.filter((i) => inRange(i.created_at, from, to));
     const newInvoicesPrev = invoices.filter((i) => inRange(i.created_at, prior.from, prior.to));
-
     const invoicedCurr = newInvoicesCurr.reduce((s, i) => s + Number(i.total ?? 0), 0);
     const invoicedPrev = newInvoicesPrev.reduce((s, i) => s + Number(i.total ?? 0), 0);
-
     const paidCurr = newInvoicesCurr.reduce((s, i) => s + Number(i.amount_paid ?? 0), 0);
     const paidPrev = newInvoicesPrev.reduce((s, i) => s + Number(i.amount_paid ?? 0), 0);
 
@@ -90,7 +107,7 @@ export default function Insights() {
     };
   }, [quotes, invoices, from, to, prior.from, prior.to]);
 
-  // ─── Revenue YoY (monthly bars) ────────────────────────────
+  // ─── Revenue YoY ──────────────────────────────────────────
   const revenueYoY = useMemo(() => {
     const now = new Date();
     const thisYear = now.getFullYear();
@@ -107,35 +124,74 @@ export default function Insights() {
     return { thisYear, lastYear, current: monthly(thisYear), prev: monthly(lastYear) };
   }, [invoices]);
 
-  // ─── Cashflow tiles ────────────────────────────────────────
+  // ─── Cashflow ─────────────────────────────────────────────
   const cashflow = useMemo(() => {
-    const outstanding = invoices
-      .filter((i) => i.status !== 'Paid' && Number(i.balance_due) > 0)
-      .reduce((s, i) => s + Number(i.balance_due), 0);
+    const unpaid = invoices.filter((i) => i.status !== 'Paid' && Number(i.balance_due) > 0);
+    const outstanding = unpaid.reduce((s, i) => s + Number(i.balance_due), 0);
 
-    // Average days from issue to paid (for invoices that have closed in the range).
-    const closedInRange = invoices.filter(
-      (i) => i.status === 'Paid' && inRange(i.updated_at, from, to)
-    );
+    const closedInRange = invoices.filter((i) => i.status === 'Paid' && inRange(i.updated_at, from, to));
     const avgDaysToPaid =
       closedInRange.length === 0
         ? null
-        : closedInRange.reduce((s, i) => {
-            const issued = new Date(i.issue_date).getTime();
-            const closed = new Date(i.updated_at).getTime();
-            return s + (closed - issued) / 86400000;
-          }, 0) / closedInRange.length;
+        : closedInRange.reduce((s, i) => s + (new Date(i.updated_at).getTime() - new Date(i.issue_date).getTime()) / 86400000, 0) / closedInRange.length;
 
-    // Projected income = sum of accepted/converted quote totals not yet invoiced.
     const invoicedQuoteIds = new Set(invoices.map((i) => i.quote_id).filter(Boolean));
     const projected = quotes
       .filter((q) => (q.status === 'Approved' || q.status === 'Converted') && !invoicedQuoteIds.has(q.id))
       .reduce((s, q) => s + Number(q.total ?? 0), 0);
 
-    return { outstanding, avgDaysToPaid, projected };
-  }, [invoices, quotes, from, to]);
+    // Top debtors — group unpaid balance by account
+    const byAccount = new Map<string, number>();
+    for (const inv of unpaid) {
+      if (!inv.account_id) continue;
+      byAccount.set(inv.account_id, (byAccount.get(inv.account_id) ?? 0) + Number(inv.balance_due));
+    }
+    const topDebtors = [...byAccount.entries()]
+      .map(([id, balance]) => ({ id, name: accountName(id), balance }))
+      .sort((a, b) => b.balance - a.balance)
+      .slice(0, 5);
 
-  // ─── Funnel & quote conversion ─────────────────────────────
+    return { outstanding, avgDaysToPaid, projected, topDebtors, unpaidCount: unpaid.length };
+  }, [invoices, quotes, from, to, accountName]);
+
+  // ─── Lead conversion ──────────────────────────────────────
+  const leadConv = useMemo(() => {
+    // Quotes whose origin request can be matched via converted_quote_id
+    const quoteIdToCreated = new Map<string, string>();
+    for (const q of quotes) quoteIdToCreated.set(q.id, q.created_at);
+
+    const requestStarts: string[] = [];
+    const requestToQuote: string[] = [];
+    for (const r of requests) {
+      if (!r.converted_quote_id) continue;
+      const qCreated = quoteIdToCreated.get(r.converted_quote_id);
+      if (!qCreated) continue;
+      requestStarts.push(r.requested_at ?? r.created_at);
+      requestToQuote.push(qCreated);
+    }
+    const reqToQuoteDays = avgDaysBetween(requestStarts, requestToQuote);
+
+    // Quote sent → approved
+    const sent: string[] = [];
+    const approved: string[] = [];
+    for (const q of quotes) {
+      if (q.sent_at && q.approved_at) {
+        sent.push(q.sent_at);
+        approved.push(q.approved_at);
+      }
+    }
+    const quoteToApprovedDays = avgDaysBetween(sent, approved);
+
+    // Funnel counts in range
+    const reqIn = requests.filter((r) => inRange(r.created_at, from, to)).length;
+    const sentIn = quotes.filter((q) => q.sent_at && inRange(q.sent_at, from, to)).length;
+    type J = { created_at?: string };
+    const jobsIn = (jobs as J[]).filter((j) => inRange(j.created_at, from, to)).length;
+
+    return { reqToQuoteDays, quoteToApprovedDays, funnel: { requests: reqIn, quotes: sentIn, jobs: jobsIn } };
+  }, [requests, quotes, jobs, from, to]);
+
+  // ─── Quotes funnel + value-over-time ──────────────────────
   const funnel = useMemo(() => {
     const sentInRange = quotes.filter(
       (q) => (q.status === 'Sent' || q.status === 'Approved' || q.status === 'Converted') && inRange(q.created_at, from, to)
@@ -150,17 +206,48 @@ export default function Insights() {
 
     const conversionRate = sentInRange.length === 0 ? 0 : (approved / sentInRange.length) * 100;
 
-    return { sent: sentInRange.length, approved, converted, sentValue, approvedValue, conversionRate };
+    // Bucket by week for the value-over-time chart
+    const weeks: { label: string; sent: number; approved: number }[] = [];
+    const span = to.getTime() - from.getTime();
+    const weekMs = 7 * 86400000;
+    const weekCount = Math.max(1, Math.min(12, Math.ceil(span / weekMs)));
+    for (let i = 0; i < weekCount; i++) {
+      const wFrom = new Date(from.getTime() + (i * span) / weekCount);
+      const wTo = new Date(from.getTime() + ((i + 1) * span) / weekCount);
+      let s = 0;
+      let a = 0;
+      for (const q of sentInRange) {
+        if (!inRange(q.created_at, wFrom, wTo)) continue;
+        s += Number(q.total ?? 0);
+        if (q.status === 'Approved' || q.status === 'Converted') a += Number(q.total ?? 0);
+      }
+      weeks.push({ label: wFrom.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }), sent: s, approved: a });
+    }
+
+    return { sent: sentInRange.length, approved, converted, sentValue, approvedValue, conversionRate, weeks };
   }, [quotes, from, to]);
 
-  // ─── Jobs section ──────────────────────────────────────────
+  // ─── Jobs ─────────────────────────────────────────────────
   const jobsSummary = useMemo(() => {
-    type J = { status?: string; created_at?: string };
-    const inRangeJobs = (jobs as J[]).filter((j) => inRange(j.created_at, from, to));
+    type J = { id?: string; status?: string; created_at?: string; is_recurring?: boolean; job_type?: string; quote_id?: string | null };
+    const list = jobs as J[];
+    const inRangeJobs = list.filter((j) => inRange(j.created_at, from, to));
     const total = inRangeJobs.length;
-    const active = (jobs as J[]).filter((j) => j.status && j.status !== 'Completed' && j.status !== 'Archived').length;
-    return { total, active };
-  }, [jobs, from, to]);
+    const active = list.filter((j) => j.status && j.status !== 'Completed' && j.status !== 'Archived').length;
+
+    const recurring = list.filter((j) => j.is_recurring === true).length;
+    const oneOff = list.filter((j) => j.is_recurring !== true).length;
+
+    // Average job value: average of (linked quote's total) for jobs created in range
+    const quoteTotalById = new Map<string, number>();
+    for (const q of quotes) quoteTotalById.set(q.id, Number(q.total ?? 0));
+    const valuedJobs = inRangeJobs
+      .map((j) => (j.quote_id ? quoteTotalById.get(j.quote_id) : undefined))
+      .filter((v): v is number => typeof v === 'number' && v > 0);
+    const avgValue = valuedJobs.length === 0 ? null : valuedJobs.reduce((s, n) => s + n, 0) / valuedJobs.length;
+
+    return { total, active, recurring, oneOff, avgValue };
+  }, [jobs, quotes, from, to]);
 
   return (
     <div className="page">
@@ -171,13 +258,12 @@ export default function Insights() {
             Insights
           </h1>
           <p style={{ color: 'var(--text-muted)', margin: 0 }}>
-            How the business is moving. Numbers update from your quotes, invoices, and payments.
+            How the business is moving. Numbers update from your requests, quotes, jobs, invoices, and payments.
           </p>
         </div>
         <RangePicker value={range} onChange={setRange} />
       </div>
 
-      {/* Overview band */}
       <Section title="Overview" subtitle={rangeLabel(range)}>
         <div className="ins-kpi-grid">
           <KpiTile label="New quotes" value={String(overview.newQuotes.curr)} change={overview.newQuotes.change} />
@@ -188,7 +274,6 @@ export default function Insights() {
         </div>
       </Section>
 
-      {/* Revenue YoY */}
       <Section title="Revenue" subtitle="By month, this year vs last">
         <div className="ins-yoy-totals">
           <div>
@@ -205,10 +290,46 @@ export default function Insights() {
         <YoYBars current={revenueYoY.current} prev={revenueYoY.prev} />
       </Section>
 
-      {/* Cashflow */}
+      <Section title="Lead conversion" subtitle="From request to job">
+        <div className="ins-lead-grid">
+          <div className="ins-lead-times">
+            <KpiTile
+              label="Request → quote"
+              value={leadConv.reqToQuoteDays == null ? '—' : `${leadConv.reqToQuoteDays.toFixed(1)} days`}
+              sub="Average for converted requests"
+            />
+            <KpiTile
+              label="Quote → accepted"
+              value={leadConv.quoteToApprovedDays == null ? '—' : `${leadConv.quoteToApprovedDays.toFixed(1)} days`}
+              sub="Sent to approved"
+            />
+          </div>
+          <div className="ins-funnel-card">
+            <div className="ins-funnel-step">
+              <div className="ins-funnel-num">{leadConv.funnel.requests}</div>
+              <div className="ins-funnel-lbl">Requests</div>
+            </div>
+            <div className="ins-funnel-arrow">→</div>
+            <div className="ins-funnel-step">
+              <div className="ins-funnel-num">{leadConv.funnel.quotes}</div>
+              <div className="ins-funnel-lbl">Quotes sent</div>
+            </div>
+            <div className="ins-funnel-arrow">→</div>
+            <div className="ins-funnel-step">
+              <div className="ins-funnel-num">{leadConv.funnel.jobs}</div>
+              <div className="ins-funnel-lbl">Jobs created</div>
+            </div>
+          </div>
+        </div>
+      </Section>
+
       <Section title="Cashflow" subtitle="Outstanding, projected, and how fast you're paid">
         <div className="ins-kpi-grid ins-kpi-grid--3">
-          <KpiTile label="Outstanding" value={CAD.format(cashflow.outstanding)} sub="Unpaid invoices" />
+          <KpiTile
+            label="Outstanding"
+            value={CAD.format(cashflow.outstanding)}
+            sub={cashflow.unpaidCount === 1 ? '1 unpaid invoice' : `${cashflow.unpaidCount} unpaid invoices`}
+          />
           <KpiTile
             label="Avg time to paid"
             value={cashflow.avgDaysToPaid == null ? '—' : `${cashflow.avgDaysToPaid.toFixed(1)} days`}
@@ -216,9 +337,23 @@ export default function Insights() {
           />
           <KpiTile label="Projected income" value={CAD.format(cashflow.projected)} sub="Accepted quotes not yet invoiced" />
         </div>
+
+        {cashflow.topDebtors.length > 0 && (
+          <div className="ins-debtors">
+            <div className="ins-debtors-head">
+              <span>Top open balances</span>
+              <span>Balance</span>
+            </div>
+            {cashflow.topDebtors.map((d) => (
+              <div key={d.id} className="ins-debtor-row">
+                <span className="ins-debtor-name">{d.name}</span>
+                <span className="ins-debtor-bal">{CAD.format(d.balance)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </Section>
 
-      {/* Funnel + conversion */}
       <Section title="Quotes" subtitle="Sent, accepted, converted to invoice">
         <div className="ins-funnel-row">
           <div className="ins-funnel-card">
@@ -246,13 +381,32 @@ export default function Insights() {
             <ConversionDonut pct={funnel.conversionRate} />
           </div>
         </div>
+
+        <div className="ins-section-sub-head">
+          Quote value over time<span className="ins-section-sub">Sent vs accepted, by week</span>
+        </div>
+        <SentVsApprovedBars weeks={funnel.weeks} />
       </Section>
 
-      {/* Jobs */}
       <Section title="Jobs" subtitle="Work in progress">
-        <div className="ins-kpi-grid ins-kpi-grid--2">
-          <KpiTile label="New jobs" value={String(jobsSummary.total)} sub={rangeLabel(range)} />
-          <KpiTile label="Active jobs" value={String(jobsSummary.active)} sub="Open right now" />
+        <div className="ins-jobs-row">
+          <div className="ins-kpi-grid ins-kpi-grid--2 ins-jobs-tiles">
+            <KpiTile label="New jobs" value={String(jobsSummary.total)} sub={rangeLabel(range)} />
+            <KpiTile label="Active jobs" value={String(jobsSummary.active)} sub="Open right now" />
+            <KpiTile
+              label="Average job value"
+              value={jobsSummary.avgValue == null ? '—' : CAD.format(jobsSummary.avgValue)}
+              sub="From linked quote totals"
+            />
+          </div>
+          <div className="ins-conv-card">
+            <div className="ins-conv-lbl">Recurring vs one-off</div>
+            <RecurringDonut recurring={jobsSummary.recurring} oneOff={jobsSummary.oneOff} />
+            <div className="ins-legend">
+              <div><span className="ins-swatch ins-swatch--curr" /> Recurring · {jobsSummary.recurring}</div>
+              <div><span className="ins-swatch ins-swatch--prev" /> One-off · {jobsSummary.oneOff}</div>
+            </div>
+          </div>
         </div>
       </Section>
 
@@ -294,17 +448,7 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
   );
 }
 
-function KpiTile({
-  label,
-  value,
-  change,
-  sub,
-}: {
-  label: string;
-  value: string;
-  change?: number | null;
-  sub?: string;
-}) {
+function KpiTile({ label, value, change, sub }: { label: string; value: string; change?: number | null; sub?: string }) {
   const changeDisplay =
     change == null ? null : (
       <span className={'ins-kpi-change ' + (change >= 0 ? 'is-up' : 'is-down')}>
@@ -323,7 +467,6 @@ function KpiTile({
   );
 }
 
-/** Year-over-year monthly bar chart. Side-by-side bars per month. */
 function YoYBars({ current, prev }: { current: number[]; prev: number[] }) {
   const max = Math.max(1, ...current, ...prev);
   const months = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
@@ -348,15 +491,37 @@ function YoYBars({ current, prev }: { current: number[]; prev: number[] }) {
           <g key={i}>
             <rect x={x} y={padY + innerH - pH} width={barW} height={pH} fill="var(--accent-soft, #d9e9dd)" rx="2" />
             <rect x={x + barW + 2} y={padY + innerH - cH} width={barW} height={cH} fill="var(--primary-green, #2a7a3a)" rx="2" />
-            <text
-              x={x + barW + 1}
-              y={H - 8}
-              textAnchor="middle"
-              fontSize="10"
-              fill="var(--text-muted)"
-            >
-              {months[i]}
-            </text>
+            <text x={x + barW + 1} y={H - 8} textAnchor="middle" fontSize="10" fill="var(--text-muted)">{months[i]}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function SentVsApprovedBars({ weeks }: { weeks: { label: string; sent: number; approved: number }[] }) {
+  const max = Math.max(1, ...weeks.map((w) => Math.max(w.sent, w.approved)));
+  const W = 720;
+  const H = 160;
+  const padX = 28;
+  const padY = 24;
+  const innerW = W - padX * 2;
+  const innerH = H - padY * 2;
+  const groupW = innerW / weeks.length;
+  const barW = Math.max(4, (groupW - 6) / 2);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="ins-yoy-svg" role="img" aria-label="Quote value sent vs accepted, by week">
+      <line x1={padX} y1={padY + innerH} x2={W - padX} y2={padY + innerH} stroke="var(--border-color)" />
+      {weeks.map((w, i) => {
+        const x = padX + i * groupW + 3;
+        const sH = (w.sent / max) * innerH;
+        const aH = (w.approved / max) * innerH;
+        return (
+          <g key={i}>
+            <rect x={x} y={padY + innerH - sH} width={barW} height={sH} fill="var(--accent-soft, #d9e9dd)" rx="2" />
+            <rect x={x + barW + 2} y={padY + innerH - aH} width={barW} height={aH} fill="var(--primary-green, #2a7a3a)" rx="2" />
+            <text x={x + barW + 1} y={H - 6} textAnchor="middle" fontSize="9" fill="var(--text-muted)">{w.label}</text>
           </g>
         );
       })}
@@ -387,6 +552,34 @@ function ConversionDonut({ pct }: { pct: number }) {
   );
 }
 
+function RecurringDonut({ recurring, oneOff }: { recurring: number; oneOff: number }) {
+  const total = recurring + oneOff;
+  const recPct = total === 0 ? 0 : (recurring / total) * 100;
+  const r = 36;
+  const c = 2 * Math.PI * r;
+  const recDash = (recPct / 100) * c;
+  return (
+    <svg viewBox="0 0 100 100" width="92" height="92" className="ins-donut">
+      <circle cx="50" cy="50" r={r} fill="none" stroke="var(--accent-soft, #d9e9dd)" strokeWidth="10" />
+      <circle
+        cx="50"
+        cy="50"
+        r={r}
+        fill="none"
+        stroke="var(--primary-green, #2a7a3a)"
+        strokeWidth="10"
+        strokeDasharray={`${recDash} ${c - recDash}`}
+        strokeDashoffset={c / 4}
+        strokeLinecap="round"
+        transform="rotate(-90 50 50)"
+      />
+      <text x="50" y="54" textAnchor="middle" fontSize="13" fontWeight="600" fill="var(--text-primary)">
+        {total}
+      </text>
+    </svg>
+  );
+}
+
 const INSIGHTS_CSS = `
   .ins-range-picker { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--surface-color); border: 1px solid var(--border-color); border-radius: 8px; }
   .ins-range-btn { background: transparent; border: 0; padding: 6px 12px; font-size: 13px; color: var(--text-muted); border-radius: 6px; cursor: pointer; }
@@ -397,6 +590,7 @@ const INSIGHTS_CSS = `
   .ins-section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
   .ins-section-title { font-size: 18px; font-weight: 600; margin: 0; }
   .ins-section-sub { font-size: 12px; color: var(--text-muted); }
+  .ins-section-sub-head { display: flex; align-items: baseline; gap: 12px; margin: 20px 0 8px; font-size: 14px; font-weight: 600; }
 
   .ins-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
   .ins-kpi-grid--2 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
@@ -405,7 +599,7 @@ const INSIGHTS_CSS = `
   .ins-kpi { padding: 14px 16px; background: var(--bg-secondary, #fafafa); border-radius: 8px; border: 1px solid var(--border-color); }
   .ins-kpi-label { font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; }
   .ins-kpi-value { font-size: 26px; font-weight: 600; line-height: 1.1; color: var(--text-primary); }
-  .ins-kpi-meta { display: flex; gap: 8px; align-items: center; margin-top: 6px; min-height: 18px; }
+  .ins-kpi-meta { display: flex; gap: 8px; align-items: center; margin-top: 6px; min-height: 18px; flex-wrap: wrap; }
   .ins-kpi-change { font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 999px; }
   .ins-kpi-change.is-up { background: rgba(42, 122, 58, 0.1); color: var(--primary-green); }
   .ins-kpi-change.is-down { background: rgba(176, 51, 55, 0.1); color: #b03337; }
@@ -420,6 +614,10 @@ const INSIGHTS_CSS = `
   .ins-swatch--prev { background: var(--accent-soft, #d9e9dd); }
   .ins-yoy-svg { width: 100%; height: auto; max-height: 240px; }
 
+  .ins-lead-grid { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 16px; align-items: stretch; }
+  @media (max-width: 720px) { .ins-lead-grid { grid-template-columns: 1fr; } }
+  .ins-lead-times { display: grid; gap: 12px; align-content: start; }
+
   .ins-funnel-row { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 16px; align-items: stretch; }
   @media (max-width: 720px) { .ins-funnel-row { grid-template-columns: 1fr; } }
   .ins-funnel-card { display: flex; align-items: center; gap: 16px; padding: 18px; background: var(--bg-secondary, #fafafa); border: 1px solid var(--border-color); border-radius: 8px; flex-wrap: wrap; }
@@ -432,4 +630,17 @@ const INSIGHTS_CSS = `
   .ins-conv-num { font-size: 28px; font-weight: 600; color: var(--text-primary); }
   .ins-conv-lbl { font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); }
   .ins-donut { margin-top: 6px; }
+  .ins-legend { font-size: 11px; color: var(--text-muted); margin-top: 8px; display: grid; gap: 4px; }
+  .ins-legend > div { display: flex; align-items: center; gap: 6px; }
+
+  .ins-debtors { margin-top: 16px; padding: 12px 14px; background: var(--bg-secondary, #fafafa); border: 1px solid var(--border-color); border-radius: 8px; }
+  .ins-debtors-head { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); padding-bottom: 8px; border-bottom: 1px solid var(--border-color); }
+  .ins-debtor-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px dashed var(--border-color); }
+  .ins-debtor-row:last-child { border-bottom: 0; }
+  .ins-debtor-name { color: var(--text-primary); }
+  .ins-debtor-bal { font-family: 'JetBrains Mono', ui-monospace, monospace; color: #b03337; font-weight: 600; }
+
+  .ins-jobs-row { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 16px; align-items: stretch; }
+  @media (max-width: 720px) { .ins-jobs-row { grid-template-columns: 1fr; } }
+  .ins-jobs-tiles { align-content: start; }
 `;

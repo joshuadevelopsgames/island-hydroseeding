@@ -818,6 +818,20 @@ html.theme-dark .theme-toggle-btn:hover {
   font-size: 0.8125rem;
 }
 
+.sidebar__nav-children {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.25rem 0 0.25rem 0.5rem;
+  padding-left: 0.65rem;
+  border-left: 2px solid var(--accent-muted);
+}
+
+.nav-link--child {
+  font-size: 0.8125rem;
+  padding-left: 0.5rem;
+}
+
 .sidebar-profile-bar {
   display: flex;
   align-items: center;
