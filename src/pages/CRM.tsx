@@ -35,20 +35,12 @@ const PIPELINE_STATUSES: CrmAccountStatus[] = [
   'Lost',
 ];
 
-const STATUS_SORT_RANK: Record<string, number> = Object.fromEntries(
-  PIPELINE_STATUSES.map((s, i) => [s, i])
-) as Record<string, number>;
-
 const FILTER_SELECT_CLASS =
   'h-10 min-w-[10rem] shrink-0 rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-color)] px-3 text-sm text-[var(--text-primary)]';
 
 type TypeFilter = 'all' | CrmAccountType;
 type StatusFilter = 'all' | CrmAccountStatus;
-type SortKey = 'name_asc' | 'name_desc' | 'updated_desc' | 'updated_asc' | 'status_pipeline' | 'type_asc';
-
-function statusSortRank(status: string): number {
-  return STATUS_SORT_RANK[status] ?? 99;
-}
+type SortKey = 'name_asc' | 'name_desc' | 'updated_desc' | 'updated_asc' | 'type_asc';
 
 function accountsToCsv(accounts: { name: string; company: string | null; account_type: string; status: string; phone: string | null; email: string | null; address: string | null; notes: string | null }[]) {
   const headers = ['name', 'company', 'account_type', 'status', 'phone', 'email', 'address', 'notes'];
@@ -83,12 +75,22 @@ function statusBadge(status: string) {
 function typeBadge(type: string) {
   const t = type as CrmAccountType;
   const variantClass: Partial<Record<CrmAccountType, string>> = {
-    Residential: 'border-emerald-800/25 bg-emerald-500/[0.07] text-emerald-900 dark:text-emerald-200/95',
-    Commercial: 'border-sky-800/25 bg-sky-500/[0.07] text-sky-950 dark:text-sky-100/90',
-    Municipal: 'border-violet-800/25 bg-violet-500/[0.07] text-violet-950 dark:text-violet-100/90',
+    Residential:
+      'border-emerald-700/55 bg-emerald-100 text-emerald-950 dark:border-emerald-400/55 dark:bg-emerald-950 dark:text-emerald-50',
+    Commercial:
+      'border-sky-700/55 bg-sky-100 text-sky-950 dark:border-sky-400/55 dark:bg-sky-950 dark:text-sky-50',
+    Municipal:
+      'border-violet-700/55 bg-violet-100 text-violet-950 dark:border-violet-400/55 dark:bg-violet-950 dark:text-violet-50',
   };
   return (
-    <Badge variant="outline" className={cn('whitespace-nowrap', variantClass[t])}>
+    <Badge
+      variant="outline"
+      className={cn(
+        'whitespace-nowrap text-xs font-semibold',
+        variantClass[t] ??
+          'border-[var(--border-strong)] bg-[var(--surface-raised)] text-[var(--text-primary)]'
+      )}
+    >
       {type}
     </Badge>
   );
@@ -113,11 +115,6 @@ function sortedAccounts(list: CrmAccount[], sortBy: SortKey): CrmAccount[] {
         return compareUpdated(a, b, -1);
       case 'updated_asc':
         return compareUpdated(a, b, 1);
-      case 'status_pipeline': {
-        const cmp = statusSortRank(a.status) - statusSortRank(b.status);
-        if (cmp !== 0) return cmp;
-        return (a.name || '').localeCompare(b.name || '');
-      }
       case 'type_asc':
         return (a.account_type || '').localeCompare(b.account_type || '') || (a.name || '').localeCompare(b.name || '');
       default:
@@ -255,9 +252,9 @@ export default function CRM() {
         </div>
       </div>
 
-      <Card className="mb-4 p-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
-          <div className="relative min-w-0 flex-1">
+      <Card className="mb-4 min-w-0 overflow-hidden p-4">
+        <div className="flex min-w-0 flex-row flex-nowrap items-center gap-3 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="relative min-w-[11rem] max-w-md shrink-0 grow basis-[14rem] sm:max-w-none sm:basis-auto sm:flex-1">
             <Search
               size={18}
               aria-hidden
@@ -265,56 +262,53 @@ export default function CRM() {
             />
             <Input
               type="search"
-              className="pl-10"
+              className="w-full min-w-0 pl-10"
               placeholder="Search name, company, email, phone…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               aria-label="Search accounts"
             />
           </div>
-          <div className="flex flex-wrap items-center gap-3 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <select
+            className={cn(FILTER_SELECT_CLASS, 'shrink-0')}
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
+            aria-label="Filter by account type"
+          >
+            <option value="all">All types</option>
+            {ACCOUNT_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+          <select
+            className={cn(FILTER_SELECT_CLASS, 'shrink-0')}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            aria-label="Filter by lead status"
+          >
+            <option value="all">All statuses</option>
+            {PIPELINE_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <div className="flex shrink-0 items-center gap-2">
+            <ArrowUpDown size={16} aria-hidden className="shrink-0 text-[var(--text-muted)]" />
             <select
-              className={FILTER_SELECT_CLASS}
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
-              aria-label="Filter by account type"
+              className={cn(FILTER_SELECT_CLASS, 'min-w-[11rem]', 'shrink-0')}
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortKey)}
+              aria-label="Sort accounts"
             >
-              <option value="all">All types</option>
-              {ACCOUNT_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
+              <option value="name_asc">Sort: Name A–Z</option>
+              <option value="name_desc">Sort: Name Z–A</option>
+              <option value="updated_desc">Sort: Recently updated</option>
+              <option value="updated_asc">Sort: Oldest update</option>
+              <option value="type_asc">Sort: Account type</option>
             </select>
-            <select
-              className={FILTER_SELECT_CLASS}
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-              aria-label="Filter by lead status"
-            >
-              <option value="all">All statuses</option>
-              {PIPELINE_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-            <div className="flex min-w-0 items-center gap-2">
-              <ArrowUpDown size={16} aria-hidden className="shrink-0 text-[var(--text-muted)]" />
-              <select
-                className={cn(FILTER_SELECT_CLASS, 'min-w-[11rem]')}
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as SortKey)}
-                aria-label="Sort accounts"
-              >
-                <option value="name_asc">Sort: Name A–Z</option>
-                <option value="name_desc">Sort: Name Z–A</option>
-                <option value="updated_desc">Sort: Recently updated</option>
-                <option value="updated_asc">Sort: Oldest update</option>
-                <option value="status_pipeline">Sort: Pipeline status</option>
-                <option value="type_asc">Sort: Account type</option>
-              </select>
-            </div>
           </div>
         </div>
       </Card>
