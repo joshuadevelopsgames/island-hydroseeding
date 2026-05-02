@@ -90,7 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       customer_account: acct,
       usage: 'off_session',
       payment_method_data: { type: 'stripe_balance' },
-    } as Parameters<Stripe['setupIntents']['create']>[0]);
+    } as any);
 
     const pmRef = setup.payment_method;
     const defaultPm =
@@ -111,7 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       payment_settings: {
         payment_method_types: ['stripe_balance'],
       },
-    } as Parameters<Stripe['subscriptions']['create']>[0]);
+    } as any);
 
     await db
       .from('tenants')
