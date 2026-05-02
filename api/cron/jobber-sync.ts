@@ -10,7 +10,8 @@ import { getJobberAccessTokenForSync } from '../_jobberOAuth';
  * - Large accounts may exceed function duration; consider a self-hosted runner or smaller sync scope.
  */
 export const config = {
-  maxDuration: 900,
+  /** Vercel Pro caps serverless duration at 800s. */
+  maxDuration: 800,
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
