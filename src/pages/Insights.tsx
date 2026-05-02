@@ -478,6 +478,17 @@ export default function Insights() {
         ],
       },
       {
+        name: 'Lead conversion by source',
+        headers: ['Source', 'Requests', 'Quotes sent', 'Jobs created', 'Conversion %'],
+        rows: leadConv.bySource.conversion.map((row) => [
+          row.source,
+          row.requests,
+          leadConv.bySource.quotes[row.source] ?? 0,
+          row.jobs,
+          row.rate == null ? 'n<3' : Number(row.rate.toFixed(2)),
+        ]),
+      },
+      {
         name: 'Cashflow',
         headers: ['Metric', 'Value'],
         rows: [
@@ -491,6 +502,11 @@ export default function Insights() {
         name: 'Top open balances',
         headers: ['Account', 'Balance ($)'],
         rows: cashflow.topDebtors.map((d) => [d.name, d.balance]),
+      },
+      {
+        name: 'Payment methods',
+        headers: ['Method', 'Count', 'Total ($)'],
+        rows: (paymentMethods?.rows ?? []).map((p) => [p.method, p.count, p.total]),
       },
       {
         name: 'Quotes',
@@ -1175,4 +1191,41 @@ const INSIGHTS_CSS = `
   .ins-jobs-row { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 16px; align-items: stretch; }
   @media (max-width: 720px) { .ins-jobs-row { grid-template-columns: 1fr; } }
   .ins-jobs-tiles { align-content: start; }
+
+  /* ── Cashflow with payment-methods donut beside the KPI tiles ── */
+  .ins-cashflow-grid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
+  @media (max-width: 820px) { .ins-cashflow-grid { grid-template-columns: 1fr; } }
+  .ins-cashflow-tiles { align-content: start; }
+
+  /* ── Stacked-by-source lead funnel ── */
+  .ins-source-funnel { display: flex; flex-direction: column; gap: 14px; padding: 18px; background: var(--bg-secondary, #fafafa); border: 1px solid var(--border-color); border-radius: 8px; }
+  .ins-funnel-stage-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .ins-source-bar { display: flex; height: 22px; border-radius: 4px; overflow: hidden; background: var(--border-color); position: relative; }
+  .ins-source-bar-seg { height: 100%; transition: width 0.2s; }
+  .ins-source-bar-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 12px; }
+  .ins-source-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 8px; font-size: 11px; color: var(--text-muted); }
+  .ins-source-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+  .ins-source-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; }
+  /* Source palette — distinct hues so stacked bars are readable. */
+  .ins-source-dot--website  { background: var(--primary-green, #2a7a3a); }
+  .ins-source-dot--phone    { background: #d97706; }
+  .ins-source-dot--email    { background: #1d4ed8; }
+  .ins-source-dot--referral { background: #9333ea; }
+  .ins-source-dot--other    { background: #475569; }
+  .ins-source-dot--direct   { background: #94a3b8; }
+
+  .ins-source-conv { margin-top: 14px; padding: 12px 14px; background: var(--bg-secondary, #fafafa); border: 1px solid var(--border-color); border-radius: 8px; font-size: 13px; }
+  .ins-source-conv-head, .ins-source-conv-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 12px; padding: 8px 0; }
+  .ins-source-conv-head { font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border-color); }
+  .ins-source-conv-row { border-bottom: 1px dashed var(--border-color); }
+  .ins-source-conv-row:last-child { border-bottom: 0; }
+  .ins-source-conv-rate { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 600; }
+
+  /* ── Payment methods card legend rows ── */
+  .ins-method-legend { width: 100%; margin-top: 12px; display: grid; gap: 6px; font-size: 12px; }
+  .ins-method-row { display: grid; grid-template-columns: 14px 1fr auto auto; gap: 8px; align-items: center; }
+  .ins-method-swatch { width: 10px; height: 10px; border-radius: 2px; }
+  .ins-method-name { color: var(--text-primary); }
+  .ins-method-total { font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--text-primary); }
+  .ins-method-pct { color: var(--text-muted); font-size: 11px; text-align: right; }
 `;
