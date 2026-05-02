@@ -14,9 +14,6 @@ import {
 import {
   Plus,
   Calendar as CalendarIcon,
-  Circle,
-  Loader2,
-  CheckCircle2,
   Search,
   Flag,
   X,
@@ -25,6 +22,9 @@ import {
   ChevronRight,
   UserCircle,
   Bell,
+  Pencil,
+  ArrowLeft,
+  ArrowRight,
 } from 'lucide-react';
 import { isBefore } from 'date-fns';
 import {
@@ -44,17 +44,25 @@ import {
   isUnacknowledgedAssignment,
   readAssignmentAcks,
 } from '../lib/taskAssignments';
+import {
+  BUILT_IN_DONE_ID,
+  DEFAULT_COLUMNS,
+  generateColumnId,
+  loadTaskColumns,
+  saveTaskColumns,
+  type TaskColumn,
+} from '../lib/taskColumns';
 
 const STORAGE_KEY = TASKS_STORAGE_KEY;
 
-type TaskStatus = 'todo' | 'in-progress' | 'done';
 type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
 type Task = {
   id: string;
   title: string;
   description: string;
-  status: TaskStatus;
+  /** Column id; matches a `TaskColumn.id` from the configured columns list. */
+  status: string;
   createdAt: string;
   dueDate: string | null;
   priority: TaskPriority;
@@ -72,9 +80,7 @@ function normalizeTask(raw: unknown): Task {
   if (Array.isArray(lr)) {
     labels = lr.map((x) => String(x).trim()).filter(Boolean).slice(0, 12);
   }
-  const st = String(o.status);
-  const status: TaskStatus =
-    st === 'in-progress' || st === 'done' || st === 'todo' ? st : 'todo';
+  const status = String(o.status ?? 'todo').trim() || 'todo';
   const pr = String(o.priority);
   const priority: TaskPriority =
     pr === 'low' || pr === 'high' || pr === 'urgent' || pr === 'medium' ? pr : 'medium';
@@ -147,7 +153,7 @@ function priorityAccent(p: TaskPriority): string {
 }
 
 function isOverdue(task: Task): boolean {
-  if (task.status === 'done' || !task.dueDate) return false;
+  if (task.status === BUILT_IN_DONE_ID || !task.dueDate) return false;
   try {
     return isBefore(vancouverStartOfDay(task.dueDate), vancouverStartOfDay());
   } catch {
@@ -166,19 +172,21 @@ function assigneeSelectLabel(u: AppUser) {
   return `${u.name} · ${u.email}`;
 }
 
-function resolveDropColumn(overId: string, allTasks: Task[]): TaskStatus | null {
-  if (overId === 'todo' || overId === 'in-progress' || overId === 'done') return overId;
+function resolveDropColumn(overId: string, columnIds: string[], allTasks: Task[]): string | null {
+  if (columnIds.includes(overId)) return overId;
   const t = allTasks.find((x) => x.id === overId);
-  return t?.status ?? null;
+  return t && columnIds.includes(t.status) ? t.status : null;
 }
 
 type KanbanTaskCardProps = {
   task: Task;
-  columnId: TaskStatus;
+  columnId: string;
   overdue: boolean;
   isNew: boolean;
   accent: string;
-  moveTask: (id: string, s: TaskStatus) => void;
+  prevColumnId: string | null;
+  nextColumnId: string | null;
+  moveTask: (id: string, s: string) => void;
   setDetailTask: (t: Task | null) => void;
 };
 
@@ -188,6 +196,8 @@ function KanbanTaskCard({
   overdue,
   isNew,
   accent,
+  prevColumnId,
+  nextColumnId,
   moveTask,
   setDetailTask,
 }: KanbanTaskCardProps) {
@@ -257,26 +267,28 @@ function KanbanTaskCard({
           onClick={(ev) => ev.stopPropagation()}
           onPointerDown={(ev) => ev.stopPropagation()}
         >
-          {columnId !== 'todo' && (
+          {prevColumnId !== null && (
             <button
               type="button"
               className="kanban-card__move"
-              title="Move back"
-              onClick={() => moveTask(task.id, columnId === 'done' ? 'in-progress' : 'todo')}
+              title={`Move to "${prevColumnId}"`}
+              onClick={() => moveTask(task.id, prevColumnId)}
             >
               <ChevronLeft size={14} style={{ verticalAlign: 'middle' }} />
             </button>
           )}
-          {columnId !== 'done' && (
+          {nextColumnId !== null && (
             <button
               type="button"
               className="kanban-card__move"
-              title="Move forward"
-              onClick={() => moveTask(task.id, columnId === 'todo' ? 'in-progress' : 'done')}
+              title={`Move to "${nextColumnId}"`}
+              onClick={() => moveTask(task.id, nextColumnId)}
             >
               <ChevronRight size={14} style={{ verticalAlign: 'middle' }} />
             </button>
           )}
+          {/* Suppress unused-var warning when neither neighbor exists */}
+          <span style={{ display: 'none' }}>{columnId}</span>
         </div>
       </div>
     </div>
@@ -284,7 +296,7 @@ function KanbanTaskCard({
 }
 
 type KanbanColumnBodyProps = {
-  columnId: TaskStatus;
+  columnId: string;
   children: ReactNode;
 };
 
@@ -300,13 +312,19 @@ function KanbanColumnBody({ columnId, children }: KanbanColumnBodyProps) {
 export default function Tasks() {
   const { users, currentUser } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [isAdding, setIsAdding] = useState<TaskStatus | null>(null);
+  const [columns, setColumns] = useState<TaskColumn[]>(DEFAULT_COLUMNS);
+  const [isAdding, setIsAdding] = useState<string | null>(null);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [search, setSearch] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | 'all'>('all');
   const [dueFilter, setDueFilter] = useState<'all' | 'overdue' | 'has' | 'none'>('all');
   const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
   const [taskDeleteId, setTaskDeleteId] = useState<string | null>(null);
+  const [columnDeleteId, setColumnDeleteId] = useState<string | null>(null);
+  const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
+  const [editingColumnLabel, setEditingColumnLabel] = useState('');
+  const [isAddingColumn, setIsAddingColumn] = useState(false);
+  const [newColumnLabel, setNewColumnLabel] = useState('');
   const [notifyPermission, setNotifyPermission] = useState(
     typeof Notification !== 'undefined' ? Notification.permission : 'denied'
   );
@@ -314,6 +332,7 @@ export default function Tasks() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   useEffect(() => {
+    setColumns(loadTaskColumns());
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return;
     try {
@@ -342,6 +361,11 @@ export default function Tasks() {
     setTasks(reconciled);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(reconciled));
     window.dispatchEvent(new Event('tasks-updated'));
+  };
+
+  const persistColumns = (next: TaskColumn[]) => {
+    setColumns(next);
+    saveTaskColumns(next);
   };
 
   const inboxCount = useMemo(() => {
@@ -422,7 +446,7 @@ export default function Tasks() {
     });
   }, [tasks, search, priorityFilter, dueFilter, assigneeFilter, currentUser, userById]);
 
-  const sortedInColumn = (status: TaskStatus) =>
+  const sortedInColumn = (status: string) =>
     [...filteredTasks.filter((t) => t.status === status)].sort((a, b) => {
       const pa = PRIORITY_ORDER.indexOf(a.priority);
       const pb = PRIORITY_ORDER.indexOf(b.priority);
@@ -430,14 +454,20 @@ export default function Tasks() {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
 
+  /** Tasks whose status doesn't match any current column — surfaced as an "Other" group at the end. */
+  const orphanTasks = useMemo(() => {
+    const ids = new Set(columns.map((c) => c.id));
+    return filteredTasks.filter((t) => !ids.has(t.status));
+  }, [filteredTasks, columns]);
+
   const stats = useMemo(() => {
-    const active = tasks.filter((t) => t.status !== 'done').length;
-    const done = tasks.filter((t) => t.status === 'done').length;
+    const active = tasks.filter((t) => t.status !== BUILT_IN_DONE_ID).length;
+    const done = tasks.filter((t) => t.status === BUILT_IN_DONE_ID).length;
     const overdue = tasks.filter((t) => isOverdue(t)).length;
     return { active, done, overdue, total: tasks.length };
   }, [tasks]);
 
-  const handleSave = (e: React.FormEvent<HTMLFormElement>, status: TaskStatus) => {
+  const handleSave = (e: React.FormEvent<HTMLFormElement>, status: string) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const dueRaw = String(formData.get('dueDate') || '').trim();
@@ -479,7 +509,7 @@ export default function Tasks() {
       ...detailTask,
       title: String(formData.get('title') || '').trim(),
       description: String(formData.get('description') || '').trim(),
-      status: formData.get('status') as TaskStatus,
+      status: String(formData.get('status') || detailTask.status),
       priority: (formData.get('priority') as TaskPriority) || 'medium',
       dueDate: dueRaw ? vancouverDateInputToIso(dueRaw) : null,
       labels: parseLabelsInput(String(formData.get('labels') || '')),
@@ -492,7 +522,7 @@ export default function Tasks() {
     setDetailTask(updated);
   };
 
-  const moveTask = (id: string, newStatus: TaskStatus) => {
+  const moveTask = (id: string, newStatus: string) => {
     persist(tasks.map((t) => (t.id === id ? { ...t, status: newStatus } : t)));
     setDetailTask((d) => (d && d.id === id ? { ...d, status: newStatus } : d));
   };
@@ -506,7 +536,7 @@ export default function Tasks() {
     const { active, over } = event;
     if (!over) return;
     const taskId = String(active.id);
-    const newStatus = resolveDropColumn(String(over.id), tasks);
+    const newStatus = resolveDropColumn(String(over.id), columns.map((c) => c.id), tasks);
     if (!newStatus) return;
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.status === newStatus) return;
@@ -519,13 +549,54 @@ export default function Tasks() {
     setTaskDeleteId(null);
   };
 
-  const columns: { id: TaskStatus; label: string; icon: typeof Circle }[] = [
-    { id: 'todo', label: 'To do', icon: Circle },
-    { id: 'in-progress', label: 'In progress', icon: Loader2 },
-    { id: 'done', label: 'Done', icon: CheckCircle2 },
-  ];
+  // ── Column management ────────────────────────────────────────────────────
+  const addColumn = () => {
+    const label = newColumnLabel.trim();
+    if (!label) return;
+    const id = generateColumnId(label, columns);
+    // Insert before the Done column so Done stays visually rightmost.
+    const doneIdx = columns.findIndex((c) => c.id === BUILT_IN_DONE_ID);
+    const next = [...columns];
+    const insertAt = doneIdx >= 0 ? doneIdx : next.length;
+    next.splice(insertAt, 0, { id, label, builtin: false });
+    persistColumns(next);
+    setIsAddingColumn(false);
+    setNewColumnLabel('');
+  };
+
+  const renameColumn = (id: string) => {
+    const label = editingColumnLabel.trim();
+    if (!label) return;
+    persistColumns(columns.map((c) => (c.id === id ? { ...c, label } : c)));
+    setEditingColumnId(null);
+    setEditingColumnLabel('');
+  };
+
+  const moveColumn = (id: string, dir: -1 | 1) => {
+    const idx = columns.findIndex((c) => c.id === id);
+    if (idx === -1) return;
+    const swap = idx + dir;
+    if (swap < 0 || swap >= columns.length) return;
+    const next = [...columns];
+    [next[idx], next[swap]] = [next[swap], next[idx]];
+    persistColumns(next);
+  };
+
+  const executeDeleteColumn = (id: string) => {
+    if (id === BUILT_IN_DONE_ID) {
+      setColumnDeleteId(null);
+      return;
+    }
+    const remaining = columns.filter((c) => c.id !== id);
+    const fallback = remaining.find((c) => c.id === 'todo')?.id ?? remaining[0]?.id ?? BUILT_IN_DONE_ID;
+    persistColumns(remaining);
+    persist(tasks.map((t) => (t.status === id ? { ...t, status: fallback } : t)));
+    setColumnDeleteId(null);
+  };
 
   const taskPendingDelete = taskDeleteId ? tasks.find((t) => t.id === taskDeleteId) : null;
+  const columnPendingDelete = columnDeleteId ? columns.find((c) => c.id === columnDeleteId) : null;
+  const tasksInDeletingColumn = columnDeleteId ? tasks.filter((t) => t.status === columnDeleteId).length : 0;
 
   const acksNow = currentUser ? readAssignmentAcks(currentUser.id) : ({} as Record<string, string>);
 
@@ -548,13 +619,30 @@ export default function Tasks() {
         onCancel={() => setTaskDeleteId(null)}
       />
 
+      <ConfirmDialog
+        open={columnDeleteId !== null}
+        title="Delete this column?"
+        message={
+          columnPendingDelete
+            ? tasksInDeletingColumn > 0
+              ? `Remove the “${columnPendingDelete.label}” column? ${tasksInDeletingColumn} task(s) will move to the To do column.`
+              : `Remove the “${columnPendingDelete.label}” column?`
+            : 'Remove this column?'
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => columnDeleteId && executeDeleteColumn(columnDeleteId)}
+        onCancel={() => setColumnDeleteId(null)}
+      />
+
       <p className="page-kicker">Operations</p>
       <div className="flex justify-between items-start mb-6 flex-wrap gap-4">
         <div>
           <h1 className="mb-2">Tasks</h1>
           <p>
-            Assign work to people from <strong>Team &amp; access</strong> (not generic roles). New assignments surface
-            in the banner below and in the sidebar; optional browser alerts when you allow notifications.
+            Drag cards between columns. Add your own columns (e.g. <em>Blake to do</em>, <em>April to do</em>) using the
+            <strong> Add column</strong> button at the end of the board.
           </p>
         </div>
       </div>
@@ -672,16 +760,83 @@ export default function Tasks() {
         onDragEnd={handleKanbanDragEnd}
       >
         <div className="kanban-board">
-          {columns.map((column) => {
-            const Icon = column.icon;
+          {columns.map((column, idx) => {
             const list = sortedInColumn(column.id);
+            const prevColId = idx > 0 ? columns[idx - 1].id : null;
+            const nextColId = idx < columns.length - 1 ? columns[idx + 1].id : null;
+            const isLastColumn = idx === columns.length - 1;
             return (
               <div key={column.id} className="kanban-column">
                 <div className="kanban-column__head">
-                  <div className="kanban-column__title">
-                    <Icon size={16} strokeWidth={2.25} />
-                    {column.label}
-                    <span className="kanban-count">{list.length}</span>
+                  {editingColumnId === column.id ? (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        renameColumn(column.id);
+                      }}
+                      style={{ display: 'flex', gap: '0.4rem', flex: 1 }}
+                    >
+                      <input
+                        type="text"
+                        value={editingColumnLabel}
+                        autoFocus
+                        onChange={(e) => setEditingColumnLabel(e.target.value)}
+                        onBlur={() => renameColumn(column.id)}
+                        style={{ margin: 0, fontWeight: 600 }}
+                      />
+                    </form>
+                  ) : (
+                    <div className="kanban-column__title" style={{ flex: 1 }}>
+                      {column.label}
+                      <span className="kanban-count">{list.length}</span>
+                    </div>
+                  )}
+                  <div className="kanban-column__menu" onClick={(e) => e.stopPropagation()}>
+                    {idx > 0 && (
+                      <button
+                        type="button"
+                        className="kanban-column__menu-btn"
+                        title="Move column left"
+                        aria-label="Move column left"
+                        onClick={() => moveColumn(column.id, -1)}
+                      >
+                        <ArrowLeft size={14} />
+                      </button>
+                    )}
+                    {!isLastColumn && (
+                      <button
+                        type="button"
+                        className="kanban-column__menu-btn"
+                        title="Move column right"
+                        aria-label="Move column right"
+                        onClick={() => moveColumn(column.id, 1)}
+                      >
+                        <ArrowRight size={14} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="kanban-column__menu-btn"
+                      title="Rename column"
+                      aria-label="Rename column"
+                      onClick={() => {
+                        setEditingColumnId(column.id);
+                        setEditingColumnLabel(column.label);
+                      }}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    {column.id !== BUILT_IN_DONE_ID && (
+                      <button
+                        type="button"
+                        className="kanban-column__menu-btn"
+                        title="Delete column"
+                        aria-label="Delete column"
+                        onClick={() => setColumnDeleteId(column.id)}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -700,6 +855,8 @@ export default function Tasks() {
                         overdue={overdue}
                         isNew={isNew}
                         accent={accent}
+                        prevColumnId={prevColId}
+                        nextColumnId={nextColId}
                         moveTask={moveTask}
                         setDetailTask={setDetailTask}
                       />
@@ -764,6 +921,88 @@ export default function Tasks() {
               </div>
             );
           })}
+
+          {/* Add column control / form */}
+          <div className="kanban-column kanban-column--add">
+            {isAddingColumn ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  addColumn();
+                }}
+                className="kanban-quick-form"
+                style={{ marginTop: 0 }}
+              >
+                <div className="kanban-quick-field">
+                  <label htmlFor="qc-new-label">Column name</label>
+                  <input
+                    id="qc-new-label"
+                    type="text"
+                    autoFocus
+                    placeholder="e.g. Blake to do"
+                    value={newColumnLabel}
+                    onChange={(e) => setNewColumnLabel(e.target.value)}
+                  />
+                </div>
+                <div className="flex justify-between items-center" style={{ marginTop: '0.25rem' }}>
+                  <button
+                    type="button"
+                    className="btn-ghost-link"
+                    onClick={() => {
+                      setIsAddingColumn(false);
+                      setNewColumnLabel('');
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary" style={{ padding: '0.45rem 1rem' }}>
+                    Add column
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button
+                type="button"
+                className="btn-add-card"
+                style={{ minHeight: '5rem' }}
+                onClick={() => setIsAddingColumn(true)}
+              >
+                <Plus size={16} /> Add column
+              </button>
+            )}
+          </div>
+
+          {orphanTasks.length > 0 && (
+            <div className="kanban-column">
+              <div className="kanban-column__head">
+                <div className="kanban-column__title" style={{ flex: 1 }}>
+                  Other
+                  <span className="kanban-count">{orphanTasks.length}</span>
+                </div>
+              </div>
+              <KanbanColumnBody columnId="__orphan__">
+                {orphanTasks.map((task) => {
+                  const overdue = isOverdue(task);
+                  const accent = priorityAccent(task.priority);
+                  const isNew = !!currentUser && isUnacknowledgedAssignment(task, currentUser.id, acksNow);
+                  return (
+                    <KanbanTaskCard
+                      key={task.id}
+                      task={task}
+                      columnId={task.status}
+                      overdue={overdue}
+                      isNew={isNew}
+                      accent={accent}
+                      prevColumnId={null}
+                      nextColumnId={columns[0]?.id ?? null}
+                      moveTask={moveTask}
+                      setDetailTask={setDetailTask}
+                    />
+                  );
+                })}
+              </KanbanColumnBody>
+            </div>
+          )}
         </div>
 
         <DragOverlay dropAnimation={null}>
@@ -838,9 +1077,14 @@ export default function Tasks() {
                 <div>
                   <label htmlFor="dt-status">Column</label>
                   <select id="dt-status" name="status" defaultValue={detailTask.status}>
-                    <option value="todo">To do</option>
-                    <option value="in-progress">In progress</option>
-                    <option value="done">Done</option>
+                    {columns.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.label}
+                      </option>
+                    ))}
+                    {!columns.some((c) => c.id === detailTask.status) && (
+                      <option value={detailTask.status}>{detailTask.status}</option>
+                    )}
                   </select>
                 </div>
                 <div>

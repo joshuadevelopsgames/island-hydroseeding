@@ -1,8 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, ClipboardCheck, ArrowLeft, Search, Truck, LifeBuoy, Camera, ImageIcon } from 'lucide-react';
+import {
+  Plus,
+  ClipboardCheck,
+  ArrowLeft,
+  Search,
+  Truck,
+  LifeBuoy,
+  Camera,
+  ImageIcon,
+  X,
+  Trash2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { formatInVancouver } from '../lib/vancouverTime';
 import { compressDataUrl } from '../lib/compressImage';
+import { savePhoto, loadPhotos, deletePhotos } from '../lib/photoStore';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 type PreTripType = 'Truck' | 'Trailer';
 
@@ -15,14 +28,16 @@ type PreTripLog = {
   location: string;
   status: 'Passed' | 'Action Req';
   remarks: string;
-  /** Base64 data URLs captured at submit */
+  /** IndexedDB photo IDs for this inspection (preferred). */
+  photoIds?: string[];
+  /** Legacy: base64 data URLs stored directly inside the log. */
   photos?: string[];
 };
 
 const INSPECTION_VALUES = ['Pass', 'Fail', 'N/A'] as const;
 
 const STORAGE_KEY = 'preTripLogs_v2';
-const MAX_PHOTOS = 24;
+const MAX_PHOTOS = 12;
 
 type PhotoEntry = { id: string; dataUrl: string };
 
@@ -41,9 +56,14 @@ function normalizeLogs(raw: unknown): PreTripLog[] {
     const r = row as PreTripLog;
     return {
       ...r,
+      photoIds: Array.isArray(r.photoIds) ? r.photoIds : [],
       photos: Array.isArray(r.photos) ? r.photos : [],
     };
   });
+}
+
+function totalPhotoCount(log: PreTripLog): number {
+  return (log.photoIds?.length ?? 0) + (log.photos?.length ?? 0);
 }
 
 export default function PreTrips() {
@@ -53,6 +73,11 @@ export default function PreTrips() {
   const [searchTerm, setSearchTerm] = useState('');
   const [photoEntries, setPhotoEntries] = useState<PhotoEntry[]>([]);
   const [photoError, setPhotoError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [detailLog, setDetailLog] = useState<PreTripLog | null>(null);
+  const [detailPhotoUrls, setDetailPhotoUrls] = useState<string[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const photoSectionRef = useRef<HTMLDivElement>(null);
 
@@ -64,6 +89,31 @@ export default function PreTrips() {
       setLogs([]);
     }
   }, []);
+
+  useEffect(() => {
+    if (!detailLog) {
+      setDetailPhotoUrls([]);
+      return;
+    }
+    let cancelled = false;
+    const ids = detailLog.photoIds ?? [];
+    const legacy = detailLog.photos ?? [];
+    if (ids.length === 0 && legacy.length === 0) {
+      setDetailPhotoUrls([]);
+      return;
+    }
+    setDetailLoading(true);
+    void (async () => {
+      const map = ids.length > 0 ? await loadPhotos(ids) : {};
+      if (cancelled) return;
+      const fromIds = ids.map((id) => map[id]).filter((s): s is string => Boolean(s));
+      setDetailPhotoUrls([...fromIds, ...legacy]);
+      setDetailLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [detailLog]);
 
   const openNewInspection = () => {
     setFormType('Truck');
@@ -118,7 +168,7 @@ export default function PreTrips() {
     setPhotoError('');
   };
 
-  const saveInspection = (form: HTMLFormElement) => {
+  const saveInspection = async (form: HTMLFormElement) => {
     if (photoEntries.length === 0) {
       setPhotoError(
         formType === 'Truck'
@@ -140,24 +190,45 @@ export default function PreTrips() {
       }
     }
 
+    setSubmitting(true);
+    let savedIds: string[] = [];
+    try {
+      // Persist photos to IndexedDB first so localStorage stays small.
+      savedIds = [];
+      for (const entry of photoEntries) {
+        const id = await savePhoto(entry.dataUrl);
+        savedIds.push(id);
+      }
+    } catch {
+      setSubmitting(false);
+      toast.error('Could not save photos', {
+        description: 'Your device blocked photo storage. Try removing some photos and submit again.',
+      });
+      return;
+    }
+
     const newLog: PreTripLog = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: Math.random().toString(36).slice(2, 11),
       type: formType,
       date: new Date().toISOString(),
-      employeeName: formData.get('employeeName') as string,
-      equipmentId: formData.get('equipmentId') as string,
-      location: formData.get('location') as string,
+      employeeName: String(formData.get('employeeName') || ''),
+      equipmentId: String(formData.get('equipmentId') || ''),
+      location: String(formData.get('location') || ''),
       status: hasFail ? 'Action Req' : 'Passed',
       remarks: (formData.get('remarks') as string) || 'No defects',
-      photos: photoEntries.map((p) => p.dataUrl),
+      photoIds: savedIds,
+      photos: [],
     };
 
     const updatedLogs = [newLog, ...logs];
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedLogs));
     } catch {
+      // Roll back the photos we just wrote so we don't orphan them.
+      void deletePhotos(savedIds);
+      setSubmitting(false);
       toast.error('Could not save inspection', {
-        description: 'Storage is full or unavailable. Remove a few photos and try again.',
+        description: 'Storage is full. Open older inspections and tap Delete to free space, then resubmit.',
       });
       return;
     }
@@ -166,6 +237,7 @@ export default function PreTrips() {
     setPhotoEntries([]);
     setPhotoError('');
     setIsFormOpen(false);
+    setSubmitting(false);
     toast.success('Inspection saved');
   };
 
@@ -178,9 +250,27 @@ export default function PreTrips() {
         const inv = form.querySelector(':invalid') as HTMLElement | null;
         inv?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       });
+      toast('Some inspection items still need answers', {
+        description: 'Scroll up — every Pass / Fail / N/A row must be filled in before submitting.',
+      });
       return;
     }
-    saveInspection(form);
+    void saveInspection(form);
+  };
+
+  const executeDelete = (id: string) => {
+    const target = logs.find((l) => l.id === id);
+    if (target?.photoIds?.length) void deletePhotos(target.photoIds);
+    const next = logs.filter((l) => l.id !== id);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Even if persist fails, drop from memory so the user can retry.
+    }
+    setLogs(next);
+    setDetailLog(null);
+    setDeleteId(null);
+    toast.success('Inspection deleted');
   };
 
   /** Pass / Fail / N/A — native vertical radios; first option carries `required` for the group. */
@@ -329,8 +419,8 @@ export default function PreTrips() {
             <h3 className="pretrip-section-title">Vehicle photos (required)</h3>
             <div className="pretrip-photo-section" ref={photoSectionRef}>
               <p className="text-secondary text-sm" style={{ margin: 0 }}>
-                Upload one or more clear photos of this {formType.toLowerCase()}. Submission is blocked until at least one
-                photo is added.
+                Upload one or more clear photos of this {formType.toLowerCase()}. Up to {MAX_PHOTOS} photos. Submission is
+                blocked until at least one photo is added.
               </p>
               <div className="pretrip-photo-drop">
                 <label className="btn btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -460,11 +550,16 @@ export default function PreTrips() {
             </div>
 
             <div className="pretrip-form-actions flex justify-between items-center border-t-subtle">
-              <button type="button" className="btn btn-secondary" onClick={() => setIsFormOpen(false)}>
+              <button type="button" className="btn btn-secondary" onClick={() => setIsFormOpen(false)} disabled={submitting}>
                 Cancel
               </button>
-              <button type="submit" className="btn btn-primary" style={{ padding: '0.75rem 2rem' }}>
-                <ClipboardCheck size={18} /> Submit inspection
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{ padding: '0.75rem 2rem' }}
+                disabled={submitting}
+              >
+                <ClipboardCheck size={18} /> {submitting ? 'Saving…' : 'Submit inspection'}
               </button>
             </div>
           </form>
@@ -479,8 +574,25 @@ export default function PreTrips() {
       log.equipmentId.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const detailPending = deleteId ? logs.find((l) => l.id === deleteId) : null;
+
   return (
     <div>
+      <ConfirmDialog
+        open={deleteId !== null}
+        title="Delete this inspection?"
+        message={
+          detailPending
+            ? `Permanently remove the ${detailPending.type.toLowerCase()} inspection for ${detailPending.equipmentId} on ${formatInVancouver(detailPending.date, 'MMM d, yyyy h:mm a')}? This cannot be undone.`
+            : 'Permanently remove this inspection? This cannot be undone.'
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => deleteId && executeDelete(deleteId)}
+        onCancel={() => setDeleteId(null)}
+      />
+
       <p className="page-kicker">Fleet</p>
       <div className="flex justify-between items-center mb-8 flex-wrap gap-4">
         <div>
@@ -532,9 +644,22 @@ export default function PreTrips() {
               </thead>
               <tbody>
                 {filteredLogs.map((log) => {
-                  const n = log.photos?.length ?? 0;
+                  const n = totalPhotoCount(log);
                   return (
-                    <tr key={log.id} style={{ borderBottom: '1px solid var(--border-color)' }} className="row-hover">
+                    <tr
+                      key={log.id}
+                      style={{ borderBottom: '1px solid var(--border-color)', cursor: 'pointer' }}
+                      className="row-hover"
+                      onClick={() => setDetailLog(log)}
+                      tabIndex={0}
+                      role="button"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setDetailLog(log);
+                        }
+                      }}
+                    >
                       <td style={{ padding: '1rem 0.5rem', fontSize: '0.875rem' }}>
                         {formatInVancouver(log.date, 'MMM d, yyyy h:mm a')}
                       </td>
@@ -572,6 +697,97 @@ export default function PreTrips() {
           </div>
         )}
       </div>
+
+      {detailLog && (
+        <div className="modal-overlay" role="presentation" onClick={() => setDetailLog(null)}>
+          <div
+            className="modal-panel modal-panel--wide"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pretrip-detail-title"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="btn-icon"
+              style={{ float: 'right', margin: '-0.5rem -0.5rem 0 0' }}
+              onClick={() => setDetailLog(null)}
+              aria-label="Close"
+            >
+              <X size={16} />
+            </button>
+            <p className="page-kicker" style={{ marginBottom: '0.35rem' }}>
+              {detailLog.type} inspection
+            </p>
+            <h2 id="pretrip-detail-title" className="modal-panel__title" style={{ marginBottom: '0.25rem' }}>
+              {detailLog.equipmentId || 'Inspection'}
+            </h2>
+            <p className="text-secondary text-sm" style={{ marginBottom: '1.25rem' }}>
+              {formatInVancouver(detailLog.date, 'PPpp')} · {detailLog.employeeName}
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '0.75rem 1rem', marginBottom: '1rem' }}>
+              <div>
+                <p className="text-xs text-muted" style={{ margin: 0 }}>Status</p>
+                {detailLog.status === 'Action Req' ? (
+                  <span className="badge" style={{ backgroundColor: '#fee2e2', color: '#b91c1c' }}>Action req</span>
+                ) : (
+                  <span className="badge badge-green">Passed</span>
+                )}
+              </div>
+              <div>
+                <p className="text-xs text-muted" style={{ margin: 0 }}>Type</p>
+                <p style={{ margin: 0 }}>{detailLog.type}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted" style={{ margin: 0 }}>Inspector</p>
+                <p style={{ margin: 0 }}>{detailLog.employeeName || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted" style={{ margin: 0 }}>Location</p>
+                <p style={{ margin: 0 }}>{detailLog.location || '—'}</p>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1.25rem' }}>
+              <p className="text-xs text-muted" style={{ margin: 0 }}>Remarks</p>
+              <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{detailLog.remarks || '—'}</p>
+            </div>
+
+            <h3 className="pretrip-section-title" style={{ marginTop: 0 }}>
+              Photos ({totalPhotoCount(detailLog)})
+            </h3>
+            {detailLoading ? (
+              <p className="text-secondary text-sm">Loading photos…</p>
+            ) : detailPhotoUrls.length === 0 ? (
+              <p className="text-secondary text-sm">No photos attached.</p>
+            ) : (
+              <div className="pretrip-photo-grid">
+                {detailPhotoUrls.map((url, i) => (
+                  <div key={`${detailLog.id}-${i}`} className="pretrip-photo-thumb">
+                    <a href={url} target="_blank" rel="noopener noreferrer" aria-label={`Open photo ${i + 1}`}>
+                      <img src={url} alt="" />
+                    </a>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="modal-panel__foot" style={{ justifyContent: 'space-between', marginTop: '1.5rem' }}>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => setDeleteId(detailLog.id)}
+              >
+                <Trash2 size={16} /> Delete inspection
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => setDetailLog(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

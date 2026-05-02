@@ -1,5 +1,5 @@
-/** Resize large camera photos and re-encode as JPEG to avoid localStorage quota failures. */
-export function compressDataUrl(dataUrl: string, maxEdge = 1600, quality = 0.82): Promise<string> {
+/** Resize large camera photos and re-encode as JPEG to keep storage manageable. */
+export function compressDataUrl(dataUrl: string, maxEdge = 1280, quality = 0.72): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -23,7 +23,10 @@ export function compressDataUrl(dataUrl: string, maxEdge = 1600, quality = 0.82)
         }
         ctx.drawImage(img, 0, 0, tw, th);
         const jpeg = canvas.toDataURL('image/jpeg', quality);
-        resolve(jpeg.length < dataUrl.length * 0.98 ? jpeg : dataUrl);
+        // Always prefer the re-encoded JPEG when it is smaller — iPhone HEIC
+        // photos can be huge even after a small resize, so the previous 2 %
+        // gate would keep the original and blow our storage budget.
+        resolve(jpeg.length < dataUrl.length ? jpeg : dataUrl);
       } catch {
         resolve(dataUrl);
       }

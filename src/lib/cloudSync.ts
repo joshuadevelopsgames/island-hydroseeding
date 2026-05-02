@@ -8,6 +8,8 @@ export const CLOUD_SYNC_KEYS = [
   'timeLogs',
   'timeEmployees',
   'tasksBoard',
+  'tasksColumns_v1',
+  'customCalendarEvents_v1',
   'equipmentMaintenance',
   'fleetAssets_v1',
   'fleetWorkOrders_v1',

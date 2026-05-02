@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { parseISO } from 'date-fns';
 import {
@@ -33,6 +33,47 @@ import {
   runCvipDueNotifications,
 } from '../lib/cvipNotify';
 import ConfirmDialog from '../components/ConfirmDialog';
+
+type ClearableDateInputProps = {
+  name: string;
+  defaultValue?: string;
+  required?: boolean;
+};
+
+/**
+ * `<input type="date">` on iOS Safari has no built-in way to clear a value once
+ * one has been committed via the wheel picker — users were getting today's date
+ * locked in. This wraps the input with a small "Clear" button.
+ */
+function ClearableDateInput({ name, defaultValue, required }: ClearableDateInputProps) {
+  const [value, setValue] = useState(defaultValue ?? '');
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="field-with-clear">
+      <input
+        ref={inputRef}
+        name={name}
+        type="date"
+        required={required}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      <button
+        type="button"
+        className="field-with-clear__clear"
+        onClick={() => {
+          setValue('');
+          inputRef.current?.focus();
+        }}
+        disabled={value === ''}
+        aria-label={`Clear ${name}`}
+        title="Clear date"
+      >
+        Clear
+      </button>
+    </div>
+  );
+}
 
 function pmHint(asset: FleetAsset): string | null {
   const parts: string[] = [];
@@ -199,10 +240,10 @@ export default function Assets() {
       </div>
 
       {cvipAlerts.length > 0 && (
-        <div className="card mb-6" style={{ borderLeft: '4px solid #f59e0b', background: '#fffbeb' }}>
-                 <h3 className="mb-2 flex items-center gap-2" style={{ color: '#b45309' }}>
-                   <AlertTriangle size={20} /> CVIP coming due (30 days)
-                 </h3>
+        <div className="card alert-card-warn mb-6">
+          <h3 className="alert-card-warn__title mb-2 flex items-center gap-2">
+            <AlertTriangle size={20} /> CVIP coming due (30 days)
+          </h3>
           <ul className="text-sm space-y-1">
             {cvipAlerts.map((a) => (
               <li key={a.id}>
@@ -312,7 +353,7 @@ export default function Assets() {
                 </div>
                 <div>
                   <label>Last PM date</label>
-                  <input name="lastPmAt" type="date" defaultValue={vancouverDateInputFromIso(editing?.lastPmAt)} />
+                  <ClearableDateInput name="lastPmAt" defaultValue={vancouverDateInputFromIso(editing?.lastPmAt)} />
                 </div>
               </div>
             </div>
@@ -332,11 +373,11 @@ export default function Assets() {
                 </div>
                 <div>
                   <label>Last CVIP date</label>
-                  <input name="cvipLast" type="date" defaultValue={vancouverDateInputFromIso(editing?.cvip.lastInspectionDate)} />
+                  <ClearableDateInput name="cvipLast" defaultValue={vancouverDateInputFromIso(editing?.cvip.lastInspectionDate)} />
                 </div>
                 <div>
-                  <label>Next due date *</label>
-                  <input name="cvipNextDue" type="date" defaultValue={vancouverDateInputFromIso(editing?.cvip.nextDueDate)} />
+                  <label>Next due date</label>
+                  <ClearableDateInput name="cvipNextDue" defaultValue={vancouverDateInputFromIso(editing?.cvip.nextDueDate)} />
                 </div>
               </div>
             </div>
@@ -346,11 +387,11 @@ export default function Assets() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '1rem' }}>
                 <div>
                   <label>Warranty expires</label>
-                  <input name="warrantyExpiresAt" type="date" defaultValue={vancouverDateInputFromIso(editing?.warrantyExpiresAt)} />
+                  <ClearableDateInput name="warrantyExpiresAt" defaultValue={vancouverDateInputFromIso(editing?.warrantyExpiresAt)} />
                 </div>
                 <div>
                   <label>Last tire service</label>
-                  <input name="lastTireServiceDate" type="date" defaultValue={vancouverDateInputFromIso(editing?.lastTireServiceDate)} />
+                  <ClearableDateInput name="lastTireServiceDate" defaultValue={vancouverDateInputFromIso(editing?.lastTireServiceDate)} />
                 </div>
               </div>
               <div className="mt-3">
