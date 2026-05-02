@@ -80,7 +80,7 @@ export default function FieldInvoiceDesign({ ctx }: { ctx: InvoiceDesignContext 
         Invoice
         <small>{ctx.paymentTerms || 'Net 30'}</small>
       </div>
-      {ctx.isPaid && <div className="fi-paid-stamp">paid in full ✓</div>}
+      {ctx.isPaid && sv.paid_stamp !== false && <div className="fi-paid-stamp">paid in full ✓</div>}
 
       <div className="fi-shell">
         {isVisible(sv, 'header') && (

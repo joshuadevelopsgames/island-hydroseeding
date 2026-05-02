@@ -32,6 +32,9 @@ const DEFAULT_VISIBILITY: Required<QuoteSectionVisibility> = {
   footer_quote: true,
   footer_meta: true,
   optional_addons: true,
+  // Invoices-only flag; quotes ignore it. Default off so quote templates don't
+  // accidentally show a "Paid" stamp.
+  paid_stamp: false,
 };
 
 const SECTION_LABELS: { key: keyof QuoteSectionVisibility; label: string; help: string }[] = [

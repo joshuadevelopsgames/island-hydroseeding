@@ -72,7 +72,7 @@ export default function TechnicalInvoiceDesign({ ctx }: { ctx: InvoiceDesignCont
   return (
     <div className="ti-inv">
       <style>{STYLE}</style>
-      {ctx.isPaid && <div className="ti-paid-stamp">Paid</div>}
+      {ctx.isPaid && sv.paid_stamp !== false && <div className="ti-paid-stamp">Paid</div>}
 
       <div className="ti-tape">
         <span><b>DOC</b>INV-{ctx.invoiceNumber}</span>

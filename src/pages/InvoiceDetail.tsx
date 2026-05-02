@@ -990,6 +990,29 @@ function InvoicePreviewCard({
       <div className="mb-4">
         <QuoteDesignPicker value={design} onChange={handlePick} />
       </div>
+      <div className="mb-4 flex items-center gap-2 text-sm">
+        <input
+          id={`paid-stamp-${bundle.invoice.id}`}
+          type="checkbox"
+          checked={(bundle.invoice.section_visibility as { paid_stamp?: boolean } | null)?.paid_stamp === true}
+          onChange={(e) => {
+            const nextVisibility = {
+              ...((bundle.invoice.section_visibility as Record<string, unknown>) ?? {}),
+              paid_stamp: e.target.checked,
+            };
+            void mutations.updateInvoice.mutateAsync({
+              id: bundle.invoice.id,
+              section_visibility: nextVisibility,
+            });
+          }}
+        />
+        <label htmlFor={`paid-stamp-${bundle.invoice.id}`} className="cursor-pointer">
+          Show "Paid" stamp
+          <span className="ml-2 text-xs text-muted-foreground">
+            (only renders when invoice status is Paid)
+          </span>
+        </label>
+      </div>
       <InvoiceDesignPreview design={design} ctx={{ ...ctx, onFieldEdit: handleEdit }} />
     </div>
   );

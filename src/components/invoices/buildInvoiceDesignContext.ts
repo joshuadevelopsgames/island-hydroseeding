@@ -54,7 +54,9 @@ export function ctxFromInvoiceBundle(
     amountPaid,
     balanceDue,
     status: inv.status,
-    isPaid: inv.status === 'Paid' || balanceDue <= 0.01,
+    // Only treat as paid when status is explicitly 'Paid'. Auto-detecting from
+    // balanceDue<=0.01 wrongly stamped empty invoices (no line items) as paid.
+    isPaid: inv.status === 'Paid',
     isOverdue,
     sectionVisibility: (inv.section_visibility ?? {}) as QuoteSectionVisibility,
     customText: (inv.custom_text ?? {}) as QuoteCustomText,
@@ -114,7 +116,7 @@ export function ctxFromInvoiceDraft(input: {
     amountPaid,
     balanceDue,
     status: input.status ?? 'Draft',
-    isPaid: input.status === 'Paid' || balanceDue <= 0.01,
+    isPaid: input.status === 'Paid',
     isOverdue,
     sectionVisibility: input.sectionVisibility ?? {},
     customText: input.customText ?? {},

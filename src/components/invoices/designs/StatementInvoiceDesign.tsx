@@ -82,7 +82,7 @@ export default function StatementInvoiceDesign({ ctx }: { ctx: InvoiceDesignCont
     <div className="si-inv">
       <style>{STYLE}</style>
 
-      {ctx.isPaid && (
+      {ctx.isPaid && sv.paid_stamp !== false && (
         <div className="si-paid-stamp">
           Paid<small>cleared</small>
         </div>

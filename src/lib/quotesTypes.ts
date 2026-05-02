@@ -36,6 +36,10 @@ export type QuoteSectionVisibility = {
   footer_quote?: boolean;
   footer_meta?: boolean;
   optional_addons?: boolean;
+  /** Invoices only — controls the PAID watermark. Even when status === 'Paid'
+   * the user can hide it (e.g. for a clean reprint). Default behavior follows
+   * isPaid; setting this to false force-hides, true force-shows. */
+  paid_stamp?: boolean;
 };
 
 /** Overridable copy for the chosen design. All fields optional — renderer falls back to stock text. */

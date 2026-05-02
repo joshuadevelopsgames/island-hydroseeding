@@ -129,7 +129,7 @@ export default function InvoicePayDesignBlock({
     amountPaid,
     balanceDue,
     status: invoice.status,
-    isPaid: invoice.status === 'Paid' || balanceDue <= 0.01,
+    isPaid: invoice.status === 'Paid',
     isOverdue,
     sectionVisibility: (invoice.section_visibility ?? {}) as QuoteSectionVisibility,
     customText: (invoice.custom_text ?? {}) as QuoteCustomText,

@@ -77,7 +77,7 @@ export default function EditorialInvoiceDesign({ ctx }: { ctx: InvoiceDesignCont
     <div className="ei-inv">
       <style>{STYLE}</style>
 
-      {ctx.isPaid && (
+      {ctx.isPaid && sv.paid_stamp !== false && (
         <div className="ei-paid-stamp">
           Paid<small>in full</small>
         </div>
