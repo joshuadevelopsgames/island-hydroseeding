@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import EditorialQuoteDesign from './designs/EditorialQuoteDesign';
 import TechnicalQuoteDesign from './designs/TechnicalQuoteDesign';
 import FieldQuoteDesign from './designs/FieldQuoteDesign';
@@ -11,7 +11,7 @@ type Props = {
   ctx: DesignContext;
   /** When true, render a Stripe-pay sidebar slot to the right of the quote (Jobber-style). */
   showPaySidebar?: boolean;
-  paySidebarSlot?: React.ReactNode;
+  paySidebarSlot?: ReactNode;
   /** Auto-scale the 850px design to fit the container. Default true. */
   autoFit?: boolean;
 };
