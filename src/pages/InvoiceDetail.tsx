@@ -5,7 +5,8 @@ import { useInvoiceDetail, useInvoicesMutations } from '@/hooks/useInvoices';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { formatInVancouver } from '@/lib/vancouverTime';
-import { generateInvoicePdf } from '@/lib/invoicePdf';
+import { generateInvoicePdf, type InvoicePdfBranding } from '@/lib/invoicePdf';
+import { apiFetch } from '@/lib/apiClient';
 import {
   ArrowLeft,
   Loader2,
@@ -99,6 +100,37 @@ export default function InvoiceDetail() {
   const [paymentLink, setPaymentLink] = useState<string | null>(null);
   const [linkCopied, setLinkCopied]   = useState(false);
   const [linkLoading, setLinkLoading] = useState(false);
+  const [pdfBranding, setPdfBranding] = useState<InvoicePdfBranding | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await apiFetch('/api/tenant-settings');
+        const d = (await r.json()) as {
+          tenant?: {
+            display_name?: string | null;
+            public_tagline?: string | null;
+            public_gst_registration?: string | null;
+            public_footer_note?: string | null;
+          };
+        };
+        if (cancelled || !d.tenant) return;
+        const t = d.tenant;
+        setPdfBranding({
+          display_name: (t.display_name?.trim() || 'Island Hydroseeding Ltd.'),
+          public_tagline: t.public_tagline,
+          public_gst_registration: t.public_gst_registration,
+          public_footer_note: t.public_footer_note,
+        });
+      } catch {
+        if (!cancelled) setPdfBranding(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Account selector for create mode
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
@@ -214,7 +246,8 @@ export default function InvoiceDetail() {
         bundle.line_items,
         bundle.payments,
         bundle.account,
-        bundle.property
+        bundle.property,
+        pdfBranding
       );
       pdf.save(
         `Invoice-${String(bundle.invoice.invoice_number).padStart(4, '0')}.pdf`

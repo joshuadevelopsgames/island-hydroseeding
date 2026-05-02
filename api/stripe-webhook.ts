@@ -61,6 +61,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (event.type === 'payment_intent.succeeded') {
       await handlePaymentSucceeded(event.data.object as Stripe.PaymentIntent);
+    } else if (event.type === 'account.updated') {
+      await handleAccountUpdated(event.data.object as Stripe.Account);
     }
   } catch (err: any) {
     console.error('[stripe-webhook] handler error:', err);
@@ -110,4 +112,22 @@ async function handlePaymentSucceeded(pi: Stripe.PaymentIntent) {
   await syncInvoiceFinancials(db, invoiceId, tenantId);
 
   console.log(`[stripe-webhook] Invoice ${invoiceId} synced after PI ${pi.id}`);
+}
+
+async function handleAccountUpdated(acct: Stripe.Account) {
+  const db = getDb();
+  const tenantId = acct.metadata?.tenant_id;
+  if (!tenantId || typeof tenantId !== 'string') return;
+
+  await db
+    .from('tenants')
+    .update({
+      stripe_connect_charges_enabled: Boolean(acct.charges_enabled),
+      stripe_connect_details_submitted: Boolean(acct.details_submitted),
+      stripe_connect_payouts_enabled: Boolean(acct.payouts_enabled),
+    })
+    .eq('id', tenantId)
+    .eq('stripe_connect_account_id', acct.id);
+
+  console.log(`[stripe-webhook] Tenant ${tenantId} Connect flags synced for ${acct.id}`);
 }

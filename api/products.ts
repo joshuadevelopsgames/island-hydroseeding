@@ -25,6 +25,22 @@ function parseBody(req: VercelRequest): Record<string, unknown> {
 
 const NOW_ISO = () => new Date().toISOString();
 
+/** Drop duplicate catalog rows (same id or same display name); preserves first row in sort order. */
+function dedupeCatalogList<T extends { id: string; name: string }>(rows: T[]): T[] {
+  const seenId = new Set<string>();
+  const seenName = new Set<string>();
+  const out: T[] = [];
+  for (const r of rows) {
+    if (seenId.has(r.id)) continue;
+    seenId.add(r.id);
+    const nk = r.name.trim().toLowerCase();
+    if (seenName.has(nk)) continue;
+    seenName.add(nk);
+    out.push(r);
+  }
+  return out;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const db = supabase();
   if (!db) {
@@ -54,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(500).json({ error: error.message });
         return;
       }
-      res.status(200).json({ products: data ?? [] });
+      res.status(200).json({ products: dedupeCatalogList(data ?? []) });
       return;
     }
 

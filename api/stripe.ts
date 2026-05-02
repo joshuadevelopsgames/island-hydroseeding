@@ -82,6 +82,14 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
 
     const tid = invoice.tenant_id as string;
 
+    const { data: tenantRow } = await db
+      .from('tenants')
+      .select(
+        'display_name, public_tagline, public_brand_logo_url, public_etransfer_email, public_gst_registration, public_footer_note'
+      )
+      .eq('id', tid)
+      .single();
+
     const { data: lineItems } = await db
       .from('invoice_line_items')
       .select('*')
@@ -107,7 +115,13 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
           .single()
       : { data: null };
 
-    return res.status(200).json({ invoice, line_items: lineItems ?? [], account, property });
+    return res.status(200).json({
+      invoice,
+      line_items: lineItems ?? [],
+      account,
+      property,
+      branding: tenantRow ?? null,
+    });
   }
 
   return res.status(400).json({ error: `Unknown GET action: ${action}` });
@@ -137,7 +151,7 @@ async function createPaymentIntent(body: Record<string, unknown>, res: VercelRes
   const { data: invoice, error } = await db
     .from('invoices')
     .select(
-      'id, tenant_id, invoice_number, title, total, balance_due, status, stripe_payment_intent_id, account_id'
+      'id, tenant_id, invoice_number, title, total, balance_due, status, stripe_payment_intent_id, stripe_payment_intent_connected_account_id, account_id'
     )
     .eq('id', invoice_id)
     .single();
@@ -148,10 +162,23 @@ async function createPaymentIntent(body: Record<string, unknown>, res: VercelRes
   if (invoice.status === 'Paid') return res.status(400).json({ error: 'Invoice is already paid' });
   if ((invoice.balance_due ?? 0) <= 0) return res.status(400).json({ error: 'No balance due' });
 
-  // Reuse existing PaymentIntent if still usable
+  const { data: tenantStripe } = await db
+    .from('tenants')
+    .select('stripe_connect_account_id, stripe_connect_charges_enabled')
+    .eq('id', tid)
+    .single();
+
+  const connectedId = tenantStripe?.stripe_connect_account_id as string | null | undefined;
+  const useConnect =
+    Boolean(connectedId && tenantStripe?.stripe_connect_charges_enabled);
+  const requestOpts = useConnect && connectedId ? { stripeAccount: connectedId } : undefined;
+
+  // Reuse existing PaymentIntent if still usable (platform vs connected is stored on the invoice row)
   if (invoice.stripe_payment_intent_id) {
     try {
-      const existing = await str.paymentIntents.retrieve(invoice.stripe_payment_intent_id);
+      const storedAcct = invoice.stripe_payment_intent_connected_account_id as string | null;
+      const retrieveOpts = storedAcct ? { stripeAccount: storedAcct } : undefined;
+      const existing = await str.paymentIntents.retrieve(invoice.stripe_payment_intent_id, retrieveOpts);
       if (existing.status !== 'succeeded' && existing.status !== 'canceled') {
         return res.status(200).json({ clientSecret: existing.client_secret });
       }
@@ -171,23 +198,32 @@ async function createPaymentIntent(body: Record<string, unknown>, res: VercelRes
 
   const amountCents = Math.round((invoice.balance_due ?? invoice.total ?? 0) * 100);
 
-  const pi = await str.paymentIntents.create({
-    amount: amountCents,
-    currency: 'cad',
-    automatic_payment_methods: { enabled: true },
-    metadata: {
-      invoice_id:     invoice.id,
-      tenant_id:      tid,
-      invoice_number: String(invoice.invoice_number),
-      client_name:    account?.name ?? '',
+  const pi = await str.paymentIntents.create(
+    {
+      amount: amountCents,
+      currency: 'cad',
+      automatic_payment_methods: { enabled: true },
+      metadata: {
+        invoice_id:     invoice.id,
+        tenant_id:      tid,
+        invoice_number: String(invoice.invoice_number),
+        client_name:    account?.name ?? '',
+      },
+      description: `Invoice #${String(invoice.invoice_number).padStart(4, '0')}${invoice.title ? ` — ${invoice.title}` : ''}`,
+      receipt_email: account?.email ?? undefined,
     },
-    description: `Invoice #${String(invoice.invoice_number).padStart(4, '0')}${invoice.title ? ` — ${invoice.title}` : ''}`,
-    receipt_email: account?.email ?? undefined,
-  });
+    requestOpts
+  );
+
+  const piContext = useConnect && connectedId ? connectedId : null;
 
   await db
     .from('invoices')
-    .update({ stripe_payment_intent_id: pi.id, updated_at: new Date().toISOString() })
+    .update({
+      stripe_payment_intent_id: pi.id,
+      stripe_payment_intent_connected_account_id: piContext,
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', invoice_id)
     .eq('tenant_id', tid);
 

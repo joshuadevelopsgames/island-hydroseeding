@@ -25,6 +25,11 @@ import {
   Share2,
 } from 'lucide-react';
 import './invoicePayPrint.css';
+import {
+  resolveClientBranding,
+  INVOICE_LOGO_URL_FALLBACK,
+  type TenantBrandingApi,
+} from '@/lib/tenantBranding';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -73,16 +78,8 @@ interface InvoiceData {
   line_items: PublicLineItem[];
   account: PublicAccount | null;
   property: PublicProperty | null;
+  branding?: TenantBrandingApi | null;
 }
-
-const ETRANSFER_EMAIL =
-  (import.meta.env.VITE_ETRANSFER_EMAIL as string | undefined)?.trim() || '';
-
-const INVOICE_LOGO_URL = (import.meta.env.VITE_INVOICE_LOGO_URL as string | undefined)?.trim() || '';
-
-const GST_REGISTRATION = (import.meta.env.VITE_GST_REGISTRATION as string | undefined)?.trim() || '';
-
-const COMPANY_NAME = 'Island Hydroseeding Ltd.';
 
 const stripePromise = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
   ? loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string)
@@ -137,11 +134,12 @@ function taxAmountFor(invoice: PublicInvoice): number {
 
 // ── brand mark (optional custom logo URL) ─────────────────────────────────────
 
-function BrandMark({ className }: { className?: string }) {
-  if (INVOICE_LOGO_URL) {
+function BrandMark({ logoUrl, className }: { logoUrl?: string | null; className?: string }) {
+  const src = logoUrl?.trim() || INVOICE_LOGO_URL_FALLBACK;
+  if (src) {
     return (
       <img
-        src={INVOICE_LOGO_URL}
+        src={src}
         alt=""
         className={className ?? 'h-11 w-auto max-w-[200px] object-contain object-left'}
         height={44}
@@ -272,6 +270,7 @@ function CheckoutForm({
 
 function PaymentReceivedScreen({ data, payUrl }: { data: InvoiceData; payUrl: string }) {
   const { invoice, line_items, account, property } = data;
+  const br = resolveClientBranding(data.branding);
   const taxPct = Math.round((invoice.tax_rate ?? 0.05) * 100);
   const taxAmt = taxAmountFor(invoice);
   const invNo = String(invoice.invoice_number).padStart(4, '0');
@@ -283,7 +282,7 @@ function PaymentReceivedScreen({ data, payUrl }: { data: InvoiceData; payUrl: st
         : Number(invoice.amount_paid);
 
   const handleShare = async () => {
-    const title = `Invoice #${invNo} — ${COMPANY_NAME}`;
+    const title = `Invoice #${invNo} — ${br.companyName}`;
     const text = `Invoice #${invNo} — Total ${CAD.format(invoice.total)}. Paid.`;
     try {
       if (navigator.share) {
@@ -299,9 +298,10 @@ function PaymentReceivedScreen({ data, payUrl }: { data: InvoiceData; payUrl: st
       <header className="invoice-pay-header border-b border-[var(--border-color)] bg-[var(--surface-color)]">
         <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-8 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <div className="flex min-w-0 items-center gap-4">
-            <BrandMark />
+            <BrandMark logoUrl={br.logoUrl} />
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--primary-green)]">{COMPANY_NAME}</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--primary-green)]">{br.companyName}</p>
+              <p className="text-xs text-[var(--text-muted)]">{br.tagline}</p>
               <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--text-primary)]">Payment received</h1>
               <p className="mt-1 text-sm text-[var(--text-muted)]">Receipt · Invoice #{invNo}</p>
             </div>
@@ -415,8 +415,8 @@ function PaymentReceivedScreen({ data, payUrl }: { data: InvoiceData; payUrl: st
                   <span>Tax (GST {taxPct}%)</span>
                   <span className="tabular-nums">{CAD.format(taxAmt)}</span>
                 </div>
-                {GST_REGISTRATION ? (
-                  <p className="text-xs text-[var(--text-muted)]">GST/HST registration no. {GST_REGISTRATION}</p>
+                {br.gst ? (
+                  <p className="text-xs text-[var(--text-muted)]">GST/HST registration no. {br.gst}</p>
                 ) : null}
                 <div className="flex justify-between font-semibold text-[var(--text-primary)]">
                   <span>Total</span>
@@ -426,8 +426,15 @@ function PaymentReceivedScreen({ data, payUrl }: { data: InvoiceData; payUrl: st
             </section>
           ) : null}
 
-          <p className="border-t border-[var(--border-color)] pt-6 text-center text-sm text-[var(--text-muted)]">
-            {COMPANY_NAME} · Keep this page for your records.
+          {br.footerNote ? (
+            <p className="whitespace-pre-wrap border-t border-[var(--border-color)] pt-6 text-center text-sm text-[var(--text-secondary)]">
+              {br.footerNote}
+            </p>
+          ) : null}
+          <p
+            className={`text-center text-sm text-[var(--text-muted)] ${br.footerNote ? 'pt-3' : 'border-t border-[var(--border-color)] pt-6'}`}
+          >
+            {br.companyName} · Keep this page for your records.
           </p>
         </article>
       </div>
@@ -520,6 +527,7 @@ export default function InvoicePay() {
   if (!invoiceData) return null;
 
   const { invoice, line_items, account, property } = invoiceData;
+  const br = resolveClientBranding(invoiceData.branding);
   const taxPct = Math.round((invoice.tax_rate ?? 0.05) * 100);
   const taxAmount = taxAmountFor(invoice);
   const balanceDue = Number(invoice.balance_due);
@@ -531,9 +539,10 @@ export default function InvoicePay() {
       <header className="invoice-pay-header border-b border-[var(--border-color)] bg-[var(--surface-color)]">
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-6 sm:flex-row sm:items-start sm:justify-between sm:px-8">
           <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-            <BrandMark />
+            <BrandMark logoUrl={br.logoUrl} />
             <div className="min-w-0 space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--primary-green)]">{COMPANY_NAME}</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--primary-green)]">{br.companyName}</p>
+              <p className="text-xs text-[var(--text-muted)]">{br.tagline}</p>
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
                   Invoice #{String(invoice.invoice_number).padStart(4, '0')}
@@ -661,8 +670,8 @@ export default function InvoicePay() {
                   <span className="text-[var(--text-secondary)]">Tax (GST {taxPct}%)</span>
                   <div className="text-right">
                     <span className="tabular-nums text-[var(--text-secondary)]">{CAD.format(taxAmount)}</span>
-                    {GST_REGISTRATION ? (
-                      <p className="mt-0.5 text-xs text-[var(--text-muted)]">GST/HST registration no. {GST_REGISTRATION}</p>
+                    {br.gst ? (
+                      <p className="mt-0.5 text-xs text-[var(--text-muted)]">GST/HST registration no. {br.gst}</p>
                     ) : null}
                   </div>
                 </div>
@@ -692,6 +701,9 @@ export default function InvoicePay() {
           ) : null}
 
           <footer className="border-t border-[var(--border-color)] pt-6 text-center text-sm text-[var(--text-muted)]">
+            {br.footerNote ? (
+              <p className="mb-3 whitespace-pre-wrap text-[var(--text-secondary)]">{br.footerNote}</p>
+            ) : null}
             <p className="font-medium text-[var(--text-primary)]">Thank you for your business.</p>
             <div className="invoice-pay-no-print mt-4">
               <button
@@ -703,14 +715,14 @@ export default function InvoicePay() {
                 Print invoice
               </button>
             </div>
-            {ETRANSFER_EMAIL ? (
+            {br.etransfer ? (
               <p className="mt-4 leading-relaxed">
                 To pay by <strong className="text-[var(--text-secondary)]">e-Transfer</strong>, send to{' '}
                 <a
-                  href={`mailto:${ETRANSFER_EMAIL}`}
+                  href={`mailto:${br.etransfer}`}
                   className="font-semibold text-[var(--primary-green)] hover:underline"
                 >
-                  {ETRANSFER_EMAIL}
+                  {br.etransfer}
                 </a>
                 . Please include invoice #{String(invoice.invoice_number).padStart(4, '0')} in the message.
               </p>
@@ -723,7 +735,7 @@ export default function InvoicePay() {
                 and reference this invoice number.
               </p>
             ) : (
-              <p className="mt-4">Questions? Contact Island Hydroseeding with this invoice number.</p>
+              <p className="mt-4">Questions? Contact {br.companyName} with this invoice number.</p>
             )}
           </footer>
         </article>

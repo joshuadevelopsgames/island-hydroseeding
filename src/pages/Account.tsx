@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { User, Palette, Info, LayoutList, Eye, EyeOff, RotateCcw, GripVertical, LogOut, Lock } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { User, Palette, Info, LayoutList, Eye, EyeOff, RotateCcw, GripVertical, LogOut, Lock, Building2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { apiFetch } from '../lib/apiClient';
 import { useAuth } from '../context/AuthContext';
 import { getThemePreference, setThemePreference, type ThemePreference } from '../lib/theme';
 import { userCanAccessPath } from '../lib/permissions';
@@ -134,12 +136,34 @@ function NavItem({
 
 // ── main page ─────────────────────────────────────────────────────────────────
 
+type WorkspaceBrandingForm = {
+  display_name: string;
+  public_tagline: string;
+  public_brand_logo_url: string;
+  public_etransfer_email: string;
+  public_gst_registration: string;
+  public_footer_note: string;
+};
+
 export default function Account() {
   const { currentUser, updateCurrentUserProfile, signOut } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [name, setName]           = useState('');
   const [email, setEmail]         = useState('');
   const [savedFlash, setSavedFlash] = useState(false);
   const [theme, setTheme]         = useState<ThemePreference>(() => getThemePreference());
+
+  const [workspaceForm, setWorkspaceForm] = useState<WorkspaceBrandingForm | null>(null);
+  const [workspaceSaved, setWorkspaceSaved] = useState(false);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [stripeStatus, setStripeStatus] = useState<{
+    connected: boolean;
+    ready_for_payments: boolean;
+    charges_enabled: boolean;
+    details_submitted: boolean;
+    payouts_enabled: boolean;
+  } | null>(null);
+  const [stripeActionLoading, setStripeActionLoading] = useState(false);
 
   // Change-password state
   const [newPw, setNewPw]           = useState('');
@@ -328,6 +352,142 @@ export default function Account() {
     return () => window.removeEventListener('ih-theme-changed', onTheme);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [tr, sr] = await Promise.all([
+          apiFetch('/api/tenant-settings'),
+          apiFetch('/api/stripe-connect?action=status'),
+        ]);
+        const tj = (await tr.json()) as { tenant?: WorkspaceBrandingForm & Record<string, unknown> };
+        const sj = (await sr.json()) as typeof stripeStatus & { error?: string };
+        if (cancelled) return;
+        const t = tj.tenant;
+        if (t) {
+          setWorkspaceForm({
+            display_name: String(t.display_name ?? ''),
+            public_tagline: String(t.public_tagline ?? ''),
+            public_brand_logo_url: String(t.public_brand_logo_url ?? ''),
+            public_etransfer_email: String(t.public_etransfer_email ?? ''),
+            public_gst_registration: String(t.public_gst_registration ?? ''),
+            public_footer_note: String(t.public_footer_note ?? ''),
+          });
+        }
+        if (!sj?.error && sj) setStripeStatus(sj);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const sp = searchParams.get('stripe');
+    if (sp == null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await apiFetch('/api/stripe-connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'sync_account_status' }),
+        });
+        const sr = await apiFetch('/api/stripe-connect?action=status');
+        const sj = (await sr.json()) as typeof stripeStatus & { error?: string };
+        if (!cancelled && !sj?.error && sj) setStripeStatus(sj);
+      } finally {
+        if (!cancelled) {
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete('stripe');
+              return next;
+            },
+            { replace: true }
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, setSearchParams]);
+
+  const saveWorkspaceBranding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!workspaceForm) return;
+    setWorkspaceLoading(true);
+    try {
+      const r = await apiFetch('/api/tenant-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          display_name: workspaceForm.display_name.trim() || null,
+          public_tagline: workspaceForm.public_tagline.trim() || null,
+          public_brand_logo_url: workspaceForm.public_brand_logo_url.trim() || null,
+          public_etransfer_email: workspaceForm.public_etransfer_email.trim() || null,
+          public_gst_registration: workspaceForm.public_gst_registration.trim() || null,
+          public_footer_note: workspaceForm.public_footer_note.trim() || null,
+        }),
+      });
+      const j = (await r.json()) as { tenant?: WorkspaceBrandingForm & Record<string, unknown> };
+      if (j.tenant) {
+        const t = j.tenant;
+        setWorkspaceForm({
+          display_name: String(t.display_name ?? ''),
+          public_tagline: String(t.public_tagline ?? ''),
+          public_brand_logo_url: String(t.public_brand_logo_url ?? ''),
+          public_etransfer_email: String(t.public_etransfer_email ?? ''),
+          public_gst_registration: String(t.public_gst_registration ?? ''),
+          public_footer_note: String(t.public_footer_note ?? ''),
+        });
+      }
+      setWorkspaceSaved(true);
+      window.setTimeout(() => setWorkspaceSaved(false), 2200);
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  };
+
+  const startStripeOnboarding = async () => {
+    const base = `${window.location.origin}/account`;
+    setStripeActionLoading(true);
+    try {
+      const r = await apiFetch('/api/stripe-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_account_link',
+          return_url: `${base}?stripe=return`,
+          refresh_url: `${base}?stripe=refresh`,
+        }),
+      });
+      const j = (await r.json()) as { url?: string; error?: string };
+      if (j.error) return;
+      if (j.url) window.location.href = j.url;
+    } finally {
+      setStripeActionLoading(false);
+    }
+  };
+
+  const openStripeExpressDashboard = async () => {
+    setStripeActionLoading(true);
+    try {
+      const r = await apiFetch('/api/stripe-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create_login_link' }),
+      });
+      const j = (await r.json()) as { url?: string; error?: string };
+      if (j.url) window.open(j.url, '_blank', 'noopener,noreferrer');
+    } finally {
+      setStripeActionLoading(false);
+    }
+  };
+
   const saveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
@@ -475,6 +635,133 @@ export default function Account() {
               {label}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Workspace: branding + Stripe Connect */}
+      <div className="card mb-6">
+        <h2 className="mb-4 flex items-center gap-2" style={{ fontSize: '1.125rem' }}>
+          <Building2 size={20} aria-hidden /> Business &amp; client-facing
+        </h2>
+        <p className="text-sm text-secondary mb-5" style={{ maxWidth: '42rem' }}>
+          These details appear on public invoice and quote views, PDFs, and payment pages. Connect your own Stripe account
+          to collect card payments into your business (Connect Express).
+        </p>
+
+        {workspaceForm ? (
+          <form onSubmit={saveWorkspaceBranding} className="flex flex-col gap-4 mb-8" style={{ maxWidth: '32rem' }}>
+            <div>
+              <label htmlFor="ws-display-name">Business name (client-facing)</label>
+              <input
+                id="ws-display-name"
+                value={workspaceForm.display_name}
+                onChange={(e) => setWorkspaceForm({ ...workspaceForm, display_name: e.target.value })}
+                autoComplete="organization"
+              />
+            </div>
+            <div>
+              <label htmlFor="ws-tagline">Tagline</label>
+              <input
+                id="ws-tagline"
+                value={workspaceForm.public_tagline}
+                onChange={(e) => setWorkspaceForm({ ...workspaceForm, public_tagline: e.target.value })}
+                placeholder="Short line under your business name"
+              />
+            </div>
+            <div>
+              <label htmlFor="ws-logo">Logo image URL</label>
+              <input
+                id="ws-logo"
+                type="url"
+                value={workspaceForm.public_brand_logo_url}
+                onChange={(e) => setWorkspaceForm({ ...workspaceForm, public_brand_logo_url: e.target.value })}
+                placeholder="https://…"
+              />
+            </div>
+            <div>
+              <label htmlFor="ws-etransfer">E-transfer email (shown to clients)</label>
+              <input
+                id="ws-etransfer"
+                type="email"
+                value={workspaceForm.public_etransfer_email}
+                onChange={(e) => setWorkspaceForm({ ...workspaceForm, public_etransfer_email: e.target.value })}
+              />
+            </div>
+            <div>
+              <label htmlFor="ws-gst">GST / HST registration no.</label>
+              <input
+                id="ws-gst"
+                value={workspaceForm.public_gst_registration}
+                onChange={(e) => setWorkspaceForm({ ...workspaceForm, public_gst_registration: e.target.value })}
+              />
+            </div>
+            <div>
+              <label htmlFor="ws-footer">Footer note (invoices &amp; receipts)</label>
+              <textarea
+                id="ws-footer"
+                rows={3}
+                value={workspaceForm.public_footer_note}
+                onChange={(e) => setWorkspaceForm({ ...workspaceForm, public_footer_note: e.target.value })}
+                className="w-full rounded-[var(--radius-sm)] border border-[var(--border-color)] bg-[var(--input-bg)] px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="flex gap-2 flex-wrap items-center">
+              <button type="submit" className="btn btn-primary" disabled={workspaceLoading}>
+                {workspaceLoading ? 'Saving…' : 'Save business details'}
+              </button>
+              {workspaceSaved && (
+                <span className="text-sm" style={{ color: 'var(--color-success)' }}>Saved</span>
+              )}
+            </div>
+          </form>
+        ) : (
+          <p className="text-sm text-secondary mb-6">Loading workspace settings…</p>
+        )}
+
+        <div className="border-t border-[var(--border-color)] pt-6" style={{ maxWidth: '32rem' }}>
+          <h3 className="mb-2 flex items-center gap-2 text-base font-semibold">
+            <CreditCard size={18} aria-hidden /> Stripe payments
+          </h3>
+          <p className="text-sm text-secondary mb-4">
+            After onboarding, online invoice payments use your connected account. You can open the Stripe Express dashboard
+            any time.
+          </p>
+          {stripeStatus ? (
+            <div className="space-y-3 text-sm">
+              <p>
+                <span className="text-secondary">Status: </span>
+                {stripeStatus.ready_for_payments ? (
+                  <span style={{ color: 'var(--color-success)' }}>Ready to charge cards</span>
+                ) : stripeStatus.connected ? (
+                  <span style={{ color: 'var(--text-muted)' }}>Setup incomplete — finish onboarding in Stripe</span>
+                ) : (
+                  <span style={{ color: 'var(--text-muted)' }}>Not connected</span>
+                )}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={stripeActionLoading}
+                  onClick={() => void startStripeOnboarding()}
+                >
+                  {stripeStatus.connected ? 'Continue Stripe setup' : 'Connect Stripe'}
+                </button>
+                {stripeStatus.connected ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={stripeActionLoading}
+                    onClick={() => void openStripeExpressDashboard()}
+                  >
+                    Stripe dashboard
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-secondary">Could not load Stripe status.</p>
+          )}
         </div>
       </div>
 

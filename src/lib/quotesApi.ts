@@ -6,6 +6,7 @@ import type {
   CrmProperty,
 } from '@/lib/quotesTypes';
 import { apiFetch } from './apiClient';
+import { dedupeCatalogProducts } from './dedupeCatalogProducts';
 
 const QUOTES = '/api/quotes';
 const PRODUCTS = '/api/products';
@@ -75,7 +76,7 @@ export async function fetchProducts(): Promise<ProductService[]> {
     throw new Error(j.error || `Products ${r.status}`);
   }
   const data = await readJson<{ products: ProductService[] }>(r);
-  return data.products ?? [];
+  return dedupeCatalogProducts(data.products ?? []);
 }
 
 export async function fetchTemplates(): Promise<QuoteTemplate[]> {

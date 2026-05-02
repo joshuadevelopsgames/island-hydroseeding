@@ -2,6 +2,13 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Invoice, InvoiceLineItem, InvoicePayment } from '@/lib/invoicesTypes';
 
+export type InvoicePdfBranding = {
+  display_name: string;
+  public_tagline?: string | null;
+  public_gst_registration?: string | null;
+  public_footer_note?: string | null;
+};
+
 // Brand colors for Island Hydroseeding
 const BRAND_GREEN = { r: 45, g: 80, b: 22 }; // #2D5016
 const BODY_TEXT = { r: 51, g: 51, b: 51 }; // #333333
@@ -29,8 +36,12 @@ export function generateInvoicePdf(
   lineItems: InvoiceLineItem[],
   payments: InvoicePayment[],
   account: { name: string; company: string | null; phone: string | null; email: string | null } | null,
-  property: { address: string; city: string | null; province: string | null; postal_code: string | null } | null
+  property: { address: string; city: string | null; province: string | null; postal_code: string | null } | null,
+  branding?: InvoicePdfBranding | null
 ): jsPDF {
+  const companyTitle = (branding?.display_name ?? 'ISLAND HYDROSEEDING LTD.').toUpperCase();
+  const tagline =
+    branding?.public_tagline?.trim() || 'Professional Hydroseeding & Site Restoration';
   const doc = new jsPDF({ unit: 'mm', format: 'letter', orientation: 'portrait' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -41,13 +52,13 @@ export function generateInvoicePdf(
   doc.setTextColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b);
   doc.setFontSize(18);
   doc.setFont('helvetica', 'bold');
-  doc.text('ISLAND HYDROSEEDING LTD.', margin, y);
+  doc.text(companyTitle, margin, y);
   y += 6;
 
   doc.setTextColor(MUTED_TEXT.r, MUTED_TEXT.g, MUTED_TEXT.b);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text('Professional Hydroseeding & Site Restoration', margin, y);
+  doc.text(tagline, margin, y);
   y += 2;
 
   // Invoice badge on right side
@@ -202,6 +213,16 @@ export function generateInvoicePdf(
   doc.text(fmtCurrency(invoice.tax_amount ?? 0), pageW - margin - 2, y, { align: 'right' });
   y += 5;
 
+  const gstReg = branding?.public_gst_registration?.trim();
+  if (gstReg) {
+    doc.setFontSize(8);
+    doc.setTextColor(MUTED_TEXT.r, MUTED_TEXT.g, MUTED_TEXT.b);
+    doc.text(`GST/HST registration no. ${gstReg}`, summaryX, y);
+    y += 4;
+    doc.setFontSize(9);
+    doc.setTextColor(BODY_TEXT.r, BODY_TEXT.g, BODY_TEXT.b);
+  }
+
   // Total row with background
   doc.setFillColor(BRAND_GREEN.r, BRAND_GREEN.g, BRAND_GREEN.b);
   doc.rect(summaryX - 2, y - 3, 52, 6, 'F');
@@ -319,10 +340,19 @@ export function generateInvoicePdf(
   }
 
   // FOOTER
-  const footerY = pageH - 10;
+  let footerY = pageH - 10;
+  const footNote = branding?.public_footer_note?.trim();
   doc.setTextColor(MUTED_TEXT.r, MUTED_TEXT.g, MUTED_TEXT.b);
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
+  if (footNote) {
+    const noteLines = doc.splitTextToSize(footNote, pageW - 2 * margin);
+    footerY = pageH - 10 - noteLines.length * 3.5;
+    noteLines.forEach((line: string, i: number) => {
+      doc.text(line, pageW / 2, footerY + i * 3.5, { align: 'center' });
+    });
+    footerY += noteLines.length * 3.5 + 2;
+  }
   doc.text('Thank you for your business!', pageW / 2, footerY, { align: 'center' });
 
   // Page number

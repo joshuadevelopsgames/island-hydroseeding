@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Loader2, Trash2, MoreVertical, Send, Pencil, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,9 @@ import { useCrmAccounts } from '@/hooks/useCrm';
 import { toast } from 'sonner';
 import { formatErrorForUi } from '@/lib/quotesApi';
 import type { Quote, QuoteLineItem, QuoteBundle, ProductService } from '@/lib/quotesTypes';
+import { apiFetch } from '@/lib/apiClient';
+import { resolveClientBranding, type TenantBrandingApi } from '@/lib/tenantBranding';
+import { TenantBrandPreview } from '@/components/TenantBrandPreview';
 
 const CAD = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' });
 const TAX_RATE = 0.05;
@@ -64,6 +67,13 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
     []
   );
   const [showLineItemDialog, setShowLineItemDialog] = useState(false);
+  const [clientBranding, setClientBranding] = useState(() => resolveClientBranding(undefined));
+  useEffect(() => {
+    void apiFetch('/api/tenant-settings')
+      .then((r) => r.json())
+      .then((d: { tenant?: TenantBrandingApi }) => setClientBranding(resolveClientBranding(d.tenant)))
+      .catch(() => {});
+  }, []);
   const [currentLineItem, setCurrentLineItem] = useState<{
     idx: number | null;
     product_service_name: string;
@@ -532,6 +542,9 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
               <CardTitle className="text-lg">Summary</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
+              <div className="border-b border-[var(--border-color)] pb-4">
+                <TenantBrandPreview br={clientBranding} />
+              </div>
               <div>
                 <p className="text-[var(--text-muted)]">Client</p>
                 <p className="font-semibold">{selectedAccount?.name || '—'}</p>
@@ -558,6 +571,9 @@ function CreateQuoteMode({ navigate }: { navigate: ReturnType<typeof useNavigate
               <div>
                 <p className="text-[var(--text-muted)]">Tax (5%)</p>
                 <p className="font-semibold">{formatCurrency(tax)}</p>
+                {clientBranding.gst ? (
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">GST/HST registration no. {clientBranding.gst}</p>
+                ) : null}
               </div>
               {depositRequired && (
                 <div>
@@ -601,6 +617,13 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
   const [selectedLineItem, setSelectedLineItem] = useState<QuoteLineItem | null>(null);
   const [editLineItemValues, setEditLineItemValues] = useState({ quantity: 1, unit_price: 0 });
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [clientBranding, setClientBranding] = useState(() => resolveClientBranding(undefined));
+  useEffect(() => {
+    void apiFetch('/api/tenant-settings')
+      .then((r) => r.json())
+      .then((d: { tenant?: TenantBrandingApi }) => setClientBranding(resolveClientBranding(d.tenant)))
+      .catch(() => {});
+  }, []);
 
   const bundle = data as QuoteBundle | undefined;
   const quote = bundle?.quote;
@@ -928,6 +951,9 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
                       <span className="text-[var(--text-secondary)]">GST (5%): </span>
                       <span className="font-semibold">{formatCurrency(tax)}</span>
                     </p>
+                    {clientBranding.gst ? (
+                      <p className="text-xs text-[var(--text-muted)]">GST/HST registration no. {clientBranding.gst}</p>
+                    ) : null}
                     <p className="pt-1 text-base font-bold">
                       <span className="text-[var(--text-secondary)]">Total: </span>
                       <span>{formatCurrency(total)}</span>
@@ -964,6 +990,9 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
               <CardTitle className="text-lg">Quote Info</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
+              <div className="border-b border-[var(--border-color)] pb-4">
+                <TenantBrandPreview br={clientBranding} />
+              </div>
               {quote.quote_number && (
                 <div>
                   <p className="text-[var(--text-muted)]">Quote #</p>
@@ -1008,6 +1037,9 @@ function ViewEditQuoteMode({ id, navigate }: { id: string; navigate: ReturnType<
               <div>
                 <p className="text-[var(--text-muted)]">Tax (5%)</p>
                 <p className="font-semibold">{formatCurrency(tax)}</p>
+                {clientBranding.gst ? (
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">GST/HST registration no. {clientBranding.gst}</p>
+                ) : null}
               </div>
               <div className="rounded-[var(--radius-sm)] bg-[var(--bg-secondary)] p-3">
                 <p className="text-[var(--text-muted)]">Total</p>
