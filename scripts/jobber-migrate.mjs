@@ -12,8 +12,13 @@
  *   4. Add to your .env.local:
  *        JOBBER_CLIENT_ID=your_client_id
  *        JOBBER_CLIENT_SECRET=your_client_secret
+ *        SUPABASE_URL=…
+ *        SUPABASE_SERVICE_ROLE_KEY=…
+ *        DEFAULT_TENANT_ID=a3d8e7f1-2b4c-4a21-9e5f-6c0d1e2f3a4b   (same as api/_tenant.ts / migration 009)
  *
- * RUN:
+ *   5. In Supabase SQL editor, run scripts/jobber-migration-prep.sql once (jobber_id columns).
+ *
+ * RUN (from repo root, logged into the Jobber account you want to export — or use JOBBER_ACCESS_TOKEN):
  *   node scripts/jobber-migrate.mjs
  *
  * The script will print an authorization URL. Open it in your browser,
@@ -71,6 +76,10 @@ if (missing.length) {
 }
 
 const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+/** Must match seed tenant in supabase/migrations/009_multi_tenancy.sql */
+const TENANT_ID =
+  env.DEFAULT_TENANT_ID?.trim() || 'a3d8e7f1-2b4c-4a21-9e5f-6c0d1e2f3a4b';
 
 // ── OAuth helpers ─────────────────────────────────────────────────────────────
 
@@ -232,19 +241,19 @@ const QUOTES_QUERY = `
         id
         quoteNumber
         title
-        status
+        quoteStatus
         message
         createdAt
         updatedAt
-        sentAt
-        approvedAt
+        transitionedAt
+        clientHubViewedAt
         client { id }
         property { id }
         amounts {
-          subtotal { value }
-          total { value }
-          depositAmount { value }
-          taxAmount { value }
+          subtotal
+          total
+          depositAmount
+          taxAmount
         }
         lineItems {
           nodes {
@@ -275,7 +284,7 @@ const JOBS_QUERY = `
         endAt
         createdAt
         updatedAt
-        total { value }
+        total
         client { id }
         property { id }
         lineItems {
@@ -310,19 +319,21 @@ const INVOICES_QUERY = `
         id
         invoiceNumber
         subject
-        status
+        invoiceStatus
         issuedDate
         dueDate
         createdAt
         updatedAt
         client { id }
-        property { id }
+        properties(first: 1) {
+          nodes { id }
+        }
         amounts {
-          subtotal { value }
-          total { value }
-          taxAmount { value }
-          paymentsTotal { value }
-          outstandingBalance { value }
+          subtotal
+          total
+          taxAmount
+          paymentsTotal
+          outstandingBalance
         }
         lineItems {
           nodes {
@@ -335,13 +346,11 @@ const INVOICES_QUERY = `
             sortOrder
           }
         }
-        payments {
+        paymentRecords(first: 100) {
           nodes {
             id
-            amount { value }
-            type
+            amount
             recordedDate
-            chequeNumber
           }
         }
       }
@@ -351,6 +360,14 @@ const INVOICES_QUERY = `
 `;
 
 // ── Mappers ───────────────────────────────────────────────────────────────────
+
+/** Jobber returns Float or Money objects depending on field / version */
+function moneyVal(x) {
+  if (x == null || x === '') return 0;
+  if (typeof x === 'number' && !Number.isNaN(x)) return x;
+  if (typeof x === 'object' && x.value != null) return parseFloat(x.value) || 0;
+  return parseFloat(x) || 0;
+}
 
 function mapClientToAccount(c) {
   const primaryEmail = c.emails?.find(e => e.primary)?.address ?? c.emails?.[0]?.address ?? null;
@@ -371,6 +388,7 @@ function mapClientToAccount(c) {
     created_at:     c.createdAt ?? new Date().toISOString(),
     updated_at:     c.updatedAt ?? new Date().toISOString(),
     jobber_id:      c.id,
+    tenant_id:      TENANT_ID,
   };
 }
 
@@ -385,12 +403,14 @@ function mapProperty(prop, accountId) {
     created_at:  new Date().toISOString(),
     updated_at:  new Date().toISOString(),
     jobber_id:   prop.id,
+    tenant_id:   TENANT_ID,
   };
 }
 
 function mapLineItem(li, parentKey, parentId, index) {
   return {
     [parentKey]:          parentId,
+    tenant_id:            TENANT_ID,
     product_service_name: li.name || 'Service',
     description:          li.description ?? null,
     quantity:             parseFloat(li.quantity) || 1,
@@ -411,7 +431,11 @@ function mapQuoteStatus(s) {
     converted:          'Converted',
     archived:           'Archived',
   };
-  return map[s?.toLowerCase()] ?? 'Draft';
+  const snake = String(s ?? '')
+    .toLowerCase()
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .toLowerCase();
+  return map[snake] ?? 'Draft';
 }
 
 function mapJobStatus(s) {
@@ -427,13 +451,18 @@ function mapJobStatus(s) {
 
 function mapInvoiceStatus(s) {
   const map = {
-    draft:    'Draft',
-    sent:     'Sent',
-    past_due: 'Past Due',
-    paid:     'Paid',
-    bad_debt: 'Archived',
+    draft:              'Draft',
+    sent:               'Sent',
+    awaiting_payment:   'Sent',
+    past_due:           'Past Due',
+    paid:               'Paid',
+    bad_debt:           'Archived',
   };
-  return map[s?.toLowerCase()] ?? 'Draft';
+  const snake = String(s ?? '')
+    .toLowerCase()
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .toLowerCase();
+  return map[snake] ?? 'Draft';
 }
 
 // ── Supabase upsert helpers ───────────────────────────────────────────────────
@@ -500,23 +529,35 @@ async function migrateQuotes(token, accountIdMap, propertyIdMap) {
   const quotes = await paginate(token, QUOTES_QUERY, d => d.quotes);
   console.log(`  ✓ ${quotes.length} quotes`);
 
-  const quoteRows = quotes.map(q => ({
-    account_id:           accountIdMap[q.client?.id] ?? null,
-    property_id:          propertyIdMap[q.property?.id] ?? null,
-    title:                q.title || `Quote #${q.quoteNumber}`,
-    status:               mapQuoteStatus(q.status),
-    introduction:         q.message ?? null,
-    subtotal:             parseFloat(q.amounts?.subtotal?.value) || 0,
-    tax_amount:           parseFloat(q.amounts?.taxAmount?.value) || 0,
-    total:                parseFloat(q.amounts?.total?.value) || 0,
-    deposit_required:     (parseFloat(q.amounts?.depositAmount?.value) || 0) > 0,
-    deposit_amount:       parseFloat(q.amounts?.depositAmount?.value) || null,
-    created_at:           q.createdAt ?? new Date().toISOString(),
-    updated_at:           q.updatedAt ?? new Date().toISOString(),
-    sent_at:              q.sentAt ?? null,
-    approved_at:          q.approvedAt ?? null,
-    jobber_id:            q.id,
-  }));
+  const quoteRows = [];
+  for (const q of quotes) {
+    const account_id = accountIdMap[q.client?.id];
+    if (!account_id) {
+      console.warn(`  ⚠ Skipping quote (no client in map): ${q.title || q.quoteNumber || q.id}`);
+      continue;
+    }
+    const statusLabel = mapQuoteStatus(q.quoteStatus);
+    const transition = q.transitionedAt ?? null;
+    quoteRows.push({
+      tenant_id:        TENANT_ID,
+      account_id,
+      property_id:      propertyIdMap[q.property?.id] ?? null,
+      title:            q.title || `Quote #${q.quoteNumber}`,
+      status:           statusLabel,
+      introduction:     q.message ?? null,
+      subtotal:         moneyVal(q.amounts?.subtotal),
+      tax_amount:       moneyVal(q.amounts?.taxAmount),
+      total:            moneyVal(q.amounts?.total),
+      deposit_required: moneyVal(q.amounts?.depositAmount) > 0,
+      deposit_amount:   moneyVal(q.amounts?.depositAmount) || null,
+      created_at:       q.createdAt ?? new Date().toISOString(),
+      updated_at:       q.updatedAt ?? new Date().toISOString(),
+      sent_at:          transition,
+      approved_at:
+        statusLabel === 'Approved' || statusLabel === 'Converted' ? transition : null,
+      jobber_id:        q.id,
+    });
+  }
 
   const { data: existingQuotes } = await sb.from('quotes').select('id, jobber_id').not('jobber_id', 'is', null);
   const existingQuoteIds = new Set((existingQuotes ?? []).map(q => q.jobber_id));
@@ -554,19 +595,28 @@ async function migrateJobs(token, accountIdMap, propertyIdMap, quoteIdMap) {
   const jobs = await paginate(token, JOBS_QUERY, d => d.jobs);
   console.log(`  ✓ ${jobs.length} jobs`);
 
-  const jobRows = jobs.map(j => ({
-    account_id:   accountIdMap[j.client?.id] ?? null,
-    property_id:  propertyIdMap[j.property?.id] ?? null,
-    title:        j.title || `Job #${j.jobNumber}`,
-    job_type:     'One-off',
-    status:       mapJobStatus(j.jobStatus),
-    total_price:  parseFloat(j.total?.value) || 0,
-    start_date:   j.startAt ? j.startAt.slice(0, 10) : null,
-    end_date:     j.endAt   ? j.endAt.slice(0, 10)   : null,
-    created_at:   j.createdAt ?? new Date().toISOString(),
-    updated_at:   j.updatedAt ?? new Date().toISOString(),
-    jobber_id:    j.id,
-  }));
+  const jobRows = [];
+  for (const j of jobs) {
+    const account_id = accountIdMap[j.client?.id];
+    if (!account_id) {
+      console.warn(`  ⚠ Skipping job (no client in map): ${j.title || j.jobNumber || j.id}`);
+      continue;
+    }
+    jobRows.push({
+      tenant_id:   TENANT_ID,
+      account_id,
+      property_id: propertyIdMap[j.property?.id] ?? null,
+      title:       j.title || `Job #${j.jobNumber}`,
+      job_type:    'One-off',
+      status:      mapJobStatus(j.jobStatus),
+      total_price: moneyVal(j.total),
+      start_date:  j.startAt ? j.startAt.slice(0, 10) : null,
+      end_date:    j.endAt ? j.endAt.slice(0, 10) : null,
+      created_at:  j.createdAt ?? new Date().toISOString(),
+      updated_at:  j.updatedAt ?? new Date().toISOString(),
+      jobber_id:   j.id,
+    });
+  }
 
   const { data: existingJobs } = await sb.from('jobs').select('id, jobber_id').not('jobber_id', 'is', null);
   const existingJobIds = new Set((existingJobs ?? []).map(j => j.jobber_id));
@@ -593,6 +643,7 @@ async function migrateJobs(token, accountIdMap, propertyIdMap, quoteIdMap) {
 
     (j.visits?.nodes ?? []).forEach(v => {
       visitRows.push({
+        tenant_id:    TENANT_ID,
         job_id:       jobId,
         scheduled_at: v.startAt ?? j.startAt ?? new Date().toISOString(),
         completed_at: v.isComplete ? (v.endAt ?? null) : null,
@@ -622,22 +673,26 @@ async function migrateInvoices(token, accountIdMap, propertyIdMap, jobIdMap) {
   const invoices = await paginate(token, INVOICES_QUERY, d => d.invoices);
   console.log(`  ✓ ${invoices.length} invoices`);
 
-  const invoiceRows = invoices.map(inv => ({
-    account_id:   accountIdMap[inv.client?.id] ?? null,
-    property_id:  propertyIdMap[inv.property?.id] ?? null,
-    title:        inv.subject ?? null,
-    status:       mapInvoiceStatus(inv.status),
-    issue_date:   inv.issuedDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
-    due_date:     inv.dueDate?.slice(0, 10)    ?? new Date().toISOString().slice(0, 10),
-    subtotal:     parseFloat(inv.amounts?.subtotal?.value) || 0,
-    tax_amount:   parseFloat(inv.amounts?.taxAmount?.value) || 0,
-    total:        parseFloat(inv.amounts?.total?.value) || 0,
-    amount_paid:  parseFloat(inv.amounts?.paymentsTotal?.value) || 0,
-    balance_due:  parseFloat(inv.amounts?.outstandingBalance?.value) || 0,
-    created_at:   inv.createdAt ?? new Date().toISOString(),
-    updated_at:   inv.updatedAt ?? new Date().toISOString(),
-    jobber_id:    inv.id,
-  }));
+  const invoiceRows = invoices.map(inv => {
+    const propId = inv.properties?.nodes?.[0]?.id;
+    return {
+      tenant_id:   TENANT_ID,
+      account_id:  accountIdMap[inv.client?.id] ?? null,
+      property_id: propertyIdMap[propId] ?? null,
+      title:       inv.subject ?? null,
+      status:      mapInvoiceStatus(inv.invoiceStatus),
+      issue_date:  inv.issuedDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+      due_date:    inv.dueDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+      subtotal:    moneyVal(inv.amounts?.subtotal),
+      tax_amount:  moneyVal(inv.amounts?.taxAmount),
+      total:       moneyVal(inv.amounts?.total),
+      amount_paid: moneyVal(inv.amounts?.paymentsTotal),
+      balance_due: moneyVal(inv.amounts?.outstandingBalance),
+      created_at:  inv.createdAt ?? new Date().toISOString(),
+      updated_at:  inv.updatedAt ?? new Date().toISOString(),
+      jobber_id:   inv.id,
+    };
+  });
 
   const { data: existingInvoices } = await sb.from('invoices').select('id, jobber_id').not('jobber_id', 'is', null);
   const existingInvoiceIds = new Set((existingInvoices ?? []).map(i => i.jobber_id));
@@ -662,13 +717,18 @@ async function migrateInvoices(token, accountIdMap, propertyIdMap, jobIdMap) {
       lineItemRows.push(mapLineItem(li, 'invoice_id', invoiceId, i));
     });
 
-    (inv.payments?.nodes ?? []).forEach(p => {
+    (inv.paymentRecords?.nodes ?? []).forEach(p => {
+      const payDate =
+        p.recordedDate?.slice(0, 10) ??
+        inv.issuedDate?.slice(0, 10) ??
+        new Date().toISOString().slice(0, 10);
       paymentRows.push({
+        tenant_id:        TENANT_ID,
         invoice_id:       invoiceId,
-        amount:           parseFloat(p.amount?.value) || 0,
-        payment_method:   p.type ?? null,
-        payment_date:     p.recordedDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
-        reference_number: p.chequeNumber ?? null,
+        amount:           moneyVal(p.amount),
+        payment_method:   null,
+        payment_date:     payDate,
+        reference_number: null,
         created_at:       new Date().toISOString(),
       });
     });

@@ -14,16 +14,9 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { decryptToken, encryptToken, signOAuthState } from './_quickbooksCrypto';
-// encryptToken used for key probe in authorize; decryptToken for disconnect revoke
+import { INTUIT_AUTH_BASE, INTUIT_REVOKE_URL, QBO_SCOPE } from './_quickbooksIntuit';
 import { requireAuth } from './_auth';
 import { resolveTenantId } from './_tenant';
-
-const INTUIT_AUTH_BASE = 'https://appcenter.intuit.com/connect/oauth2';
-const INTUIT_TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
-const INTUIT_REVOKE_URL = 'https://developer.api.intuit.com/v2/oauth2/tokens/revoke';
-
-/** Default: read/write accounting API */
-const QBO_SCOPE = 'com.intuit.quickbooks.accounting';
 
 function getDb() {
   return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
@@ -197,6 +190,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   res.status(400).json({ error: 'Unknown action' });
 }
-
-/** Exported for quickbooks-callback and future QBO API routes */
-export { INTUIT_TOKEN_URL, QBO_SCOPE };

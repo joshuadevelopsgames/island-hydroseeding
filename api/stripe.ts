@@ -12,6 +12,9 @@
  * POST { action: 'get_payment_link', invoice_id }
  *   Generates a pay_token for the invoice (idempotent) and returns the full URL.
  *
+ * POST { action: 'create_checkout_session', invoice_id } (auth)
+ *   Stripe Checkout on the connected account with optional application fee (platform).
+ *
  * Webhook events are handled in /api/stripe-webhook.ts (separate file,
  * body parser disabled for signature verification).
  */
@@ -20,6 +23,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { randomUUID } from 'crypto';
+import { requireAuth } from './_auth';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -28,7 +32,7 @@ function getDb(): SupabaseClient {
 }
 
 function getStripe(): Stripe {
-  return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-02-24.acacia' });
+  return new Stripe(process.env.STRIPE_SECRET_KEY!);
 }
 
 function parseBody(req: VercelRequest): Record<string, unknown> {
@@ -135,6 +139,11 @@ async function handlePost(req: VercelRequest, res: VercelResponse) {
 
   if (action === 'create_payment_intent') return createPaymentIntent(body, res);
   if (action === 'get_payment_link')      return getPaymentLink(body, req, res);
+  if (action === 'create_checkout_session') {
+    const auth = await requireAuth(req, res);
+    if (!auth) return;
+    return createCheckoutSessionForInvoice(body, req, res);
+  }
 
   return res.status(400).json({ error: `Unknown POST action: ${action}` });
 }
@@ -264,4 +273,103 @@ async function getPaymentLink(body: Record<string, unknown>, req: VercelRequest,
   const url   = `${proto}://${host}/pay/${token}`;
 
   return res.status(200).json({ url, token });
+}
+
+// ── create_checkout_session (Connect Checkout + optional application fee) ───
+
+async function createCheckoutSessionForInvoice(
+  body: Record<string, unknown>,
+  req: VercelRequest,
+  res: VercelResponse
+) {
+  const { invoice_id } = body as { invoice_id: string };
+  if (!invoice_id) return res.status(400).json({ error: 'invoice_id required' });
+
+  const db = getDb();
+  const str = getStripe();
+
+  const { data: invoice, error } = await db
+    .from('invoices')
+    .select(
+      'id, tenant_id, invoice_number, title, status, balance_due, total, pay_token, account_id'
+    )
+    .eq('id', invoice_id)
+    .single();
+
+  if (error || !invoice) return res.status(404).json({ error: 'Invoice not found' });
+  if (invoice.status === 'Paid') return res.status(400).json({ error: 'Invoice is already paid' });
+
+  const tid = invoice.tenant_id as string;
+  const balance = Number(invoice.balance_due ?? invoice.total ?? 0);
+  if (balance <= 0) return res.status(400).json({ error: 'No balance due' });
+
+  const { data: tenantStripe } = await db
+    .from('tenants')
+    .select('stripe_connect_account_id, stripe_connect_charges_enabled')
+    .eq('id', tid)
+    .single();
+
+  const connectedId = tenantStripe?.stripe_connect_account_id as string | null | undefined;
+  const useConnect =
+    Boolean(connectedId && tenantStripe?.stripe_connect_charges_enabled);
+  const requestOpts = useConnect && connectedId ? { stripeAccount: connectedId } : undefined;
+
+  let token = invoice.pay_token as string | null;
+  if (!token) {
+    token = randomUUID();
+    await db
+      .from('invoices')
+      .update({ pay_token: token, updated_at: new Date().toISOString() })
+      .eq('id', invoice_id)
+      .eq('tenant_id', tid);
+  }
+
+  const proto = (req.headers['x-forwarded-proto'] as string) ?? 'https';
+  const host =
+    (req.headers['x-forwarded-host'] as string) ?? req.headers.host ?? 'island-hydroseeding.vercel.app';
+  const basePay = `${proto}://${host}/pay/${token}`;
+
+  const amountCents = Math.round(balance * 100);
+  const invNo = String(invoice.invoice_number ?? '').padStart(4, '0');
+  const title = invoice.title ? String(invoice.title) : '';
+
+  const feeCents = Math.max(
+    0,
+    parseInt(process.env.STRIPE_PLATFORM_APPLICATION_FEE_CENTS ?? '0', 10) || 0
+  );
+
+  const paymentIntentData: Stripe.Checkout.SessionCreateParams.PaymentIntentData = {
+    metadata: {
+      invoice_id: invoice.id,
+      tenant_id: tid,
+      invoice_number: invNo,
+    },
+  };
+  if (feeCents > 0 && useConnect && connectedId) {
+    paymentIntentData.application_fee_amount = feeCents;
+  }
+
+  const session = await str.checkout.sessions.create(
+    {
+      mode: 'payment',
+      success_url: `${basePay}?checkout=success`,
+      cancel_url: `${basePay}?checkout=cancel`,
+      line_items: [
+        {
+          price_data: {
+            currency: 'cad',
+            product_data: {
+              name: title ? `Invoice #${invNo} — ${title}` : `Invoice #${invNo}`,
+            },
+            unit_amount: amountCents,
+          },
+          quantity: 1,
+        },
+      ],
+      payment_intent_data: paymentIntentData,
+    },
+    requestOpts
+  );
+
+  return res.status(200).json({ url: session.url, id: session.id });
 }

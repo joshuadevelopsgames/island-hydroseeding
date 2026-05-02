@@ -61,7 +61,10 @@ export function verifyOAuthState(state: string): OAuthStatePayload | null {
     const b64 = state.slice(0, dot);
     const sig = state.slice(dot + 1);
     const expected = crypto.createHmac('sha256', getStateSecret()).update(b64).digest('base64url');
-    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+    const a = Buffer.from(sig, 'utf8');
+    const b = Buffer.from(expected, 'utf8');
+    if (a.length !== b.length) return null;
+    if (!crypto.timingSafeEqual(a, b)) return null;
     const json = Buffer.from(b64, 'base64url').toString('utf8');
     const payload = JSON.parse(json) as OAuthStatePayload;
     if (!payload?.tenantId || typeof payload.exp !== 'number') return null;

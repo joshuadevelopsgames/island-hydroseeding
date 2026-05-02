@@ -15,7 +15,7 @@ import {
 import {
   LayoutDashboard, Users, Inbox, FileText, Briefcase, Receipt, CreditCard,
   Calendar, Clock, ClipboardCheck, FolderOpen, CheckSquare,
-  Truck, AlertTriangle, Fuel, Wrench, Package, UserCog,
+  Truck, AlertTriangle, Fuel, Wrench, Package, UserCog, BookOpen,
 } from 'lucide-react';
 
 // ── nav item catalogue ────────────────────────────────────────────────────────
@@ -164,6 +164,14 @@ export default function Account() {
     payouts_enabled: boolean;
   } | null>(null);
   const [stripeActionLoading, setStripeActionLoading] = useState(false);
+
+  const [qbStatus, setQbStatus] = useState<{
+    connected: boolean;
+    realm_id: string | null;
+    connected_at: string | null;
+  } | null>(null);
+  const [qbActionLoading, setQbActionLoading] = useState(false);
+  const [qbOAuthFlash, setQbOAuthFlash] = useState<'connected' | 'error' | 'realm_taken' | null>(null);
 
   // Change-password state
   const [newPw, setNewPw]           = useState('');
@@ -356,12 +364,14 @@ export default function Account() {
     let cancelled = false;
     void (async () => {
       try {
-        const [tr, sr] = await Promise.all([
+        const [tr, sr, qr] = await Promise.all([
           apiFetch('/api/tenant-settings'),
           apiFetch('/api/stripe-connect?action=status'),
+          apiFetch('/api/quickbooks-connect?action=status'),
         ]);
         const tj = (await tr.json()) as { tenant?: WorkspaceBrandingForm & Record<string, unknown> };
         const sj = (await sr.json()) as typeof stripeStatus & { error?: string };
+        const qj = (await qr.json()) as typeof qbStatus & { error?: string };
         if (cancelled) return;
         const t = tj.tenant;
         if (t) {
@@ -375,6 +385,7 @@ export default function Account() {
           });
         }
         if (!sj?.error && sj) setStripeStatus(sj);
+        if (!qj?.error && qj) setQbStatus(qj);
       } catch {
         /* ignore */
       }
@@ -404,6 +415,37 @@ export default function Account() {
             (prev) => {
               const next = new URLSearchParams(prev);
               next.delete('stripe');
+              return next;
+            },
+            { replace: true }
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const sp = searchParams.get('quickbooks');
+    if (sp == null) return;
+    if (sp === 'connected' || sp === 'error' || sp === 'realm_taken') {
+      setQbOAuthFlash(sp);
+      window.setTimeout(() => setQbOAuthFlash(null), 12000);
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await apiFetch('/api/quickbooks-connect?action=status');
+        const qj = (await r.json()) as typeof qbStatus & { error?: string };
+        if (!cancelled && !qj?.error && qj) setQbStatus(qj);
+      } finally {
+        if (!cancelled) {
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete('quickbooks');
               return next;
             },
             { replace: true }
@@ -485,6 +527,39 @@ export default function Account() {
       if (j.url) window.open(j.url, '_blank', 'noopener,noreferrer');
     } finally {
       setStripeActionLoading(false);
+    }
+  };
+
+  const startQuickBooksConnect = async () => {
+    setQbActionLoading(true);
+    try {
+      const r = await apiFetch('/api/quickbooks-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'authorize' }),
+      });
+      const j = (await r.json()) as { authorization_url?: string; error?: string };
+      if (j.error) return;
+      if (j.authorization_url) window.location.href = j.authorization_url;
+    } finally {
+      setQbActionLoading(false);
+    }
+  };
+
+  const disconnectQuickBooks = async () => {
+    setQbActionLoading(true);
+    try {
+      const r = await apiFetch('/api/quickbooks-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'disconnect' }),
+      });
+      const j = (await r.json()) as { disconnected?: boolean; error?: string };
+      if (j.disconnected) {
+        setQbStatus({ connected: false, realm_id: null, connected_at: null });
+      }
+    } finally {
+      setQbActionLoading(false);
     }
   };
 
@@ -761,6 +836,70 @@ export default function Account() {
             </div>
           ) : (
             <p className="text-sm text-secondary">Could not load Stripe status.</p>
+          )}
+        </div>
+
+        <div className="border-t border-[var(--border-color)] pt-6 mt-6" style={{ maxWidth: '32rem' }}>
+          <h3 className="mb-2 flex items-center gap-2 text-base font-semibold">
+            <BookOpen size={18} aria-hidden /> QuickBooks Online
+          </h3>
+          <p className="text-sm text-secondary mb-4">
+            Connect your company file so we can sync accounting data (invoices, customers, and more) per workspace.
+            Each workspace links one QuickBooks company.
+          </p>
+          {qbOAuthFlash === 'connected' ? (
+            <p className="text-sm mb-3" style={{ color: 'var(--color-success)' }}>
+              QuickBooks connected successfully.
+            </p>
+          ) : null}
+          {qbOAuthFlash === 'error' ? (
+            <p className="text-sm mb-3" style={{ color: 'var(--color-danger, #c45)' }}>
+              QuickBooks connection failed. Check Intuit app redirect URI and environment variables, then try again.
+            </p>
+          ) : null}
+          {qbOAuthFlash === 'realm_taken' ? (
+            <p className="text-sm mb-3" style={{ color: 'var(--color-danger, #c45)' }}>
+              That QuickBooks company is already linked to another workspace.
+            </p>
+          ) : null}
+          {qbStatus ? (
+            <div className="space-y-3 text-sm">
+              <p>
+                <span className="text-secondary">Status: </span>
+                {qbStatus.connected ? (
+                  <span style={{ color: 'var(--color-success)' }}>Connected</span>
+                ) : (
+                  <span style={{ color: 'var(--text-muted)' }}>Not connected</span>
+                )}
+              </p>
+              {qbStatus.connected && qbStatus.realm_id ? (
+                <p className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
+                  Company (realm) id: {qbStatus.realm_id}
+                </p>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={qbActionLoading}
+                  onClick={() => void startQuickBooksConnect()}
+                >
+                  {qbStatus.connected ? 'Reconnect QuickBooks' : 'Connect QuickBooks'}
+                </button>
+                {qbStatus.connected ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={qbActionLoading}
+                    onClick={() => void disconnectQuickBooks()}
+                  >
+                    Disconnect
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-secondary">Could not load QuickBooks status.</p>
           )}
         </div>
       </div>

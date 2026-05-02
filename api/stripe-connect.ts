@@ -1,5 +1,9 @@
 /**
- * Stripe Connect onboarding for the current tenant (Express-style connected accounts).
+ * Stripe Connect onboarding for the current tenant.
+ *
+ * Default: Accounts v1 Express (`accounts.create` + `accountLinks`).
+ * Accounts v2 (blueprint): set STRIPE_CONNECT_USE_ACCOUNTS_V2=true, STRIPE_API_VERSION (Workbench preview, e.g. 2026-02-25.clover),
+ * optional STRIPE_CONNECTED_ACCOUNT_DEFAULT_COUNTRY (default CA), STRIPE_SIMULATE_CONNECTED_ONBOARDING=true in test.
  *
  * POST { action: 'create_account_link', return_url, refresh_url }
  *   Creates connected account if missing, then Account Link for onboarding.
@@ -16,13 +20,18 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { requireAuth } from './_auth';
 import { resolveTenantId } from './_tenant';
+import { createOnboardingAccountLink, createUnifiedConnectedAccount } from './connectLinkedAccountV2';
 
 function getDb() {
   return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 }
 
 function getStripe(): Stripe {
-  return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-02-24.acacia' });
+  return new Stripe(process.env.STRIPE_SECRET_KEY!);
+}
+
+function useAccountsV2(): boolean {
+  return process.env.STRIPE_CONNECT_USE_ACCOUNTS_V2 === 'true';
 }
 
 function parseBody(req: VercelRequest): Record<string, unknown> {
@@ -112,18 +121,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let accountId = tenant.stripe_connect_account_id as string | null;
 
     if (!accountId) {
-      const acct = await stripe.accounts.create({
-        type: 'express',
-        country: 'CA',
-        email: auth.email ?? undefined,
-        business_profile: { name: String(tenant.display_name ?? '').slice(0, 100) || undefined },
-        capabilities: {
-          card_payments: { requested: true },
-          transfers: { requested: true },
-        },
-        metadata: { tenant_id: tenantId },
-      });
-      accountId = acct.id;
+      if (useAccountsV2()) {
+        try {
+          const country = (process.env.STRIPE_CONNECTED_ACCOUNT_DEFAULT_COUNTRY ?? 'CA').trim().toUpperCase();
+          const created = await createUnifiedConnectedAccount({
+            displayName: String(tenant.display_name ?? 'Workspace'),
+            contactEmail: auth.email ?? '',
+            tenantId,
+            country,
+          });
+          accountId = created.id;
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          res.status(502).json({
+            error: msg,
+            hint: 'Set STRIPE_API_VERSION to your Workbench preview (e.g. 2026-02-25.clover) and ensure Accounts v2 is enabled for your platform.',
+          });
+          return;
+        }
+      } else {
+        const acct = await stripe.accounts.create({
+          type: 'express',
+          country: 'CA',
+          email: auth.email ?? undefined,
+          business_profile: { name: String(tenant.display_name ?? '').slice(0, 100) || undefined },
+          capabilities: {
+            card_payments: { requested: true },
+            transfers: { requested: true },
+          },
+          metadata: { tenant_id: tenantId },
+        });
+        accountId = acct.id;
+      }
 
       const { error: upErr } = await db
         .from('tenants')
@@ -136,14 +165,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const link = await stripe.accountLinks.create({
-      account: accountId,
-      refresh_url: refreshUrl,
-      return_url: returnUrl,
-      type: 'account_onboarding',
-    });
+    let linkUrl: string;
+    let expiresAt: number | undefined;
 
-    res.status(200).json({ url: link.url, expires_at: link.expires_at });
+    if (useAccountsV2()) {
+      try {
+        const link = await createOnboardingAccountLink({
+          accountId,
+          returnUrl,
+          refreshUrl,
+        });
+        linkUrl = link.url;
+        expiresAt = link.expires_at;
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        res.status(502).json({ error: msg });
+        return;
+      }
+    } else {
+      const link = await stripe.accountLinks.create({
+        account: accountId,
+        refresh_url: refreshUrl,
+        return_url: returnUrl,
+        type: 'account_onboarding',
+      });
+      linkUrl = link.url;
+      expiresAt = link.expires_at;
+    }
+
+    res.status(200).json({ url: linkUrl, expires_at: expiresAt });
     return;
   }
 

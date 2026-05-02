@@ -10,6 +10,8 @@
  *
  * Events handled:
  *   payment_intent.succeeded → mark invoice Paid, record payment row
+ *   account.updated → sync Connect flags (v1 Express)
+ *   v2.core.account…capability… → re-fetch Account and sync flags (Accounts v2)
  */
 
 import { createClient } from '@supabase/supabase-js';
@@ -22,7 +24,7 @@ import { syncInvoiceFinancials } from './_invoiceSync';
 export const config = { api: { bodyParser: false } };
 
 function getStripe() {
-  return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-02-24.acacia' });
+  return new Stripe(process.env.STRIPE_SECRET_KEY!);
 }
 
 function getDb() {
@@ -63,6 +65,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await handlePaymentSucceeded(event.data.object as Stripe.PaymentIntent);
     } else if (event.type === 'account.updated') {
       await handleAccountUpdated(event.data.object as Stripe.Account);
+    } else if (event.type.includes('v2.core.account') && event.type.includes('capability')) {
+      await handleAccountsV2CapabilityEvent(event);
     }
   } catch (err: any) {
     console.error('[stripe-webhook] handler error:', err);
@@ -130,4 +134,34 @@ async function handleAccountUpdated(acct: Stripe.Account) {
     .eq('stripe_connect_account_id', acct.id);
 
   console.log(`[stripe-webhook] Tenant ${tenantId} Connect flags synced for ${acct.id}`);
+}
+
+function accountIdFromV2CapabilityPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const o = payload as Record<string, unknown>;
+  if (typeof o.id === 'string' && o.id.startsWith('acct_')) return o.id;
+  const acc = o.account;
+  if (typeof acc === 'string' && acc.startsWith('acct_')) return acc;
+  if (acc && typeof acc === 'object' && 'id' in acc) {
+    const id = (acc as { id?: string }).id;
+    if (typeof id === 'string' && id.startsWith('acct_')) return id;
+  }
+  return null;
+}
+
+/** Thin / snapshot events from Accounts v2 — re-fetch v1 Account object for metadata + flags. */
+async function handleAccountsV2CapabilityEvent(event: Stripe.Event) {
+  const raw = event.data?.object as unknown;
+  const id = accountIdFromV2CapabilityPayload(raw);
+  if (!id) {
+    console.warn('[stripe-webhook] v2 capability event: could not resolve account id', event.type);
+    return;
+  }
+
+  try {
+    const acct = await getStripe().accounts.retrieve(id);
+    await handleAccountUpdated(acct);
+  } catch (e: unknown) {
+    console.error('[stripe-webhook] v2 capability sync failed:', e);
+  }
 }
