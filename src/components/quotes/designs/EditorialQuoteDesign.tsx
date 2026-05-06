@@ -16,8 +16,10 @@ const STYLE = `
   .eq-accept-stamp small{display:block;font-style:italic;font-family:'Fraunces',serif;font-weight:400;font-size:11px;letter-spacing:1px;text-transform:none;margin-top:2px;}
   .eq-head{display:grid;grid-template-columns:1fr auto;gap:40px;align-items:start;padding-bottom:24px;border-bottom:1px solid var(--ink);}
   .eq-mark{display:flex;align-items:center;gap:14px;}
-  .eq-mark-glyph{width:56px;height:56px;border-radius:50%;background:var(--accent);color:var(--paper);display:grid;place-items:center;font-family:'Fraunces',serif;font-style:italic;font-weight:600;font-size:30px;padding-bottom:4px;}
-  .eq-mark-glyph img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
+  .eq-mark-glyph{width:56px;height:56px;border-radius:50%;background:var(--accent);color:var(--paper);display:grid;place-items:center;font-family:'Fraunces',serif;font-style:italic;font-weight:600;font-size:30px;padding-bottom:4px;overflow:hidden;flex:none;}
+  .eq-mark-glyph img{max-width:88%;max-height:88%;width:auto;height:auto;object-fit:contain;object-position:center;border-radius:50%;}
+  .eq-mark-logo{height:64px;display:flex;align-items:center;flex:none;}
+  .eq-mark-logo img{height:64px;max-height:64px;width:auto;max-width:200px;object-fit:contain;object-position:left center;display:block;}
   .eq-mark-name{font-size:26px;font-weight:500;letter-spacing:-.01em;line-height:1.05;}
   .eq-mark-name em{font-style:italic;color:var(--accent);font-weight:400;}
   .eq-mark-tag{font-family:'Inter',sans-serif;font-size:10px;letter-spacing:2.4px;text-transform:uppercase;color:var(--muted);margin-top:4px;}
@@ -114,13 +116,13 @@ export default function EditorialQuoteDesign({ ctx }: { ctx: DesignContext }) {
       {isVisible(sv, 'header') && (
         <header className="eq-head">
           <div className="eq-mark">
-            <div className="eq-mark-glyph">
-              {ctx.tenant.logoUrl ? (
+            {ctx.tenant.logoUrl ? (
+              <div className="eq-mark-logo">
                 <img src={ctx.tenant.logoUrl} alt={ctx.tenant.name} />
-              ) : (
-                tenantInitial
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="eq-mark-glyph">{tenantInitial}</div>
+            )}
             <div>
               <div className="eq-mark-name">{ctx.tenant.name}</div>
               {ctx.tenant.tagline && <div className="eq-mark-tag">{ctx.tenant.tagline}</div>}

@@ -13,8 +13,10 @@ const STYLE = `
   .ei-paid-stamp small{display:block;font-style:italic;font-family:'Fraunces',serif;font-weight:400;font-size:12px;letter-spacing:1px;text-transform:none;margin-top:2px;}
   .ei-head{display:grid;grid-template-columns:1fr auto;gap:40px;align-items:start;padding-bottom:24px;border-bottom:1px solid var(--ink);}
   .ei-mark{display:flex;align-items:center;gap:14px;}
-  .ei-mark-glyph{width:56px;height:56px;border-radius:50%;background:var(--accent);color:var(--paper);display:grid;place-items:center;font-family:'Fraunces',serif;font-style:italic;font-weight:600;font-size:30px;padding-bottom:4px;}
-  .ei-mark-glyph img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
+  .ei-mark-glyph{width:56px;height:56px;border-radius:50%;background:var(--accent);color:var(--paper);display:grid;place-items:center;font-family:'Fraunces',serif;font-style:italic;font-weight:600;font-size:30px;padding-bottom:4px;overflow:hidden;flex:none;}
+  .ei-mark-glyph img{max-width:88%;max-height:88%;width:auto;height:auto;object-fit:contain;object-position:center;border-radius:50%;}
+  .ei-mark-logo{height:64px;display:flex;align-items:center;flex:none;}
+  .ei-mark-logo img{height:64px;max-height:64px;width:auto;max-width:200px;object-fit:contain;object-position:left center;display:block;}
   .ei-mark-name{font-size:26px;font-weight:500;letter-spacing:-.01em;line-height:1.05;}
   .ei-mark-name em{font-style:italic;color:var(--accent);font-weight:400;}
   .ei-mark-tag{font-family:'Inter',sans-serif;font-size:10px;letter-spacing:2.4px;text-transform:uppercase;color:var(--muted);margin-top:4px;}
@@ -86,9 +88,13 @@ export default function EditorialInvoiceDesign({ ctx }: { ctx: InvoiceDesignCont
       {isVisible(sv, 'header') && (
         <header className="ei-head">
           <div className="ei-mark">
-            <div className="ei-mark-glyph">
-              {ctx.tenant.logoUrl ? <img src={ctx.tenant.logoUrl} alt={ctx.tenant.name} /> : tenantInitial}
-            </div>
+            {ctx.tenant.logoUrl ? (
+              <div className="ei-mark-logo">
+                <img src={ctx.tenant.logoUrl} alt={ctx.tenant.name} />
+              </div>
+            ) : (
+              <div className="ei-mark-glyph">{tenantInitial}</div>
+            )}
             <div>
               <div className="ei-mark-name">{ctx.tenant.name}</div>
               {ctx.tenant.tagline && <div className="ei-mark-tag">{ctx.tenant.tagline}</div>}

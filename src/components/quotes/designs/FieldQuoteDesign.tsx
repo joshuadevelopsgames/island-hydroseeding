@@ -14,11 +14,13 @@ const STYLE = `
   .fq-stamp small{display:block;font-family:'Fraunces',serif;font-style:italic;font-weight:400;font-size:9px;letter-spacing:1px;text-transform:none;margin-top:2px;}
   .fq-accept-stamp{position:absolute;top:380px;left:80px;transform:rotate(-12deg);color:var(--accent);font-family:'Fraunces',serif;font-style:italic;font-size:54px;font-weight:500;letter-spacing:-.02em;opacity:.55;pointer-events:none;z-index:4;}
   .fq-shell{padding:52px 64px 44px;position:relative;}
-  .fq-hero{display:grid;grid-template-columns:110px 1fr;gap:28px;align-items:center;padding-bottom:22px;border-bottom:2px solid var(--ink);}
-  .fq-crest{width:110px;height:110px;border:2px solid var(--ink);border-radius:50%;display:grid;place-items:center;position:relative;background:var(--paper-edge);overflow:hidden;}
+  .fq-hero{display:grid;grid-template-columns:auto 1fr;gap:28px;align-items:center;padding-bottom:22px;border-bottom:2px solid var(--ink);}
+  .fq-crest{width:110px;height:110px;border:2px solid var(--ink);border-radius:50%;display:grid;place-items:center;position:relative;background:var(--paper-edge);overflow:hidden;flex:none;}
   .fq-crest::before{content:'';position:absolute;inset:6px;border:1px solid var(--ink);border-radius:50%;}
-  .fq-crest img{width:100%;height:100%;object-fit:cover;}
+  .fq-crest img{max-width:88%;max-height:88%;width:auto;height:auto;object-fit:contain;object-position:center;}
   .fq-crest-letter{font-family:'Fraunces',serif;font-style:italic;font-size:54px;font-weight:500;color:var(--ink);}
+  .fq-logo{height:96px;display:flex;align-items:center;flex:none;}
+  .fq-logo img{height:96px;max-height:96px;width:auto;max-width:240px;object-fit:contain;object-position:left center;display:block;}
   .fq-hero-title{font-family:'Fraunces',serif;font-size:42px;font-weight:400;letter-spacing:-.015em;line-height:1;margin:0 0 6px;}
   .fq-hero-title em{font-style:italic;color:var(--accent);font-weight:500;}
   .fq-hero-sub{font-style:italic;font-size:14px;color:var(--ink-soft);margin-bottom:8px;}
@@ -119,13 +121,15 @@ export default function FieldQuoteDesign({ ctx }: { ctx: DesignContext }) {
       <div className="fq-shell">
         {isVisible(sv, 'header') && (
           <header className="fq-hero">
-            <div className="fq-crest">
-              {ctx.tenant.logoUrl ? (
+            {ctx.tenant.logoUrl ? (
+              <div className="fq-logo">
                 <img src={ctx.tenant.logoUrl} alt={ctx.tenant.name} />
-              ) : (
+              </div>
+            ) : (
+              <div className="fq-crest">
                 <div className="fq-crest-letter">{tenantInitial}</div>
-              )}
-            </div>
+              </div>
+            )}
             <div>
               <div className="fq-hero-title">
                 <em>{ctx.tenant.name}</em>

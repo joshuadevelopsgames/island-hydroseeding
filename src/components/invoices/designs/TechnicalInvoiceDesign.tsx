@@ -15,9 +15,11 @@ const STYLE = `
   .ti-shell{padding:32px 40px 36px;}
   .ti-head{display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:start;padding-bottom:22px;border-bottom:2px solid var(--ink);}
   .ti-mark-row{display:flex;align-items:center;gap:14px;margin-bottom:16px;}
-  .ti-mark-glyph{width:52px;height:52px;background:var(--ink);color:var(--bg);display:grid;place-items:center;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:22px;letter-spacing:-.04em;position:relative;overflow:hidden;}
+  .ti-mark-glyph{width:52px;height:52px;background:var(--ink);color:var(--bg);display:grid;place-items:center;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:22px;letter-spacing:-.04em;position:relative;overflow:hidden;flex:none;}
   .ti-mark-glyph::after{content:'';position:absolute;inset:4px;border:1px solid var(--bg);}
-  .ti-mark-glyph img{width:100%;height:100%;object-fit:cover;}
+  .ti-mark-glyph img{max-width:88%;max-height:88%;width:auto;height:auto;object-fit:contain;object-position:center;}
+  .ti-mark-logo{height:56px;display:flex;align-items:center;flex:none;}
+  .ti-mark-logo img{height:56px;max-height:56px;width:auto;max-width:180px;object-fit:contain;object-position:left center;display:block;}
   .ti-mark-name{font-family:'Space Grotesk',sans-serif;font-size:22px;font-weight:700;letter-spacing:-.02em;line-height:1;}
   .ti-mark-sub{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-top:4px;}
   .ti-meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;font-size:11px;}
@@ -86,9 +88,13 @@ export default function TechnicalInvoiceDesign({ ctx }: { ctx: InvoiceDesignCont
           <header className="ti-head">
             <div>
               <div className="ti-mark-row">
-                <div className="ti-mark-glyph">
-                  {ctx.tenant.logoUrl ? <img src={ctx.tenant.logoUrl} alt={ctx.tenant.name} /> : initials}
-                </div>
+                {ctx.tenant.logoUrl ? (
+                  <div className="ti-mark-logo">
+                    <img src={ctx.tenant.logoUrl} alt={ctx.tenant.name} />
+                  </div>
+                ) : (
+                  <div className="ti-mark-glyph">{initials}</div>
+                )}
                 <div>
                   <div className="ti-mark-name">{ctx.tenant.name.toUpperCase()}</div>
                   {ctx.tenant.tagline && <div className="ti-mark-sub">{ctx.tenant.tagline}</div>}

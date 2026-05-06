@@ -10,10 +10,8 @@ const STYLE = `
   .sq-quote h1,.sq-quote h2,.sq-quote h3,.sq-quote h4,.sq-quote h5,.sq-quote h6{color:inherit;font-weight:inherit;letter-spacing:inherit;}
   .sq-side{background:var(--accent);color:#fff;padding:32px 22px 28px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden;}
   .sq-side::before{content:'';position:absolute;top:0;right:0;bottom:0;width:1px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.2) 20%,rgba(255,255,255,.2) 80%,transparent);}
-  .sq-side-mark{font-family:'Fraunces',serif;font-style:italic;font-size:52px;font-weight:400;letter-spacing:-.04em;line-height:.85;}
-  .sq-side-mark::after{content:'';display:block;width:32px;height:2px;background:#fff;margin-top:12px;}
-  .sq-side-logo{display:block;max-width:140px;max-height:60px;width:auto;height:auto;margin-bottom:8px;filter:brightness(0) invert(1);}
-  .sq-side-logo + .sq-side-mark::after{margin-top:8px;}
+  .sq-side-logo{display:block;max-width:160px;max-height:84px;width:auto;height:auto;margin-bottom:14px;object-fit:contain;object-position:left top;filter:brightness(0) invert(1);}
+  .sq-side-fallback{font-family:'Fraunces',serif;font-size:18px;font-weight:500;letter-spacing:-.01em;line-height:1.1;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,.4);}
   .sq-side-name{font-size:11px;letter-spacing:3px;text-transform:uppercase;font-weight:600;margin-top:14px;}
   .sq-side-name span{display:block;font-weight:400;opacity:.75;margin-top:2px;letter-spacing:2px;font-size:9px;}
   .sq-side-vert{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:4px;text-transform:uppercase;writing-mode:vertical-rl;transform:rotate(180deg);opacity:.8;margin:24px 0;}
@@ -92,7 +90,6 @@ export default function StatementQuoteDesign({ ctx }: { ctx: DesignContext }) {
   const ct = ctx.customText;
 
   const includedCount = ctx.items.filter((i) => !i.isOptional).length;
-  const tenantInitial = (ctx.tenant.name || 'S').trim().charAt(0).toUpperCase() || 'S';
 
   const metaStrip = ct.banner_stats?.length
     ? ct.banner_stats
@@ -119,13 +116,11 @@ export default function StatementQuoteDesign({ ctx }: { ctx: DesignContext }) {
 
       <aside className="sq-side">
         <div>
-          {ctx.tenant.logoUrl && (
+          {ctx.tenant.logoUrl ? (
             <img className="sq-side-logo" src={ctx.tenant.logoUrl} alt={ctx.tenant.name} />
+          ) : (
+            <div className="sq-side-fallback">{ctx.tenant.name}</div>
           )}
-          <div className="sq-side-mark">
-            {tenantInitial}
-            <span style={{ fontStyle: 'italic' }}>·</span>
-          </div>
           <div className="sq-side-name">
             {ctx.tenant.name}
             {ctx.tenant.tagline && <span>{ctx.tenant.tagline}</span>}

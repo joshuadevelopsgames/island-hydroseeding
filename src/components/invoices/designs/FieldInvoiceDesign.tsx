@@ -14,11 +14,13 @@ const STYLE = `
   .fi-stamp small{display:block;font-family:'Fraunces',serif;font-style:italic;font-weight:400;font-size:9px;letter-spacing:1px;text-transform:none;margin-top:2px;}
   .fi-paid-stamp{position:absolute;top:380px;left:80px;transform:rotate(-12deg);color:var(--accent);font-family:'Fraunces',serif;font-style:italic;font-size:54px;font-weight:500;letter-spacing:-.02em;opacity:.55;pointer-events:none;z-index:4;}
   .fi-shell{padding:52px 64px 44px;position:relative;}
-  .fi-hero{display:grid;grid-template-columns:110px 1fr;gap:28px;align-items:center;padding-bottom:22px;border-bottom:2px solid var(--ink);}
-  .fi-crest{width:110px;height:110px;border:2px solid var(--ink);border-radius:50%;display:grid;place-items:center;position:relative;background:var(--paper-edge);overflow:hidden;}
+  .fi-hero{display:grid;grid-template-columns:auto 1fr;gap:28px;align-items:center;padding-bottom:22px;border-bottom:2px solid var(--ink);}
+  .fi-crest{width:110px;height:110px;border:2px solid var(--ink);border-radius:50%;display:grid;place-items:center;position:relative;background:var(--paper-edge);overflow:hidden;flex:none;}
   .fi-crest::before{content:'';position:absolute;inset:6px;border:1px solid var(--ink);border-radius:50%;}
-  .fi-crest img{width:100%;height:100%;object-fit:cover;}
+  .fi-crest img{max-width:88%;max-height:88%;width:auto;height:auto;object-fit:contain;object-position:center;}
   .fi-crest-letter{font-family:'Fraunces',serif;font-style:italic;font-size:54px;font-weight:500;color:var(--ink);}
+  .fi-logo{height:96px;display:flex;align-items:center;flex:none;}
+  .fi-logo img{height:96px;max-height:96px;width:auto;max-width:240px;object-fit:contain;object-position:left center;display:block;}
   .fi-hero-title{font-family:'Fraunces',serif;font-size:42px;font-weight:400;letter-spacing:-.015em;line-height:1;margin:0 0 6px;}
   .fi-hero-title em{font-style:italic;color:var(--accent);font-weight:500;}
   .fi-hero-sub{font-style:italic;font-size:14px;color:var(--ink-soft);margin-bottom:8px;}
@@ -85,9 +87,15 @@ export default function FieldInvoiceDesign({ ctx }: { ctx: InvoiceDesignContext 
       <div className="fi-shell">
         {isVisible(sv, 'header') && (
           <header className="fi-hero">
-            <div className="fi-crest">
-              {ctx.tenant.logoUrl ? <img src={ctx.tenant.logoUrl} alt={ctx.tenant.name} /> : <div className="fi-crest-letter">{tenantInitial}</div>}
-            </div>
+            {ctx.tenant.logoUrl ? (
+              <div className="fi-logo">
+                <img src={ctx.tenant.logoUrl} alt={ctx.tenant.name} />
+              </div>
+            ) : (
+              <div className="fi-crest">
+                <div className="fi-crest-letter">{tenantInitial}</div>
+              </div>
+            )}
             <div>
               <div className="fi-hero-title"><em>{ctx.tenant.name}</em></div>
               {ctx.tenant.tagline && <div className="fi-hero-sub">{ctx.tenant.tagline}</div>}

@@ -10,9 +10,8 @@ const STYLE = `
   .si-inv h1,.si-inv h2,.si-inv h3,.si-inv h4,.si-inv h5,.si-inv h6{color:inherit;font-weight:inherit;letter-spacing:inherit;}
   .si-side{background:var(--accent);color:#fff;padding:32px 22px 28px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden;}
   .si-side::before{content:'';position:absolute;top:0;right:0;bottom:0;width:1px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.2) 20%,rgba(255,255,255,.2) 80%,transparent);}
-  .si-side-logo{display:block;max-width:140px;max-height:60px;width:auto;height:auto;margin-bottom:8px;filter:brightness(0) invert(1);}
-  .si-side-mark{font-family:'Fraunces',serif;font-style:italic;font-size:52px;font-weight:400;letter-spacing:-.04em;line-height:.85;}
-  .si-side-mark::after{content:'';display:block;width:32px;height:2px;background:#fff;margin-top:12px;}
+  .si-side-logo{display:block;max-width:160px;max-height:84px;width:auto;height:auto;margin-bottom:14px;object-fit:contain;object-position:left top;filter:brightness(0) invert(1);}
+  .si-side-fallback{font-family:'Fraunces',serif;font-size:18px;font-weight:500;letter-spacing:-.01em;line-height:1.1;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,.4);}
   .si-side-name{font-size:11px;letter-spacing:3px;text-transform:uppercase;font-weight:600;margin-top:14px;}
   .si-side-name span{display:block;font-weight:400;opacity:.75;margin-top:2px;letter-spacing:2px;font-size:9px;}
   .si-side-vert{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:4px;text-transform:uppercase;writing-mode:vertical-rl;transform:rotate(180deg);opacity:.8;margin:24px 0;}
@@ -76,7 +75,6 @@ const STYLE = `
 export default function StatementInvoiceDesign({ ctx }: { ctx: InvoiceDesignContext }) {
   const sv = ctx.sectionVisibility;
   const ct = ctx.customText;
-  const tenantInitial = (ctx.tenant.name || 'S').trim().charAt(0).toUpperCase() || 'S';
 
   return (
     <div className="si-inv">
@@ -90,8 +88,11 @@ export default function StatementInvoiceDesign({ ctx }: { ctx: InvoiceDesignCont
 
       <aside className="si-side">
         <div>
-          {ctx.tenant.logoUrl && <img className="si-side-logo" src={ctx.tenant.logoUrl} alt={ctx.tenant.name} />}
-          <div className="si-side-mark">{tenantInitial}<span style={{ fontStyle: 'italic' }}>·</span></div>
+          {ctx.tenant.logoUrl ? (
+            <img className="si-side-logo" src={ctx.tenant.logoUrl} alt={ctx.tenant.name} />
+          ) : (
+            <div className="si-side-fallback">{ctx.tenant.name}</div>
+          )}
           <div className="si-side-name">{ctx.tenant.name}{ctx.tenant.tagline && <span>{ctx.tenant.tagline}</span>}</div>
           <div className="si-side-vert">№ INV-{ctx.invoiceNumber}</div>
         </div>
