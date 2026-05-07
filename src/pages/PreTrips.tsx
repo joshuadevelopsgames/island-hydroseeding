@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatInVancouver } from '../lib/vancouverTime';
-import { compressDataUrl } from '../lib/compressImage';
+import { compressFileToJpeg } from '../lib/compressImage';
 import { savePhoto, loadPhotos, deletePhotos } from '../lib/photoStore';
 import ConfirmDialog from '../components/ConfirmDialog';
 
@@ -40,15 +40,6 @@ const STORAGE_KEY = 'preTripLogs_v2';
 const MAX_PHOTOS = 12;
 
 type PhotoEntry = { id: string; dataUrl: string };
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = () => reject(new Error('read'));
-    r.readAsDataURL(file);
-  });
-}
 
 function normalizeLogs(raw: unknown): PreTripLog[] {
   if (!Array.isArray(raw)) return [];
@@ -131,34 +122,49 @@ export default function PreTrips() {
   const handlePhotoPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
     if (!fileList?.length) return;
-    const files = Array.from(fileList).filter((f) => f.type.startsWith('image/'));
+    const all = Array.from(fileList);
+    const files = all.filter((f) => !f.type || f.type.startsWith('image/'));
     if (!files.length) {
       setPhotoError('Please choose image files only.');
       e.target.value = '';
       return;
     }
     void (async () => {
-      try {
-        const built: PhotoEntry[] = [];
-        for (const file of files) {
-          const raw = await readFileAsDataUrl(file);
-          const dataUrl = await compressDataUrl(raw).catch(() => raw);
+      const built: PhotoEntry[] = [];
+      let failed = 0;
+      for (const file of files) {
+        try {
+          const dataUrl = await compressFileToJpeg(file);
           built.push({ id: Math.random().toString(36).slice(2, 11), dataUrl });
+        } catch {
+          failed += 1;
         }
-        setPhotoEntries((prev) => {
-          const room = Math.max(0, MAX_PHOTOS - prev.length);
-          const add = built.slice(0, room);
-          if (built.length > room) {
-            toast('Photo limit', {
-              description: `Up to ${MAX_PHOTOS} photos per inspection. Extra files were skipped.`,
-            });
-          }
-          return [...prev, ...add];
-        });
-        setPhotoError('');
-      } catch {
-        setPhotoError('Could not read one or more images.');
       }
+      if (built.length === 0) {
+        setPhotoError(
+          failed === 1
+            ? "Could not read that photo. iPhone HEIC photos may need to be saved as JPEG first (Settings → Camera → Formats → Most Compatible)."
+            : 'Could not read any of the chosen photos. Try saving them as JPEG and retrying.'
+        );
+        e.target.value = '';
+        return;
+      }
+      setPhotoEntries((prev) => {
+        const room = Math.max(0, MAX_PHOTOS - prev.length);
+        const add = built.slice(0, room);
+        if (built.length > room) {
+          toast('Photo limit', {
+            description: `Up to ${MAX_PHOTOS} photos per inspection. Extra files were skipped.`,
+          });
+        }
+        return [...prev, ...add];
+      });
+      if (failed > 0) {
+        toast('Some photos were skipped', {
+          description: `${failed} photo${failed === 1 ? '' : 's'} could not be read and ${failed === 1 ? 'was' : 'were'} skipped.`,
+        });
+      }
+      setPhotoError('');
       e.target.value = '';
     })();
   };
@@ -777,7 +783,13 @@ export default function PreTrips() {
               <button
                 type="button"
                 className="btn btn-danger"
-                onClick={() => setDeleteId(detailLog.id)}
+                onClick={() => {
+                  // Close the detail modal first so the confirm dialog isn't
+                  // fighting it for stacking order on iOS Safari.
+                  const id = detailLog.id;
+                  setDetailLog(null);
+                  setDeleteId(id);
+                }}
               >
                 <Trash2 size={16} /> Delete inspection
               </button>

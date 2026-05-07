@@ -24,7 +24,12 @@ export default function ConfirmDialog({
   if (!open) return null;
 
   return (
-    <div className="modal-overlay" role="presentation" onClick={onCancel}>
+    <div
+      className="modal-overlay"
+      role="presentation"
+      onClick={onCancel}
+      style={{ zIndex: 300 }}
+    >
       <div
         className="modal-panel"
         role="alertdialog"
