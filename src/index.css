@@ -1806,6 +1806,10 @@ html.theme-dark .dashboard-export-menu {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  /* Match the section padding so scrollIntoView lands cleanly instead of
+     jamming the photos against the top edge of the scroll container. */
+  scroll-margin-top: 1rem;
+  scroll-margin-bottom: 1rem;
 }
 
 .pretrip-photo-section > p.text-secondary {
@@ -1893,6 +1897,10 @@ html.theme-dark .dashboard-export-menu {
 
 .pretrip-form-actions {
   padding-top: 1.25rem;
+  /* Keep the submit row clear of iOS Safari's bottom toolbar after the
+     native file picker dismisses — without this padding the toolbar can
+     visually overlap the Cancel/Submit buttons on iPhones. */
+  padding-bottom: max(0px, env(safe-area-inset-bottom, 0px));
   margin-top: 0.125rem;
   gap: 1rem;
   flex-wrap: wrap;

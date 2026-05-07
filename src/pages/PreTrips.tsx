@@ -166,6 +166,13 @@ export default function PreTrips() {
       }
       setPhotoError('');
       e.target.value = '';
+      // iOS Safari likes to leave the page scrolled to wherever the native
+      // file picker left it after dismissal — sometimes that buries the
+      // photo section behind the bottom toolbar. Pull the user back to the
+      // photos they just added on the next paint.
+      requestAnimationFrame(() => {
+        photoSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     })();
   };
 
