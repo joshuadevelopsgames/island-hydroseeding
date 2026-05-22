@@ -15,7 +15,10 @@ export const CLOUD_SYNC_KEYS = [
   'tasksColumns_v1',
   'customCalendarEvents_v1',
   'equipmentMaintenance',
-  'preTripLogs_v2',
+  // NOTE: 'preTripLogs_v2' intentionally removed. Pre-trips are now stored
+  // server-side as first-class rows via /api/fleet-pretrips. Syncing them
+  // inside this last-write-wins blob silently clobbered records submitted
+  // from multiple field devices.
   'documentsRepository',
   'documentsRepositoryV2',
   'flhaLogs_v2',

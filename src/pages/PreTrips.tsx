@@ -14,97 +14,61 @@ import {
 import { toast } from 'sonner';
 import { formatInVancouver } from '../lib/vancouverTime';
 import { compressFileToJpeg } from '../lib/compressImage';
-import { savePhoto, loadPhotos, deletePhotos } from '../lib/photoStore';
+import {
+  fetchPretrips,
+  createPretrip,
+  deletePretrip,
+  type Pretrip,
+  type PretripType,
+} from '../lib/pretripsRemote';
 import ConfirmDialog from '../components/ConfirmDialog';
-
-type PreTripType = 'Truck' | 'Trailer';
-
-type PreTripLog = {
-  id: string;
-  type: PreTripType;
-  date: string;
-  employeeName: string;
-  equipmentId: string;
-  location: string;
-  status: 'Passed' | 'Action Req';
-  remarks: string;
-  /** IndexedDB photo IDs for this inspection (preferred). */
-  photoIds?: string[];
-  /** Legacy: base64 data URLs stored directly inside the log. */
-  photos?: string[];
-};
 
 const INSPECTION_VALUES = ['Pass', 'Fail', 'N/A'] as const;
 
-const STORAGE_KEY = 'preTripLogs_v2';
 const MAX_PHOTOS = 12;
+
+/** Form field names that are stored as their own columns, not part of the checklist. */
+const NON_CHECKLIST_FIELDS = new Set(['employeeName', 'equipmentId', 'location', 'remarks', 'pretripUnitVisual']);
 
 type PhotoEntry = { id: string; dataUrl: string };
 
-function normalizeLogs(raw: unknown): PreTripLog[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.map((row) => {
-    const r = row as PreTripLog;
-    return {
-      ...r,
-      photoIds: Array.isArray(r.photoIds) ? r.photoIds : [],
-      photos: Array.isArray(r.photos) ? r.photos : [],
-    };
-  });
-}
-
-function totalPhotoCount(log: PreTripLog): number {
-  return (log.photoIds?.length ?? 0) + (log.photos?.length ?? 0);
-}
-
 export default function PreTrips() {
-  const [logs, setLogs] = useState<PreTripLog[]>([]);
+  const [logs, setLogs] = useState<Pretrip[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [formType, setFormType] = useState<PreTripType>('Truck');
+  const [formType, setFormType] = useState<PretripType>('Truck');
   const [searchTerm, setSearchTerm] = useState('');
   const [photoEntries, setPhotoEntries] = useState<PhotoEntry[]>([]);
   const [photoError, setPhotoError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [detailLog, setDetailLog] = useState<PreTripLog | null>(null);
-  const [detailPhotoUrls, setDetailPhotoUrls] = useState<string[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailLog, setDetailLog] = useState<Pretrip | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const photoSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) setLogs(normalizeLogs(JSON.parse(saved)));
-    } catch {
-      setLogs([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!detailLog) {
-      setDetailPhotoUrls([]);
-      return;
-    }
     let cancelled = false;
-    const ids = detailLog.photoIds ?? [];
-    const legacy = detailLog.photos ?? [];
-    if (ids.length === 0 && legacy.length === 0) {
-      setDetailPhotoUrls([]);
-      return;
-    }
-    setDetailLoading(true);
     void (async () => {
-      const map = ids.length > 0 ? await loadPhotos(ids) : {};
-      if (cancelled) return;
-      const fromIds = ids.map((id) => map[id]).filter((s): s is string => Boolean(s));
-      setDetailPhotoUrls([...fromIds, ...legacy]);
-      setDetailLoading(false);
+      try {
+        const rows = await fetchPretrips();
+        if (cancelled) return;
+        setLogs(rows);
+        setLoadError(null);
+      } catch (err) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : 'Could not load inspections';
+        setLoadError(msg);
+        toast.error('Could not load inspections', { description: msg });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [detailLog]);
+  }, []);
 
   const openNewInspection = () => {
     setFormType('Truck');
@@ -113,7 +77,7 @@ export default function PreTrips() {
     setIsFormOpen(true);
   };
 
-  const changeFormType = (next: PreTripType) => {
+  const changeFormType = (next: PretripType) => {
     setFormType(next);
     setPhotoEntries([]);
     setPhotoError('');
@@ -195,63 +159,40 @@ export default function PreTrips() {
     const formData = new FormData(form);
 
     let hasFail = false;
+    const checklist: Record<string, string> = {};
     for (const [key, value] of formData.entries()) {
-      if (key === 'remarks') continue;
-      if (typeof value === 'string' && value === 'Fail') {
-        hasFail = true;
-        break;
-      }
+      if (typeof value !== 'string') continue;
+      if (!NON_CHECKLIST_FIELDS.has(key)) checklist[key] = value;
+      if (key !== 'remarks' && value === 'Fail') hasFail = true;
     }
 
     setSubmitting(true);
-    let savedIds: string[] = [];
     try {
-      // Persist photos to IndexedDB first so localStorage stays small.
-      savedIds = [];
-      for (const entry of photoEntries) {
-        const id = await savePhoto(entry.dataUrl);
-        savedIds.push(id);
-      }
-    } catch {
-      setSubmitting(false);
-      toast.error('Could not save photos', {
-        description: 'Your device blocked photo storage. Try removing some photos and submit again.',
+      const saved = await createPretrip({
+        type: formType,
+        date: new Date().toISOString(),
+        employeeName: String(formData.get('employeeName') || ''),
+        equipmentId: String(formData.get('equipmentId') || ''),
+        location: String(formData.get('location') || ''),
+        status: hasFail ? 'Action Req' : 'Passed',
+        remarks: (formData.get('remarks') as string) || 'No defects',
+        checklist,
+        photos: photoEntries.map((p) => p.dataUrl),
       });
-      return;
-    }
-
-    const newLog: PreTripLog = {
-      id: Math.random().toString(36).slice(2, 11),
-      type: formType,
-      date: new Date().toISOString(),
-      employeeName: String(formData.get('employeeName') || ''),
-      equipmentId: String(formData.get('equipmentId') || ''),
-      location: String(formData.get('location') || ''),
-      status: hasFail ? 'Action Req' : 'Passed',
-      remarks: (formData.get('remarks') as string) || 'No defects',
-      photoIds: savedIds,
-      photos: [],
-    };
-
-    const updatedLogs = [newLog, ...logs];
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedLogs));
-    } catch {
-      // Roll back the photos we just wrote so we don't orphan them.
-      void deletePhotos(savedIds);
-      setSubmitting(false);
+      setLogs((prev) => [saved, ...prev]);
+      setPhotoEntries([]);
+      setPhotoError('');
+      setIsFormOpen(false);
+      toast.success('Inspection saved');
+    } catch (err) {
+      // Keep the form populated so nothing is lost — the worker can retry.
+      const msg = err instanceof Error ? err.message : 'Please try again.';
       toast.error('Could not save inspection', {
-        description: 'Storage is full. Open older inspections and tap Delete to free space, then resubmit.',
+        description: `${msg} Your entries are still here — check your connection and submit again.`,
       });
-      return;
+    } finally {
+      setSubmitting(false);
     }
-
-    setLogs(updatedLogs);
-    setPhotoEntries([]);
-    setPhotoError('');
-    setIsFormOpen(false);
-    setSubmitting(false);
-    toast.success('Inspection saved');
   };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -271,19 +212,20 @@ export default function PreTrips() {
     void saveInspection(form);
   };
 
-  const executeDelete = (id: string) => {
-    const target = logs.find((l) => l.id === id);
-    if (target?.photoIds?.length) void deletePhotos(target.photoIds);
-    const next = logs.filter((l) => l.id !== id);
+  const executeDelete = async (id: string) => {
+    setDeleting(true);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // Even if persist fails, drop from memory so the user can retry.
+      await deletePretrip(id);
+      setLogs((prev) => prev.filter((l) => l.id !== id));
+      setDetailLog(null);
+      setDeleteId(null);
+      toast.success('Inspection deleted');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Please try again.';
+      toast.error('Could not delete inspection', { description: msg });
+    } finally {
+      setDeleting(false);
     }
-    setLogs(next);
-    setDetailLog(null);
-    setDeleteId(null);
-    toast.success('Inspection deleted');
   };
 
   /** Pass / Fail / N/A — native vertical radios; first option carries `required` for the group. */
@@ -599,10 +541,10 @@ export default function PreTrips() {
             ? `Permanently remove the ${detailPending.type.toLowerCase()} inspection for ${detailPending.equipmentId} on ${formatInVancouver(detailPending.date, 'MMM d, yyyy h:mm a')}? This cannot be undone.`
             : 'Permanently remove this inspection? This cannot be undone.'
         }
-        confirmLabel="Delete"
+        confirmLabel={deleting ? 'Deleting…' : 'Delete'}
         cancelLabel="Cancel"
         variant="danger"
-        onConfirm={() => deleteId && executeDelete(deleteId)}
+        onConfirm={() => deleteId && void executeDelete(deleteId)}
         onCancel={() => setDeleteId(null)}
       />
 
@@ -636,7 +578,17 @@ export default function PreTrips() {
           <span className="badge badge-gray">{logs.length} total records</span>
         </div>
 
-        {filteredLogs.length === 0 ? (
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '4rem 0', color: 'var(--text-muted)' }}>
+            <p>Loading inspections…</p>
+          </div>
+        ) : loadError ? (
+          <div style={{ textAlign: 'center', padding: '4rem 0', color: 'var(--text-muted)' }}>
+            <ClipboardCheck size={48} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
+            <p>Could not load inspections.</p>
+            <p className="text-sm">{loadError}</p>
+          </div>
+        ) : filteredLogs.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '4rem 0', color: 'var(--text-muted)' }}>
             <ClipboardCheck size={48} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
             <p>No pre-trip inspection records found.</p>
@@ -657,7 +609,7 @@ export default function PreTrips() {
               </thead>
               <tbody>
                 {filteredLogs.map((log) => {
-                  const n = totalPhotoCount(log);
+                  const n = log.photoCount;
                   return (
                     <tr
                       key={log.id}
@@ -768,15 +720,13 @@ export default function PreTrips() {
             </div>
 
             <h3 className="pretrip-section-title" style={{ marginTop: 0 }}>
-              Photos ({totalPhotoCount(detailLog)})
+              Photos ({detailLog.photoCount})
             </h3>
-            {detailLoading ? (
-              <p className="text-secondary text-sm">Loading photos…</p>
-            ) : detailPhotoUrls.length === 0 ? (
+            {detailLog.photoUrls.length === 0 ? (
               <p className="text-secondary text-sm">No photos attached.</p>
             ) : (
               <div className="pretrip-photo-grid">
-                {detailPhotoUrls.map((url, i) => (
+                {detailLog.photoUrls.map((url, i) => (
                   <div key={`${detailLog.id}-${i}`} className="pretrip-photo-thumb">
                     <a href={url} target="_blank" rel="noopener noreferrer" aria-label={`Open photo ${i + 1}`}>
                       <img src={url} alt="" />
