@@ -27,6 +27,62 @@ const INSPECTION_VALUES = ['Pass', 'Fail', 'N/A'] as const;
 
 const MAX_PHOTOS = 12;
 
+/**
+ * Human-readable labels for every checklist key so the saved answers can be
+ * shown back in the detail view. Keys not listed here fall back to a humanized
+ * version of the raw key, so the record is never silently dropped.
+ */
+const CHECKLIST_LABELS: Record<string, string> = {
+  odometer: 'Odometer reading',
+  fuelType: 'Fuel type',
+  truckUsed: 'Truck used to tow',
+  regIns: 'Registration & insurance',
+  cvi: 'CVI & decal',
+  tires: 'Tires & rims',
+  body: 'Body (doors, bumpers / fenders, ramps)',
+  mirrors: 'Mirrors',
+  toolboxes: 'Toolboxes secured',
+  doors: 'Doors secured',
+  load: 'Load secured (no debris)',
+  oil: 'Engine oil',
+  coolant: 'Coolant',
+  transFluid: 'Transmission fluid',
+  powerSteering: 'Power steering fluid',
+  seats: 'Seats & seat belts',
+  wipers: 'Windshield wipers',
+  defroster: 'Defroster',
+  horn: 'Horn',
+  cabClean: 'Free of dangerous items',
+  hitchPinned: 'Truck hitch pinned',
+  ballSize: 'Hitch ball correct size',
+  coupler: 'Coupler latched & pinned',
+  chains: 'Chains crossed / connect',
+  electricalCon: 'Electrical connector secured',
+  headlights: 'Headlights',
+  markerLights: 'Running & marker lights',
+  turnSignals: 'Turn signals / hazard',
+  brakeLights: 'Brake lights',
+  parkingBrake: 'Parking brake',
+  brakes: 'Service brakes',
+  steering: 'Steering',
+  tugTest: 'Gain up tug test',
+  rollTest: 'Gain up roll test',
+  breakaway: 'Electrical breakaway test',
+  firstAid: 'First aid kit',
+  fireExtinguisher: 'Charged fire extinguisher',
+  wheelChocks: 'Wheel chocks',
+  triangles: 'Reflective triangles / cones',
+  spillKit: 'Spill kit',
+  tireChains: 'Winter tire chains',
+};
+
+const humanizeKey = (key: string) =>
+  key
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/^./, (c) => c.toUpperCase());
+
+const labelForChecklistKey = (key: string) => CHECKLIST_LABELS[key] ?? humanizeKey(key);
+
 /** Form field names that are stored as their own columns, not part of the checklist. */
 const NON_CHECKLIST_FIELDS = new Set(['employeeName', 'equipmentId', 'location', 'remarks', 'pretripUnitVisual']);
 
@@ -718,6 +774,50 @@ export default function PreTrips() {
               <p className="text-xs text-muted" style={{ margin: 0 }}>Remarks</p>
               <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{detailLog.remarks || '—'}</p>
             </div>
+
+            {Object.keys(detailLog.checklist).length > 0 && (
+              <>
+                <h3 className="pretrip-section-title" style={{ marginTop: 0 }}>
+                  Inspection items
+                </h3>
+                <ul style={{ listStyle: 'none', margin: '0 0 1.25rem', padding: 0 }}>
+                  {Object.entries(detailLog.checklist).map(([key, value]) => {
+                    const isFail = value === 'Fail';
+                    return (
+                      <li
+                        key={key}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '1rem',
+                          padding: '0.5rem 0',
+                          borderBottom: '1px solid var(--border-color)',
+                        }}
+                      >
+                        <span style={{ fontSize: '0.875rem' }}>{labelForChecklistKey(key)}</span>
+                        {value === 'Pass' || value === 'Fail' || value === 'N/A' ? (
+                          <span
+                            className="badge"
+                            style={
+                              isFail
+                                ? { backgroundColor: '#fee2e2', color: '#b91c1c' }
+                                : value === 'Pass'
+                                  ? undefined
+                                  : { backgroundColor: 'var(--surface-hover)', color: 'var(--text-secondary)' }
+                            }
+                          >
+                            {value}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>{value || '—'}</span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
 
             <h3 className="pretrip-section-title" style={{ marginTop: 0 }}>
               Photos ({detailLog.photoCount})
