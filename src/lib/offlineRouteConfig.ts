@@ -11,13 +11,15 @@ const OFFLINE_CAPABLE_PREFIXES = [
   '/fuel',
   '/issues',
   '/inventory',
-  '/tasks',
   '/schedule',
   '/time',
   '/quotes',
 ] as const;
 
 const NEEDS_CONNECTION_PREFIXES = [
+  // The task board reads from /api/tasks now (it used to be localStorage), so
+  // it can no longer be opened offline.
+  '/tasks',
   '/crm',
   '/requests',
   '/jobs',

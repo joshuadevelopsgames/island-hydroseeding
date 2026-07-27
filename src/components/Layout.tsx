@@ -29,6 +29,7 @@ import { formatInVancouver } from '../lib/vancouverTime';
 import { useAuth } from '../context/AuthContext';
 import { userCanAccessPath } from '../lib/permissions';
 import { countUnacknowledgedForUser } from '../lib/taskAssignments';
+import { refreshTaskBadgeCache } from '../lib/tasksRemote';
 import { loadAssets } from '../lib/fleetStore';
 import { runCvipDueNotifications } from '../lib/cvipNotify';
 import { loadSidebarPrefs, SIDEBAR_PREFS_EVENT } from '../lib/sidebarPrefs';
@@ -89,6 +90,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const sync = () => setTaskInboxCount(countUnacknowledgedForUser(currentUser?.id ?? null));
     sync();
+    // Tasks live on the server now, so pull a fresh copy into the badge cache —
+    // otherwise a device that never opens the Tasks page shows a stale count.
+    if (currentUser?.id) void refreshTaskBadgeCache();
     const onTasks = () => sync();
     window.addEventListener('tasks-updated', onTasks);
     window.addEventListener('storage', onTasks);

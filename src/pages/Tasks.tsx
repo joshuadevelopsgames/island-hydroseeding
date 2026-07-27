@@ -25,6 +25,9 @@ import {
   Pencil,
   ArrowLeft,
   ArrowRight,
+  LayoutList,
+  LayoutGrid,
+  Columns3,
 } from 'lucide-react';
 import { isBefore } from 'date-fns';
 import {
@@ -37,23 +40,24 @@ import {
 import { useAuth } from '../context/AuthContext';
 import type { AppUser } from '../context/AuthContext';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { toast } from 'sonner';
 import {
-  TASKS_STORAGE_KEY,
   acknowledgeAllAssignments,
   acknowledgeAssignment,
   isUnacknowledgedAssignment,
   readAssignmentAcks,
 } from '../lib/taskAssignments';
+import { BUILT_IN_DONE_ID, DEFAULT_COLUMNS, generateColumnId, type TaskColumn } from '../lib/taskColumns';
 import {
-  BUILT_IN_DONE_ID,
-  DEFAULT_COLUMNS,
-  generateColumnId,
-  loadTaskColumns,
-  saveTaskColumns,
-  type TaskColumn,
-} from '../lib/taskColumns';
-
-const STORAGE_KEY = TASKS_STORAGE_KEY;
+  fetchTaskBoard,
+  createTask,
+  updateTask,
+  deleteTask,
+  saveTaskColumnsRemote,
+  writeTaskBadgeCache,
+  type TaskInput,
+} from '../lib/tasksRemote';
+import { importLegacyBoardIfNeeded } from '../lib/tasksLegacyImport';
 
 type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
@@ -139,6 +143,34 @@ function parseLabelsInput(s: string): string[] {
 
 const PRIORITY_ORDER: TaskPriority[] = ['urgent', 'high', 'medium', 'low'];
 
+/** List / Grid / Board, mirroring the view switcher in the LECRM tasks page. */
+type ViewMode = 'list' | 'grid' | 'board';
+const VIEW_MODES: { id: ViewMode; label: string; Icon: typeof LayoutList }[] = [
+  { id: 'list', label: 'List', Icon: LayoutList },
+  { id: 'grid', label: 'Grid', Icon: LayoutGrid },
+  { id: 'board', label: 'Board', Icon: Columns3 },
+];
+
+type DateFilter = 'today' | 'upcoming' | 'done' | 'all';
+const DATE_FILTERS: { id: DateFilter; label: string }[] = [
+  { id: 'today', label: 'Today' },
+  { id: 'upcoming', label: 'Upcoming' },
+  { id: 'done', label: 'Done' },
+  { id: 'all', label: 'All' },
+];
+
+const VIEW_MODE_KEY = 'tasksViewMode_v1';
+const DATE_FILTER_KEY = 'tasksDateFilter_v1';
+
+function readStored<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  try {
+    const v = localStorage.getItem(key);
+    return allowed.includes(v as T) ? (v as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function priorityAccent(p: TaskPriority): string {
   switch (p) {
     case 'urgent':
@@ -159,6 +191,28 @@ function isOverdue(task: Task): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Which top-level tab a task belongs under. "Today" deliberately includes
+ * overdue work — an inspection that slipped yesterday still needs doing today,
+ * and burying it under a tab nobody opens is how things get missed.
+ */
+function matchesDateFilter(task: Task, filter: DateFilter): boolean {
+  if (filter === 'all') return true;
+  const isDone = task.status === BUILT_IN_DONE_ID;
+  if (filter === 'done') return isDone;
+  if (isDone || !task.dueDate) return false;
+  let due: Date;
+  let today: Date;
+  try {
+    due = vancouverStartOfDay(task.dueDate);
+    today = vancouverStartOfDay();
+  } catch {
+    return false;
+  }
+  if (filter === 'today') return !isBefore(today, due);
+  return isBefore(today, due);
 }
 
 function resolveAssignee(formData: FormData, users: AppUser[]) {
@@ -295,6 +349,112 @@ function KanbanTaskCard({
   );
 }
 
+type TaskRowProps = {
+  task: Task;
+  statusLabel: string;
+  overdue: boolean;
+  isNew: boolean;
+  accent: string;
+  onOpen: (t: Task) => void;
+};
+
+/** Full-width row used by the List view. */
+function TaskListRow({ task, statusLabel, overdue, isNew, accent, onOpen }: TaskRowProps) {
+  return (
+    <button
+      type="button"
+      className={`task-row${overdue ? ' task-row--overdue' : ''}${isNew ? ' task-row--unread' : ''}`}
+      style={{ ['--task-accent' as string]: accent }}
+      onClick={() => onOpen(task)}
+    >
+      <span className="task-row__accent" aria-hidden />
+      <span className="task-row__main">
+        <span className="task-row__titleline">
+          <span className="task-row__title">{task.title}</span>
+          {isNew && <span className="task-row__new">New for you</span>}
+        </span>
+        {task.description ? <span className="task-row__desc">{task.description}</span> : null}
+        {task.labels.length > 0 && (
+          <span className="task-row__labels">
+            {task.labels.map((lab, i) => (
+              <span key={`${task.id}-${i}-${lab}`} className="task-label-tag">
+                {lab}
+              </span>
+            ))}
+          </span>
+        )}
+      </span>
+      <span className="task-row__meta">
+        <span className="task-row__status">{statusLabel}</span>
+        {task.dueDate && (
+          <span className={`task-row__chip${overdue ? ' task-row__chip--overdue' : ''}`}>
+            <CalendarIcon size={12} aria-hidden />
+            {isVancouverToday(task.dueDate) ? 'Today' : formatInVancouver(task.dueDate, 'MMM d')}
+            {overdue ? ' · Overdue' : ''}
+          </span>
+        )}
+        <span className="task-row__chip">
+          <Flag size={12} aria-hidden />
+          {task.priority}
+        </span>
+        <span className="task-row__chip">
+          <UserCircle size={12} aria-hidden />
+          {task.assigneeName || 'Unassigned'}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/** Card used by the Grid view — same information as a board card, no drag handles. */
+function TaskGridCard({ task, statusLabel, overdue, isNew, accent, onOpen }: TaskRowProps) {
+  return (
+    <button
+      type="button"
+      className={`task-tile${overdue ? ' task-tile--overdue' : ''}${isNew ? ' task-tile--unread' : ''}`}
+      style={{ ['--task-accent' as string]: accent }}
+      onClick={() => onOpen(task)}
+    >
+      <span className="task-tile__top">
+        <span className="task-row__status">{statusLabel}</span>
+        {isNew && <span className="task-row__new">New</span>}
+      </span>
+      {task.labels.length > 0 && (
+        <span className="task-row__labels">
+          {task.labels.map((lab, i) => (
+            <span key={`${task.id}-${i}-${lab}`} className="task-label-tag">
+              {lab}
+            </span>
+          ))}
+        </span>
+      )}
+      <span className="task-tile__titleline">
+        <span className="priority-dot" style={{ marginTop: '0.35rem', background: accent }} />
+        <span className="task-tile__title">{task.title}</span>
+      </span>
+      {task.description ? <span className="task-tile__desc">{task.description}</span> : null}
+      <span className="task-tile__foot">
+        {task.dueDate && (
+          <span className={`task-row__chip${overdue ? ' task-row__chip--overdue' : ''}`}>
+            <CalendarIcon size={12} aria-hidden />
+            {isVancouverToday(task.dueDate) ? 'Today' : formatInVancouver(task.dueDate, 'MMM d')}
+          </span>
+        )}
+        <span className="task-row__chip">
+          <Flag size={12} aria-hidden />
+          {task.priority}
+        </span>
+        {task.assigneeName ? (
+          <span className="task-row__chip">
+            <UserCircle size={12} aria-hidden />
+            {task.assigneeName}
+          </span>
+        ) : null}
+      </span>
+    </button>
+  );
+}
+
 type KanbanColumnBodyProps = {
   columnId: string;
   children: ReactNode;
@@ -329,19 +489,72 @@ export default function Tasks() {
     typeof Notification !== 'undefined' ? Notification.permission : 'denied'
   );
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('today');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
+  // Restore the last-used view and tab so the page opens where you left it.
   useEffect(() => {
-    setColumns(loadTaskColumns());
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return;
+    setViewMode(readStored(VIEW_MODE_KEY, VIEW_MODES.map((v) => v.id), 'list'));
+    setDateFilter(readStored(DATE_FILTER_KEY, DATE_FILTERS.map((f) => f.id), 'today'));
+  }, []);
+
+  const changeViewMode = (next: ViewMode) => {
+    setViewMode(next);
     try {
-      const parsed = JSON.parse(saved) as unknown[];
-      setTasks(reconcileAssignees(parsed.map(normalizeTask), users));
+      localStorage.setItem(VIEW_MODE_KEY, next);
     } catch {
-      setTasks([]);
+      /* private mode — the view just won't persist */
     }
-    // Initial load only; team updates handled by reconcile effect.
+  };
+
+  const changeDateFilter = (next: DateFilter) => {
+    setDateFilter(next);
+    try {
+      localStorage.setItem(DATE_FILTER_KEY, next);
+    } catch {
+      /* private mode — the tab just won't persist */
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const board = await fetchTaskBoard();
+        if (cancelled) return;
+
+        // One-time lift of the old per-browser board onto the server.
+        const imported = await importLegacyBoardIfNeeded(board.tasks.length);
+        if (cancelled) return;
+        const rows = imported && imported.importedCount > 0 ? imported.tasks : board.tasks;
+        const cols = imported?.columns ?? board.columns;
+        if (imported && imported.importedCount > 0) {
+          toast.success(
+            `Imported ${imported.importedCount} task${imported.importedCount === 1 ? '' : 's'} from this device`,
+            { description: 'Tasks now live on the server and are shared across devices.' }
+          );
+        }
+
+        setColumns(cols.length ? cols : DEFAULT_COLUMNS);
+        setTasks(reconcileAssignees(rows.map(normalizeTask), users));
+        setLoadError(null);
+      } catch (err) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : 'Could not load tasks';
+        setLoadError(msg);
+        toast.error('Could not load tasks', { description: msg });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Initial load only; team updates handled by the reconcile effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -350,22 +563,34 @@ export default function Tasks() {
       if (prev.length === 0) return prev;
       const next = reconcileAssignees(prev, users);
       if (!tasksAssigneeReconcileChanged(prev, next)) return prev;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      window.dispatchEvent(new Event('tasks-updated'));
       return next;
     });
   }, [users]);
 
-  const persist = (next: Task[]) => {
+  /**
+   * Applies the server's copy of the board to local state and refreshes the
+   * sidebar badge cache. All mutations funnel through here so the cache can
+   * never drift from what we're rendering.
+   */
+  const applyTasks = (next: Task[]) => {
     const reconciled = reconcileAssignees(next, users);
     setTasks(reconciled);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(reconciled));
-    window.dispatchEvent(new Event('tasks-updated'));
+    writeTaskBadgeCache(reconciled);
+    return reconciled;
   };
 
-  const persistColumns = (next: TaskColumn[]) => {
+  /** Persists the column set, rolling local state back if the server rejects it. */
+  const persistColumns = async (next: TaskColumn[]) => {
+    const previous = columns;
     setColumns(next);
-    saveTaskColumns(next);
+    try {
+      const saved = await saveTaskColumnsRemote(next);
+      if (saved.length) setColumns(saved);
+    } catch (err) {
+      setColumns(previous);
+      const msg = err instanceof Error ? err.message : 'Please try again.';
+      toast.error('Could not save the columns', { description: msg });
+    }
   };
 
   const inboxCount = useMemo(() => {
@@ -412,7 +637,8 @@ export default function Tasks() {
 
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
-  const filteredTasks = useMemo(() => {
+  /** Everything matching the search + dropdown filters, before the date tab is applied. */
+  const searchedTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
     return tasks.filter((t) => {
       if (q) {
@@ -446,13 +672,44 @@ export default function Tasks() {
     });
   }, [tasks, search, priorityFilter, dueFilter, assigneeFilter, currentUser, userById]);
 
+  const filteredTasks = useMemo(
+    () => searchedTasks.filter((t) => matchesDateFilter(t, dateFilter)),
+    [searchedTasks, dateFilter]
+  );
+
+  /** Tab counts reflect the other active filters, so they never promise rows the tab won't show. */
+  const tabCounts = useMemo(() => {
+    const counts = {} as Record<DateFilter, number>;
+    for (const f of DATE_FILTERS) counts[f.id] = searchedTasks.filter((t) => matchesDateFilter(t, f.id)).length;
+    return counts;
+  }, [searchedTasks]);
+
+  const byPriorityThenNewest = (a: Task, b: Task) => {
+    const pa = PRIORITY_ORDER.indexOf(a.priority);
+    const pb = PRIORITY_ORDER.indexOf(b.priority);
+    if (pa !== pb) return pa - pb;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  };
+
   const sortedInColumn = (status: string) =>
-    [...filteredTasks.filter((t) => t.status === status)].sort((a, b) => {
-      const pa = PRIORITY_ORDER.indexOf(a.priority);
-      const pb = PRIORITY_ORDER.indexOf(b.priority);
-      if (pa !== pb) return pa - pb;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
+    [...filteredTasks.filter((t) => t.status === status)].sort(byPriorityThenNewest);
+
+  /** Flat, sorted list backing the List and Grid views: overdue first, then priority. */
+  const flatTasks = useMemo(
+    () =>
+      [...filteredTasks].sort((a, b) => {
+        const oa = isOverdue(a) ? 0 : 1;
+        const ob = isOverdue(b) ? 0 : 1;
+        if (oa !== ob) return oa - ob;
+        return byPriorityThenNewest(a, b);
+      }),
+    [filteredTasks]
+  );
+
+  const columnLabelById = useMemo(() => {
+    const m = new Map(columns.map((c) => [c.id, c.label]));
+    return (id: string) => m.get(id) ?? 'Other';
+  }, [columns]);
 
   /** Tasks whose status doesn't match any current column — surfaced as an "Other" group at the end. */
   const orphanTasks = useMemo(() => {
@@ -469,27 +726,38 @@ export default function Tasks() {
 
   const handleSave = (e: React.FormEvent<HTMLFormElement>, status: string) => {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const formData = new FormData(form);
     const dueRaw = String(formData.get('dueDate') || '').trim();
     const { assigneeId, assigneeName } = resolveAssignee(formData, users);
-    const createdAt = new Date().toISOString();
-    const newTask: Task = {
-      id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2, 11),
-      title: String(formData.get('title') || '').trim(),
+    const title = String(formData.get('title') || '').trim();
+    if (!title) return;
+    const input: TaskInput = {
+      title,
       description: String(formData.get('description') || '').trim(),
       status,
-      createdAt,
       dueDate: dueRaw ? vancouverDateInputToIso(dueRaw) : null,
       priority: (formData.get('priority') as TaskPriority) || 'medium',
       labels: parseLabelsInput(String(formData.get('labels') || '')),
       assigneeId,
       assigneeName,
-      assigneeSince: assigneeId ? createdAt : null,
+      assigneeSince: assigneeId ? new Date().toISOString() : null,
     };
-    if (!newTask.title) return;
-    persist([newTask, ...tasks]);
-    setIsAdding(null);
-    e.currentTarget.reset();
+    setSaving(true);
+    void (async () => {
+      try {
+        const created = await createTask(input);
+        applyTasks([normalizeTask(created), ...tasks]);
+        setIsAdding(null);
+        form.reset();
+      } catch (err) {
+        // Leave the form populated so nothing typed is lost on a failed save.
+        const msg = err instanceof Error ? err.message : 'Please try again.';
+        toast.error('Could not create the task', { description: msg });
+      } finally {
+        setSaving(false);
+      }
+    })();
   };
 
   const handleDetailSave = (e: React.FormEvent<HTMLFormElement>) => {
@@ -499,15 +767,15 @@ export default function Tasks() {
     const dueRaw = String(formData.get('dueDate') || '').trim();
     const { assigneeId, assigneeName } = resolveAssignee(formData, users);
     const assigneeChanged = detailTask.assigneeId !== assigneeId;
-    const assigneeSince =
-      !assigneeId
-        ? null
-        : assigneeChanged
-          ? new Date().toISOString()
-          : detailTask.assigneeSince ?? detailTask.createdAt;
-    const updated: Task = {
-      ...detailTask,
-      title: String(formData.get('title') || '').trim(),
+    const assigneeSince = !assigneeId
+      ? null
+      : assigneeChanged
+        ? new Date().toISOString()
+        : detailTask.assigneeSince ?? detailTask.createdAt;
+    const title = String(formData.get('title') || '').trim();
+    if (!title) return;
+    const input: TaskInput = {
+      title,
       description: String(formData.get('description') || '').trim(),
       status: String(formData.get('status') || detailTask.status),
       priority: (formData.get('priority') as TaskPriority) || 'medium',
@@ -517,14 +785,38 @@ export default function Tasks() {
       assigneeName,
       assigneeSince,
     };
-    if (!updated.title) return;
-    persist(tasks.map((t) => (t.id === updated.id ? updated : t)));
-    setDetailTask(updated);
+    const id = detailTask.id;
+    setSaving(true);
+    void (async () => {
+      try {
+        const saved = normalizeTask(await updateTask(id, input));
+        applyTasks(tasks.map((t) => (t.id === id ? saved : t)));
+        setDetailTask(saved);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Please try again.';
+        toast.error('Could not save the task', { description: msg });
+      } finally {
+        setSaving(false);
+      }
+    })();
   };
 
+  /** Optimistic status change — drag and the ‹ › buttons both land here. */
   const moveTask = (id: string, newStatus: string) => {
-    persist(tasks.map((t) => (t.id === id ? { ...t, status: newStatus } : t)));
+    const previous = tasks;
+    applyTasks(tasks.map((t) => (t.id === id ? { ...t, status: newStatus } : t)));
     setDetailTask((d) => (d && d.id === id ? { ...d, status: newStatus } : d));
+    void (async () => {
+      try {
+        await updateTask(id, { status: newStatus });
+      } catch (err) {
+        applyTasks(previous);
+        const revert = previous.find((t) => t.id === id) ?? null;
+        setDetailTask((d) => (d && d.id === id ? revert : d));
+        const msg = err instanceof Error ? err.message : 'Please try again.';
+        toast.error('Could not move the task', { description: msg });
+      }
+    })();
   };
 
   const handleKanbanDragStart = (event: DragStartEvent) => {
@@ -544,9 +836,17 @@ export default function Tasks() {
   };
 
   const executeDeleteTask = (id: string) => {
-    persist(tasks.filter((t) => t.id !== id));
-    setDetailTask((d) => (d?.id === id ? null : d));
-    setTaskDeleteId(null);
+    void (async () => {
+      try {
+        await deleteTask(id);
+        applyTasks(tasks.filter((t) => t.id !== id));
+        setDetailTask((d) => (d?.id === id ? null : d));
+        setTaskDeleteId(null);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Please try again.';
+        toast.error('Could not delete the task', { description: msg });
+      }
+    })();
   };
 
   // ── Column management ────────────────────────────────────────────────────
@@ -559,7 +859,7 @@ export default function Tasks() {
     const next = [...columns];
     const insertAt = doneIdx >= 0 ? doneIdx : next.length;
     next.splice(insertAt, 0, { id, label, builtin: false });
-    persistColumns(next);
+    void persistColumns(next);
     setIsAddingColumn(false);
     setNewColumnLabel('');
   };
@@ -567,7 +867,7 @@ export default function Tasks() {
   const renameColumn = (id: string) => {
     const label = editingColumnLabel.trim();
     if (!label) return;
-    persistColumns(columns.map((c) => (c.id === id ? { ...c, label } : c)));
+    void persistColumns(columns.map((c) => (c.id === id ? { ...c, label } : c)));
     setEditingColumnId(null);
     setEditingColumnLabel('');
   };
@@ -579,7 +879,7 @@ export default function Tasks() {
     if (swap < 0 || swap >= columns.length) return;
     const next = [...columns];
     [next[idx], next[swap]] = [next[swap], next[idx]];
-    persistColumns(next);
+    void persistColumns(next);
   };
 
   const executeDeleteColumn = (id: string) => {
@@ -589,9 +889,21 @@ export default function Tasks() {
     }
     const remaining = columns.filter((c) => c.id !== id);
     const fallback = remaining.find((c) => c.id === 'todo')?.id ?? remaining[0]?.id ?? BUILT_IN_DONE_ID;
-    persistColumns(remaining);
-    persist(tasks.map((t) => (t.status === id ? { ...t, status: fallback } : t)));
+    const orphaned = tasks.filter((t) => t.status === id);
     setColumnDeleteId(null);
+    void (async () => {
+      // Re-home the tasks first — a column removal that succeeded while its
+      // tasks kept a dead status would strand them in the "Other" group.
+      try {
+        await Promise.all(orphaned.map((t) => updateTask(t.id, { status: fallback })));
+        applyTasks(tasks.map((t) => (t.status === id ? { ...t, status: fallback } : t)));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Please try again.';
+        toast.error('Could not move the tasks out of that column', { description: msg });
+        return;
+      }
+      await persistColumns(remaining);
+    })();
   };
 
   const taskPendingDelete = taskDeleteId ? tasks.find((t) => t.id === taskDeleteId) : null;
@@ -641,10 +953,27 @@ export default function Tasks() {
         <div>
           <h1 className="mb-2">Tasks</h1>
           <p>
-            Drag cards between columns. Add your own columns (e.g. <em>Blake to do</em>, <em>April to do</em>) using the
-            <strong> Add column</strong> button at the end of the board.
+            {filteredTasks.length}{' '}
+            {dateFilter === 'today'
+              ? 'due today or overdue'
+              : dateFilter === 'upcoming'
+                ? 'upcoming'
+                : dateFilter === 'done'
+                  ? 'completed'
+                  : 'total'}{' '}
+            {filteredTasks.length === 1 ? 'task' : 'tasks'}
+            {viewMode === 'board' ? ' · drag cards between columns to change status' : ''}
           </p>
         </div>
+        {viewMode !== 'board' && (
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setIsAdding(columns.find((c) => c.id !== BUILT_IN_DONE_ID)?.id ?? columns[0]?.id ?? 'todo')}
+          >
+            <Plus size={16} /> New task
+          </button>
+        )}
       </div>
 
       {currentUser && inboxCount > 0 && (
@@ -678,6 +1007,17 @@ export default function Tasks() {
         </div>
       )}
 
+      {loading ? (
+        <div className="card" style={{ textAlign: 'center', padding: '4rem 1rem', color: 'var(--text-muted)' }}>
+          <p style={{ margin: 0 }}>Loading tasks…</p>
+        </div>
+      ) : loadError ? (
+        <div className="card" style={{ textAlign: 'center', padding: '4rem 1rem', color: 'var(--text-muted)' }}>
+          <p style={{ margin: 0 }}>Could not load tasks.</p>
+          <p className="text-sm" style={{ marginBottom: 0 }}>{loadError}</p>
+        </div>
+      ) : (
+        <>
       <div className="kanban-stats">
         <span className="kanban-stat">{stats.total} total</span>
         <span className="kanban-stat">{stats.active} active</span>
@@ -687,6 +1027,39 @@ export default function Tasks() {
             {stats.overdue} overdue
           </span>
         )}
+      </div>
+
+      <div className="task-viewbar">
+        <div className="task-tabs" role="tablist" aria-label="Filter tasks by due date">
+          {DATE_FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              role="tab"
+              aria-selected={dateFilter === f.id}
+              className={`task-tab${dateFilter === f.id ? ' task-tab--active' : ''}`}
+              onClick={() => changeDateFilter(f.id)}
+            >
+              {f.label}
+              <span className="task-tab__count">{tabCounts[f.id]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="task-viewswitch" role="group" aria-label="Task view">
+          {VIEW_MODES.map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={viewMode === id}
+              title={`${label} view`}
+              className={`task-viewswitch__btn${viewMode === id ? ' task-viewswitch__btn--active' : ''}`}
+              onClick={() => changeViewMode(id)}
+            >
+              <Icon size={15} aria-hidden />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="kanban-toolbar">
@@ -753,6 +1126,104 @@ export default function Tasks() {
         </div>
       </div>
 
+      {viewMode !== 'board' && isAdding !== null && (
+        <form onSubmit={(e) => handleSave(e, isAdding)} className="kanban-quick-form task-quick-form">
+          <div className="kanban-quick-field">
+            <label htmlFor="qt-flat-title">Title</label>
+            <input id="qt-flat-title" name="title" required autoFocus placeholder="Short title" />
+          </div>
+          <div className="kanban-quick-field">
+            <label htmlFor="qt-flat-desc">Description (optional)</label>
+            <textarea id="qt-flat-desc" name="description" rows={3} placeholder="Details, links, checklist…" />
+          </div>
+          <div className="kanban-quick-row">
+            <div className="kanban-quick-field">
+              <label htmlFor="qt-flat-status">Column</label>
+              {/* Drives the `status` argument passed to handleSave, not a form field. */}
+              <select id="qt-flat-status" value={isAdding} onChange={(e) => setIsAdding(e.target.value)}>
+                {columns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="kanban-quick-field">
+              <label htmlFor="qt-flat-assign">Assignee</label>
+              <select id="qt-flat-assign" name="assigneeId" defaultValue="">
+                <option value="">Unassigned</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {assigneeSelectLabel(u)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="kanban-quick-row">
+            <div className="kanban-quick-field">
+              <label htmlFor="qt-flat-pri">Priority</label>
+              <select id="qt-flat-pri" name="priority" defaultValue="medium">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </div>
+            <div className="kanban-quick-field">
+              <label htmlFor="qt-flat-due">Due</label>
+              <input id="qt-flat-due" name="dueDate" type="date" />
+            </div>
+          </div>
+          <div className="kanban-quick-field">
+            <label htmlFor="qt-flat-lab">Labels</label>
+            <input id="qt-flat-lab" name="labels" placeholder="e.g. Safety, Admin (comma-separated)" />
+          </div>
+          <div className="flex justify-between items-center" style={{ marginTop: '0.25rem' }}>
+            <button type="button" className="btn-ghost-link" onClick={() => setIsAdding(null)}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" style={{ padding: '0.45rem 1rem' }} disabled={saving}>
+              {saving ? 'Adding…' : 'Add task'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {viewMode !== 'board' &&
+        (flatTasks.length === 0 ? (
+          <div className="card" style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+            <p style={{ margin: 0 }}>
+              {dateFilter === 'today'
+                ? 'Nothing due today. Check Upcoming for what is coming next.'
+                : dateFilter === 'upcoming'
+                  ? 'No upcoming tasks with a due date.'
+                  : dateFilter === 'done'
+                    ? 'No completed tasks yet.'
+                    : 'No tasks match these filters.'}
+            </p>
+          </div>
+        ) : (
+          <div className={viewMode === 'grid' ? 'task-grid' : 'task-list'}>
+            {flatTasks.map((task) => {
+              const props = {
+                task,
+                statusLabel: columnLabelById(task.status),
+                overdue: isOverdue(task),
+                isNew: !!currentUser && isUnacknowledgedAssignment(task, currentUser.id, acksNow),
+                accent: priorityAccent(task.priority),
+                onOpen: setDetailTask,
+              };
+              return viewMode === 'grid' ? (
+                <TaskGridCard key={task.id} {...props} />
+              ) : (
+                <TaskListRow key={task.id} {...props} />
+              );
+            })}
+          </div>
+        ))}
+
+      {viewMode === 'board' && (
       <DndContext
         sensors={sensors}
         collisionDetection={closestCorners}
@@ -908,8 +1379,8 @@ export default function Tasks() {
                     <button type="button" className="btn-ghost-link" onClick={() => setIsAdding(null)}>
                       Cancel
                     </button>
-                    <button type="submit" className="btn btn-primary" style={{ padding: '0.45rem 1rem' }}>
-                      Add card
+                    <button type="submit" className="btn btn-primary" style={{ padding: '0.45rem 1rem' }} disabled={saving}>
+                      {saving ? 'Adding…' : 'Add card'}
                     </button>
                   </div>
                 </form>
@@ -1028,6 +1499,9 @@ export default function Tasks() {
           ) : null}
         </DragOverlay>
       </DndContext>
+      )}
+        </>
+      )}
 
       {detailTask && (
         <div className="modal-overlay" role="presentation" onClick={() => setDetailTask(null)}>
@@ -1119,8 +1593,8 @@ export default function Tasks() {
                   <button type="button" className="btn btn-secondary" onClick={() => setDetailTask(null)}>
                     Close
                   </button>
-                  <button type="submit" className="btn btn-primary">
-                    Save
+                  <button type="submit" className="btn btn-primary" disabled={saving}>
+                    {saving ? 'Saving…' : 'Save'}
                   </button>
                 </div>
               </div>

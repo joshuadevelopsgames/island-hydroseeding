@@ -31,6 +31,9 @@ const INSPECTION_VALUES = ['Pass', 'Fail', 'N/A'] as const;
 
 const MAX_PHOTOS = 12;
 
+/** Submission is blocked until the driver has attached this many photos. */
+const MIN_PHOTOS = 4;
+
 /** Form field names that are stored as their own columns, not part of the checklist. */
 const NON_CHECKLIST_FIELDS = new Set(['employeeName', 'equipmentId', 'location', 'remarks', 'pretripUnitVisual']);
 
@@ -151,11 +154,11 @@ export default function PreTrips() {
   };
 
   const saveInspection = async (form: HTMLFormElement) => {
-    if (photoEntries.length === 0) {
+    if (photoEntries.length < MIN_PHOTOS) {
+      const short = MIN_PHOTOS - photoEntries.length;
       setPhotoError(
-        formType === 'Truck'
-          ? 'Add at least one photo of the truck before submitting.'
-          : 'Add at least one photo of the trailer before submitting.'
+        `Add at least ${MIN_PHOTOS} photos of the ${formType.toLowerCase()} before submitting — ` +
+          `${short} more ${short === 1 ? 'photo is' : 'photos are'} needed.`
       );
       photoSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
@@ -394,11 +397,11 @@ export default function PreTrips() {
               )}
             </div>
 
-            <h3 className="pretrip-section-title">Vehicle photos (required)</h3>
+            <h3 className="pretrip-section-title">Vehicle photos ({MIN_PHOTOS} required)</h3>
             <div className="pretrip-photo-section" ref={photoSectionRef}>
               <p className="text-secondary text-sm" style={{ margin: 0 }}>
-                Upload one or more clear photos of this {formType.toLowerCase()}. Up to {MAX_PHOTOS} photos. Submission is
-                blocked until at least one photo is added.
+                Upload at least {MIN_PHOTOS} clear photos of this {formType.toLowerCase()} — front, back and both sides. Up
+                to {MAX_PHOTOS} photos. Submission is blocked until {MIN_PHOTOS} photos are added.
               </p>
               <div className="pretrip-photo-drop">
                 <label className="btn btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -408,6 +411,16 @@ export default function PreTrips() {
                 </label>
               </div>
               {photoError ? <p className="pretrip-photo-error">{photoError}</p> : null}
+              <p
+                className="pretrip-photo-count text-sm flex items-center gap-2"
+                aria-live="polite"
+                data-met={photoEntries.length >= MIN_PHOTOS ? 'true' : 'false'}
+              >
+                <ImageIcon size={16} aria-hidden />
+                {photoEntries.length >= MIN_PHOTOS
+                  ? `${photoEntries.length} photo${photoEntries.length === 1 ? '' : 's'} added — minimum met`
+                  : `${photoEntries.length} of ${MIN_PHOTOS} required photos added`}
+              </p>
               {photoEntries.length > 0 ? (
                 <div className="pretrip-photo-grid">
                   {photoEntries.map((p) => (
@@ -419,11 +432,7 @@ export default function PreTrips() {
                     </div>
                   ))}
                 </div>
-              ) : (
-                <p className="text-secondary text-sm flex items-center gap-2" style={{ margin: 0 }}>
-                  <ImageIcon size={16} aria-hidden /> No photos yet
-                </p>
-              )}
+              ) : null}
             </div>
 
             <h3 className="pretrip-section-title">Documentation & exterior</h3>
