@@ -2482,6 +2482,64 @@ html.theme-dark .pretrip-check-readout li:has(.pretrip-check-readout__result--fa
   white-space: nowrap;
 }
 
+/* The status chip is also the column picker. A transparent native <select> sits
+   on top of the styled pill so we keep native keyboard/touch behaviour while
+   the chip still looks like the rest of the meta row. */
+.task-status-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem 0.15rem 0.55rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-raised);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.task-status-select:hover,
+.task-status-select:focus-within {
+  border-color: var(--primary-green);
+  background: var(--surface-color);
+  color: var(--text-primary);
+}
+
+.task-status-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  width: auto;
+  min-width: 0;
+  /* Native focus ring would fight the pill's own focus-within styling. */
+  outline: none;
+}
+
+.task-status-select select:focus-visible {
+  outline: 2px solid var(--lawn-green);
+  outline-offset: 3px;
+  border-radius: var(--radius-pill);
+}
+
+.task-status-select svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
 .task-row__chip {
   display: inline-flex;
   align-items: center;

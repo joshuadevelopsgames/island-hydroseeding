@@ -20,6 +20,7 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   UserCircle,
   Bell,
   Pencil,
@@ -215,6 +216,11 @@ function matchesDateFilter(task: Task, filter: DateFilter): boolean {
   return isBefore(today, due);
 }
 
+/** Today in Vancouver, as a `yyyy-MM-dd` value for a `<input type="date">`. */
+function todayDateInput(): string {
+  return vancouverDateInputFromIso(new Date().toISOString());
+}
+
 function resolveAssignee(formData: FormData, users: AppUser[]) {
   const aid = String(formData.get('assigneeId') || '').trim();
   if (!aid) return { assigneeId: null as string | null, assigneeName: '' };
@@ -355,17 +361,71 @@ type TaskRowProps = {
   overdue: boolean;
   isNew: boolean;
   accent: string;
+  columns: TaskColumn[];
   onOpen: (t: Task) => void;
+  onStatusChange: (id: string, status: string) => void;
 };
 
-/** Full-width row used by the List view. */
-function TaskListRow({ task, statusLabel, overdue, isNew, accent, onOpen }: TaskRowProps) {
+/**
+ * The status chip doubles as the column picker — changing which list a task is
+ * in is the most common edit, and it shouldn't need opening the task first.
+ * Rendered as a real `<select>` so it gets native keyboard and touch handling.
+ */
+function TaskStatusSelect({
+  task,
+  statusLabel,
+  columns,
+  onStatusChange,
+}: Pick<TaskRowProps, 'task' | 'statusLabel' | 'columns' | 'onStatusChange'>) {
+  const known = columns.some((c) => c.id === task.status);
   return (
-    <button
-      type="button"
+    <span
+      className="task-status-select"
+      // Keep clicks off the row so picking a column never opens the detail panel.
+      onClick={(ev) => ev.stopPropagation()}
+      onKeyDown={(ev) => ev.stopPropagation()}
+    >
+      <select
+        value={task.status}
+        aria-label={`Column for “${task.title}”`}
+        onChange={(ev) => onStatusChange(task.id, ev.target.value)}
+      >
+        {!known && <option value={task.status}>{statusLabel}</option>}
+        {columns.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown size={12} aria-hidden />
+    </span>
+  );
+}
+
+/** Full-width row used by the List view. */
+function TaskListRow({
+  task,
+  statusLabel,
+  overdue,
+  isNew,
+  accent,
+  columns,
+  onOpen,
+  onStatusChange,
+}: TaskRowProps) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
       className={`task-row${overdue ? ' task-row--overdue' : ''}${isNew ? ' task-row--unread' : ''}`}
       style={{ ['--task-accent' as string]: accent }}
       onClick={() => onOpen(task)}
+      onKeyDown={(ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          onOpen(task);
+        }
+      }}
     >
       <span className="task-row__accent" aria-hidden />
       <span className="task-row__main">
@@ -385,7 +445,12 @@ function TaskListRow({ task, statusLabel, overdue, isNew, accent, onOpen }: Task
         )}
       </span>
       <span className="task-row__meta">
-        <span className="task-row__status">{statusLabel}</span>
+        <TaskStatusSelect
+          task={task}
+          statusLabel={statusLabel}
+          columns={columns}
+          onStatusChange={onStatusChange}
+        />
         {task.dueDate && (
           <span className={`task-row__chip${overdue ? ' task-row__chip--overdue' : ''}`}>
             <CalendarIcon size={12} aria-hidden />
@@ -402,21 +467,42 @@ function TaskListRow({ task, statusLabel, overdue, isNew, accent, onOpen }: Task
           {task.assigneeName || 'Unassigned'}
         </span>
       </span>
-    </button>
+    </div>
   );
 }
 
 /** Card used by the Grid view — same information as a board card, no drag handles. */
-function TaskGridCard({ task, statusLabel, overdue, isNew, accent, onOpen }: TaskRowProps) {
+function TaskGridCard({
+  task,
+  statusLabel,
+  overdue,
+  isNew,
+  accent,
+  columns,
+  onOpen,
+  onStatusChange,
+}: TaskRowProps) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       className={`task-tile${overdue ? ' task-tile--overdue' : ''}${isNew ? ' task-tile--unread' : ''}`}
       style={{ ['--task-accent' as string]: accent }}
       onClick={() => onOpen(task)}
+      onKeyDown={(ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          onOpen(task);
+        }
+      }}
     >
       <span className="task-tile__top">
-        <span className="task-row__status">{statusLabel}</span>
+        <TaskStatusSelect
+          task={task}
+          statusLabel={statusLabel}
+          columns={columns}
+          onStatusChange={onStatusChange}
+        />
         {isNew && <span className="task-row__new">New</span>}
       </span>
       {task.labels.length > 0 && (
@@ -451,7 +537,7 @@ function TaskGridCard({ task, statusLabel, overdue, isNew, accent, onOpen }: Tas
           </span>
         ) : null}
       </span>
-    </button>
+    </div>
   );
 }
 
@@ -736,7 +822,9 @@ export default function Tasks() {
       title,
       description: String(formData.get('description') || '').trim(),
       status,
-      dueDate: dueRaw ? vancouverDateInputToIso(dueRaw) : null,
+      // A new task with no date lands on today rather than nowhere — undated
+      // tasks fall outside every date tab except All, so they get forgotten.
+      dueDate: vancouverDateInputToIso(dueRaw || todayDateInput()),
       priority: (formData.get('priority') as TaskPriority) || 'medium',
       labels: parseLabelsInput(String(formData.get('labels') || '')),
       assigneeId,
@@ -1172,7 +1260,7 @@ export default function Tasks() {
             </div>
             <div className="kanban-quick-field">
               <label htmlFor="qt-flat-due">Due</label>
-              <input id="qt-flat-due" name="dueDate" type="date" />
+              <input id="qt-flat-due" name="dueDate" type="date" defaultValue={todayDateInput()} />
             </div>
           </div>
           <div className="kanban-quick-field">
@@ -1212,7 +1300,9 @@ export default function Tasks() {
                 overdue: isOverdue(task),
                 isNew: !!currentUser && isUnacknowledgedAssignment(task, currentUser.id, acksNow),
                 accent: priorityAccent(task.priority),
+                columns,
                 onOpen: setDetailTask,
+                onStatusChange: moveTask,
               };
               return viewMode === 'grid' ? (
                 <TaskGridCard key={task.id} {...props} />
@@ -1368,7 +1458,7 @@ export default function Tasks() {
                     </div>
                     <div className="kanban-quick-field">
                       <label htmlFor={`qt-${column.id}-due`}>Due</label>
-                      <input id={`qt-${column.id}-due`} name="dueDate" type="date" />
+                      <input id={`qt-${column.id}-due`} name="dueDate" type="date" defaultValue={todayDateInput()} />
                     </div>
                   </div>
                   <div className="kanban-quick-field">
