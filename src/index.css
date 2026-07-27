@@ -1915,6 +1915,349 @@ html.theme-dark .dashboard-export-menu {
   line-height: 1.35;
 }
 
+/* --- Pre-trip log list: table on desktop, cards on narrow screens --- */
+.pretrip-log-table-wrap {
+  overflow-x: auto;
+}
+
+.pretrip-log-cards {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .pretrip-log-table-wrap {
+    display: none;
+  }
+
+  .pretrip-log-cards {
+    display: grid;
+    gap: 0.75rem;
+  }
+}
+
+.pretrip-log-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-color);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.pretrip-log-card:hover,
+.pretrip-log-card:focus-visible {
+  border-color: var(--primary-green);
+  box-shadow: var(--shadow-sm);
+}
+
+.pretrip-log-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pretrip-log-card__unit {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.pretrip-log-card__type {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.15rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.pretrip-log-card__meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
+  gap: 0.5rem 1rem;
+  margin: 0;
+}
+
+.pretrip-log-card__meta dt {
+  margin: 0;
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.pretrip-log-card__meta dd {
+  margin: 0.1rem 0 0;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* --- Pre-trip detail sheet: fixed header/footer, scrolling middle ---
+   Qualified with .modal-panel / .modal-overlay because those base rules are
+   declared later in this file — without the extra specificity they would win
+   the padding / overflow / max-height cascade. */
+.modal-panel.pretrip-detail-panel {
+  max-width: 760px;
+  /* dvh keeps the sheet inside the visible area when iOS Safari's toolbars
+     are showing — 100vh would push the footer under the browser chrome. */
+  max-height: min(92dvh, 100%);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pretrip-detail-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.pretrip-detail-head__title {
+  margin: 0.1rem 0 0;
+  font-size: 1.25rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.pretrip-detail-head__sub {
+  margin: 0.35rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.pretrip-detail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 1.25rem 1.5rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.pretrip-detail-foot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.9rem 1.5rem;
+  padding-bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border-color);
+  background: var(--surface-color);
+}
+
+.pretrip-detail-foot__group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.pretrip-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: 0.85rem 1.25rem;
+  margin: 0;
+}
+
+.pretrip-detail-meta dt {
+  margin: 0;
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.pretrip-detail-meta dd {
+  margin: 0.2rem 0 0;
+  font-size: 0.9375rem;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.pretrip-detail-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid #fecaca;
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: 0.875rem;
+}
+
+html.theme-dark .pretrip-detail-alert {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(153, 27, 27, 0.28);
+  color: #fca5a5;
+}
+
+.pretrip-detail-alert ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.pretrip-detail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.pretrip-detail-remarks {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.pretrip-check-readout {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.pretrip-check-readout li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.875rem;
+}
+
+.pretrip-check-readout li:last-child {
+  border-bottom: none;
+}
+
+.pretrip-check-readout__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pretrip-check-readout__value {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+/* The brand palette's "green" tokens are actually red (#c84a4e), so a
+   badge-green "Pass" is nearly indistinguishable from a red "Fail". In a
+   30-row safety checklist only the failures should be loud — everything else
+   reads as quiet text. */
+.pretrip-check-readout__result {
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pretrip-check-readout__result--na {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.pretrip-check-readout__result--fail {
+  padding: 0.2rem 0.65rem;
+  border-radius: var(--radius-pill);
+  background-color: #fee2e2;
+  color: #b91c1c;
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+html.theme-dark .pretrip-check-readout__result--fail {
+  background-color: rgba(153, 27, 27, 0.35);
+  color: #fca5a5;
+}
+
+.pretrip-check-readout li:has(.pretrip-check-readout__result--fail) {
+  background: color-mix(in srgb, #fee2e2 45%, transparent);
+  margin: 0 -0.5rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  border-radius: var(--radius-sm);
+}
+
+html.theme-dark .pretrip-check-readout li:has(.pretrip-check-readout__result--fail) {
+  background: rgba(153, 27, 27, 0.18);
+}
+
+@media (max-width: 640px) {
+  /* Full-height sheet on phones — the old centred card clipped long
+     inspections against the top and bottom of the screen. */
+  .modal-overlay.pretrip-detail-overlay {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .modal-panel.pretrip-detail-panel {
+    max-width: none;
+    max-height: none;
+    height: 100%;
+    border: none;
+    border-radius: 0;
+  }
+
+  .pretrip-detail-head,
+  .pretrip-detail-body,
+  .pretrip-detail-foot {
+    padding-left: 1.1rem;
+    padding-right: 1.1rem;
+  }
+
+  .pretrip-detail-head {
+    padding-top: calc(1.1rem + env(safe-area-inset-top, 0px));
+  }
+
+  /* column-reverse keeps Close / Download on the thumb row and pushes the
+     destructive Delete below them at a smaller, non-stretching size. */
+  .pretrip-detail-foot {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+
+  .pretrip-detail-foot__group {
+    width: 100%;
+  }
+
+  .pretrip-detail-foot__group .btn {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .pretrip-detail-foot > .btn-danger {
+    align-self: center;
+    flex: 0 0 auto;
+  }
+}
+
 /* Kanban / Tasks */
 .kanban-toolbar {
   display: flex;
@@ -2358,6 +2701,13 @@ html.theme-dark .modal-overlay {
   box-shadow: var(--shadow-lg);
   padding: 1.75rem;
   animation: modal-panel 0.28s cubic-bezier(0.33, 1, 0.68, 1);
+  /* The overlay is fixed and centred, so a panel taller than the viewport used
+     to spill off both edges with no way to reach the clipped content. Cap the
+     height and let the panel scroll instead. */
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal-panel__dismiss {

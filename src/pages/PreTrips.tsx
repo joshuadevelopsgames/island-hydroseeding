@@ -10,6 +10,8 @@ import {
   ImageIcon,
   X,
   Trash2,
+  Download,
+  AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatInVancouver } from '../lib/vancouverTime';
@@ -21,67 +23,13 @@ import {
   type Pretrip,
   type PretripType,
 } from '../lib/pretripsRemote';
+import { groupChecklist, failedItems } from '../lib/pretripChecklist';
+import { downloadPretripPdf } from '../lib/pretripPdf';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const INSPECTION_VALUES = ['Pass', 'Fail', 'N/A'] as const;
 
 const MAX_PHOTOS = 12;
-
-/**
- * Human-readable labels for every checklist key so the saved answers can be
- * shown back in the detail view. Keys not listed here fall back to a humanized
- * version of the raw key, so the record is never silently dropped.
- */
-const CHECKLIST_LABELS: Record<string, string> = {
-  odometer: 'Odometer reading',
-  fuelType: 'Fuel type',
-  truckUsed: 'Truck used to tow',
-  regIns: 'Registration & insurance',
-  cvi: 'CVI & decal',
-  tires: 'Tires & rims',
-  body: 'Body (doors, bumpers / fenders, ramps)',
-  mirrors: 'Mirrors',
-  toolboxes: 'Toolboxes secured',
-  doors: 'Doors secured',
-  load: 'Load secured (no debris)',
-  oil: 'Engine oil',
-  coolant: 'Coolant',
-  transFluid: 'Transmission fluid',
-  powerSteering: 'Power steering fluid',
-  seats: 'Seats & seat belts',
-  wipers: 'Windshield wipers',
-  defroster: 'Defroster',
-  horn: 'Horn',
-  cabClean: 'Free of dangerous items',
-  hitchPinned: 'Truck hitch pinned',
-  ballSize: 'Hitch ball correct size',
-  coupler: 'Coupler latched & pinned',
-  chains: 'Chains crossed / connect',
-  electricalCon: 'Electrical connector secured',
-  headlights: 'Headlights',
-  markerLights: 'Running & marker lights',
-  turnSignals: 'Turn signals / hazard',
-  brakeLights: 'Brake lights',
-  parkingBrake: 'Parking brake',
-  brakes: 'Service brakes',
-  steering: 'Steering',
-  tugTest: 'Gain up tug test',
-  rollTest: 'Gain up roll test',
-  breakaway: 'Electrical breakaway test',
-  firstAid: 'First aid kit',
-  fireExtinguisher: 'Charged fire extinguisher',
-  wheelChocks: 'Wheel chocks',
-  triangles: 'Reflective triangles / cones',
-  spillKit: 'Spill kit',
-  tireChains: 'Winter tire chains',
-};
-
-const humanizeKey = (key: string) =>
-  key
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/^./, (c) => c.toUpperCase());
-
-const labelForChecklistKey = (key: string) => CHECKLIST_LABELS[key] ?? humanizeKey(key);
 
 /** Form field names that are stored as their own columns, not part of the checklist. */
 const NON_CHECKLIST_FIELDS = new Set(['employeeName', 'equipmentId', 'location', 'remarks', 'pretripUnitVisual']);
@@ -101,6 +49,7 @@ export default function PreTrips() {
   const [detailLog, setDetailLog] = useState<Pretrip | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
 
   const photoSectionRef = useRef<HTMLDivElement>(null);
 
@@ -239,7 +188,13 @@ export default function PreTrips() {
       setPhotoEntries([]);
       setPhotoError('');
       setIsFormOpen(false);
-      toast.success('Inspection saved');
+      // Drop straight into the record that was just filed so the driver can
+      // check it over and pull a PDF copy without hunting for it in the list.
+      setDetailLog(saved);
+      toast.success('Inspection saved', {
+        description: 'Download a PDF copy from the record below.',
+        action: { label: 'Download PDF', onClick: () => void handleDownloadPdf(saved) },
+      });
     } catch (err) {
       // Keep the form populated so nothing is lost — the worker can retry.
       const msg = err instanceof Error ? err.message : 'Please try again.';
@@ -266,6 +221,18 @@ export default function PreTrips() {
       return;
     }
     void saveInspection(form);
+  };
+
+  const handleDownloadPdf = async (log: Pretrip) => {
+    setPdfBusyId(log.id);
+    try {
+      await downloadPretripPdf(log);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Please try again.';
+      toast.error('Could not build the PDF', { description: msg });
+    } finally {
+      setPdfBusyId(null);
+    }
   };
 
   const executeDelete = async (id: string) => {
@@ -650,7 +617,60 @@ export default function PreTrips() {
             <p>No pre-trip inspection records found.</p>
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <>
+          {/* Phone-sized screens get cards — the seven-column table needed
+              sideways scrolling and buried the status behind the fold. */}
+          <div className="pretrip-log-cards">
+            {filteredLogs.map((log) => (
+              <button
+                key={log.id}
+                type="button"
+                className="pretrip-log-card"
+                onClick={() => setDetailLog(log)}
+              >
+                <div className="pretrip-log-card__top">
+                  <div style={{ minWidth: 0 }}>
+                    <p className="pretrip-log-card__unit">{log.equipmentId || 'Unit'}</p>
+                    <p className="pretrip-log-card__type">
+                      {log.type === 'Truck' ? <Truck size={14} aria-hidden /> : <LifeBuoy size={14} aria-hidden />}
+                      {log.type}
+                      {log.photoCount > 0 ? (
+                        <>
+                          <span aria-hidden>·</span>
+                          <ImageIcon size={14} aria-hidden /> {log.photoCount}
+                        </>
+                      ) : null}
+                    </p>
+                  </div>
+                  {log.status === 'Action Req' ? (
+                    <span className="badge" style={{ backgroundColor: '#fee2e2', color: '#b91c1c', flexShrink: 0 }}>
+                      Action req
+                    </span>
+                  ) : (
+                    <span className="badge badge-green" style={{ flexShrink: 0 }}>
+                      Passed
+                    </span>
+                  )}
+                </div>
+                <dl className="pretrip-log-card__meta">
+                  <div>
+                    <dt>Date</dt>
+                    <dd>{formatInVancouver(log.date, 'MMM d, yyyy h:mm a')}</dd>
+                  </div>
+                  <div>
+                    <dt>Inspector</dt>
+                    <dd>{log.employeeName || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Location</dt>
+                    <dd>{log.location || '—'}</dd>
+                  </div>
+                </dl>
+              </button>
+            ))}
+          </div>
+
+          <div className="pretrip-log-table-wrap">
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               <thead>
                 <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-secondary)' }}>
@@ -716,127 +736,143 @@ export default function PreTrips() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 
       {detailLog && (
-        <div className="modal-overlay" role="presentation" onClick={() => setDetailLog(null)}>
+        <div
+          className="modal-overlay pretrip-detail-overlay"
+          role="presentation"
+          onClick={() => setDetailLog(null)}
+        >
           <div
-            className="modal-panel modal-panel--wide"
+            className="modal-panel pretrip-detail-panel"
             role="dialog"
             aria-modal="true"
             aria-labelledby="pretrip-detail-title"
             onClick={(ev) => ev.stopPropagation()}
           >
-            <button
-              type="button"
-              className="btn-icon"
-              style={{ float: 'right', margin: '-0.5rem -0.5rem 0 0' }}
-              onClick={() => setDetailLog(null)}
-              aria-label="Close"
-            >
-              <X size={16} />
-            </button>
-            <p className="page-kicker" style={{ marginBottom: '0.35rem' }}>
-              {detailLog.type} inspection
-            </p>
-            <h2 id="pretrip-detail-title" className="modal-panel__title" style={{ marginBottom: '0.25rem' }}>
-              {detailLog.equipmentId || 'Inspection'}
-            </h2>
-            <p className="text-secondary text-sm" style={{ marginBottom: '1.25rem' }}>
-              {formatInVancouver(detailLog.date, 'PPpp')} · {detailLog.employeeName}
-            </p>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '0.75rem 1rem', marginBottom: '1rem' }}>
-              <div>
-                <p className="text-xs text-muted" style={{ margin: 0 }}>Status</p>
+            <div className="pretrip-detail-head">
+              <div style={{ minWidth: 0 }}>
+                <p className="page-kicker" style={{ marginBottom: 0 }}>
+                  {detailLog.type} inspection
+                </p>
+                <h2 id="pretrip-detail-title" className="pretrip-detail-head__title">
+                  {detailLog.equipmentId || 'Inspection'}
+                </h2>
+                <p className="pretrip-detail-head__sub">
+                  {formatInVancouver(detailLog.date, 'PPpp')}
+                  {detailLog.employeeName ? ` · ${detailLog.employeeName}` : ''}
+                </p>
+              </div>
+              <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
                 {detailLog.status === 'Action Req' ? (
-                  <span className="badge" style={{ backgroundColor: '#fee2e2', color: '#b91c1c' }}>Action req</span>
+                  <span className="badge" style={{ backgroundColor: '#fee2e2', color: '#b91c1c' }}>
+                    Action req
+                  </span>
                 ) : (
                   <span className="badge badge-green">Passed</span>
                 )}
-              </div>
-              <div>
-                <p className="text-xs text-muted" style={{ margin: 0 }}>Type</p>
-                <p style={{ margin: 0 }}>{detailLog.type}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted" style={{ margin: 0 }}>Inspector</p>
-                <p style={{ margin: 0 }}>{detailLog.employeeName || '—'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted" style={{ margin: 0 }}>Location</p>
-                <p style={{ margin: 0 }}>{detailLog.location || '—'}</p>
+                <button type="button" className="btn-icon" onClick={() => setDetailLog(null)} aria-label="Close">
+                  <X size={16} />
+                </button>
               </div>
             </div>
 
-            <div style={{ marginBottom: '1.25rem' }}>
-              <p className="text-xs text-muted" style={{ margin: 0 }}>Remarks</p>
-              <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{detailLog.remarks || '—'}</p>
-            </div>
-
-            {Object.keys(detailLog.checklist).length > 0 && (
-              <>
-                <h3 className="pretrip-section-title" style={{ marginTop: 0 }}>
-                  Inspection items
-                </h3>
-                <ul style={{ listStyle: 'none', margin: '0 0 1.25rem', padding: 0 }}>
-                  {Object.entries(detailLog.checklist).map(([key, value]) => {
-                    const isFail = value === 'Fail';
-                    return (
-                      <li
-                        key={key}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          gap: '1rem',
-                          padding: '0.5rem 0',
-                          borderBottom: '1px solid var(--border-color)',
-                        }}
-                      >
-                        <span style={{ fontSize: '0.875rem' }}>{labelForChecklistKey(key)}</span>
-                        {value === 'Pass' || value === 'Fail' || value === 'N/A' ? (
-                          <span
-                            className="badge"
-                            style={
-                              isFail
-                                ? { backgroundColor: '#fee2e2', color: '#b91c1c' }
-                                : value === 'Pass'
-                                  ? undefined
-                                  : { backgroundColor: 'var(--surface-hover)', color: 'var(--text-secondary)' }
-                            }
-                          >
-                            {value}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>{value || '—'}</span>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </>
-            )}
-
-            <h3 className="pretrip-section-title" style={{ marginTop: 0 }}>
-              Photos ({detailLog.photoCount})
-            </h3>
-            {detailLog.photoUrls.length === 0 ? (
-              <p className="text-secondary text-sm">No photos attached.</p>
-            ) : (
-              <div className="pretrip-photo-grid">
-                {detailLog.photoUrls.map((url, i) => (
-                  <div key={`${detailLog.id}-${i}`} className="pretrip-photo-thumb">
-                    <a href={url} target="_blank" rel="noopener noreferrer" aria-label={`Open photo ${i + 1}`}>
-                      <img src={url} alt="" />
-                    </a>
+            <div className="pretrip-detail-body">
+              {(() => {
+                const failed = failedItems(detailLog.checklist);
+                if (!failed.length) return null;
+                return (
+                  <div className="pretrip-detail-alert">
+                    <AlertTriangle size={18} aria-hidden style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+                    <div>
+                      <strong>
+                        {failed.length} item{failed.length === 1 ? '' : 's'} failed inspection
+                      </strong>
+                      <ul>
+                        {failed.map((item) => (
+                          <li key={item.key}>{item.label}</li>
+                        ))}
+                      </ul>
+                    </div>
                   </div>
-                ))}
-              </div>
-            )}
+                );
+              })()}
 
-            <div className="modal-panel__foot" style={{ justifyContent: 'space-between', marginTop: '1.5rem' }}>
+              <dl className="pretrip-detail-meta">
+                <div>
+                  <dt>Unit type</dt>
+                  <dd>{detailLog.type}</dd>
+                </div>
+                <div>
+                  <dt>Inspector / driver</dt>
+                  <dd>{detailLog.employeeName || '—'}</dd>
+                </div>
+                <div>
+                  <dt>Location</dt>
+                  <dd>{detailLog.location || '—'}</dd>
+                </div>
+                <div>
+                  <dt>Photos</dt>
+                  <dd>{detailLog.photoCount}</dd>
+                </div>
+              </dl>
+
+              <div className="pretrip-detail-block">
+                <h3 className="pretrip-section-title">Details of defects / remarks</h3>
+                <p className="pretrip-detail-remarks">{detailLog.remarks || '—'}</p>
+              </div>
+
+              {groupChecklist(detailLog.checklist).map((section) => (
+                <div className="pretrip-detail-block" key={section.title}>
+                  <h3 className="pretrip-section-title">{section.title}</h3>
+                  <ul className="pretrip-check-readout">
+                    {section.items.map((item) => {
+                      const isAnswer = item.value === 'Pass' || item.value === 'Fail' || item.value === 'N/A';
+                      const resultClass =
+                        item.value === 'Fail'
+                          ? 'pretrip-check-readout__result pretrip-check-readout__result--fail'
+                          : item.value === 'N/A'
+                            ? 'pretrip-check-readout__result pretrip-check-readout__result--na'
+                            : 'pretrip-check-readout__result';
+                      return (
+                        <li key={item.key}>
+                          <span className="pretrip-check-readout__label">{item.label}</span>
+                          {isAnswer ? (
+                            <span className={resultClass}>{item.value}</span>
+                          ) : (
+                            <span className="pretrip-check-readout__value">{item.value || '—'}</span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+
+              <div className="pretrip-detail-block">
+                <h3 className="pretrip-section-title">Photos ({detailLog.photoCount})</h3>
+                {detailLog.photoUrls.length === 0 ? (
+                  <p className="text-secondary text-sm" style={{ margin: 0 }}>
+                    No photos attached.
+                  </p>
+                ) : (
+                  <div className="pretrip-photo-grid">
+                    {detailLog.photoUrls.map((url, i) => (
+                      <div key={`${detailLog.id}-${i}`} className="pretrip-photo-thumb">
+                        <a href={url} target="_blank" rel="noopener noreferrer" aria-label={`Open photo ${i + 1}`}>
+                          <img src={url} alt="" />
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="pretrip-detail-foot">
               <button
                 type="button"
                 className="btn btn-danger"
@@ -848,11 +884,22 @@ export default function PreTrips() {
                   setDeleteId(id);
                 }}
               >
-                <Trash2 size={16} /> Delete inspection
+                <Trash2 size={16} /> Delete
               </button>
-              <button type="button" className="btn btn-secondary" onClick={() => setDetailLog(null)}>
-                Close
-              </button>
+              <div className="pretrip-detail-foot__group">
+                <button type="button" className="btn btn-secondary" onClick={() => setDetailLog(null)}>
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={pdfBusyId === detailLog.id}
+                  onClick={() => void handleDownloadPdf(detailLog)}
+                >
+                  <Download size={16} />
+                  {pdfBusyId === detailLog.id ? 'Building PDF…' : 'Download PDF'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
