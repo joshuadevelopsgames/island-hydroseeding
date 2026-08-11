@@ -29,6 +29,7 @@
 
   --bg-color: #f6f4f4;
   --bg-elevated: #ffffff;
+  --bg-secondary: #fafafa;
   --surface-color: #ffffff;
   --surface-raised: #faf8f8;
   --surface-hover: rgba(178, 52, 56, 0.07);
@@ -75,6 +76,7 @@ html.theme-dark {
 
   --bg-color: #0e1011;
   --bg-elevated: #14181b;
+  --bg-secondary: #1f2529;
   --surface-color: #181d20;
   --surface-raised: #1f2529;
   --surface-hover: rgba(232, 137, 140, 0.12);

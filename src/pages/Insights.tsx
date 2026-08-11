@@ -147,32 +147,65 @@ export default function Insights() {
 
   // ─── Revenue: selected range vs same range one year ago ──
   const revenueYoY = useMemo(() => {
-    // Bucket monthly. The number of buckets covers the range — and the
-    // prior-year window is the same window shifted back 365 days, so the
-    // comparison is true like-for-like instead of always Jan–Dec.
+    // Bucket size follows the range length. Always bucketing by month turned
+    // short ranges ("This month" = 11 days) into a single bucket, which drew
+    // one enormous bar instead of a chart.
+    const DAY_MS = 86400000;
+    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const spanDays = Math.max(1, Math.round((to.getTime() - from.getTime()) / DAY_MS) + 1);
+    // Thresholds are loose so each preset lands where you'd expect: this month
+    // and last 30 days → daily, last 90 → weekly, YTD / 12 months → monthly,
+    // all time (starts in 2000) → yearly.
+    const gran: 'day' | 'week' | 'month' | 'year' =
+      spanDays <= 45 ? 'day' : spanDays <= 120 ? 'week' : spanDays <= 1100 ? 'month' : 'year';
+    const stepDays = gran === 'day' ? 1 : 7;
+    // "All time" starts in 2000 — bucket those by year so the chart isn't
+    // hundreds of overlapping bars.
+    const stepMonths = gran === 'year' ? 12 : 1;
+    const byMonth = gran === 'month' || gran === 'year';
+
+    // The prior-year window is the same window shifted back a year, so both
+    // series get the same bucket size and line up index-for-index.
     const buildBuckets = (rFrom: Date, rTo: Date) => {
       const out: { label: string; value: number; key: string }[] = [];
-      const cursor = new Date(rFrom.getFullYear(), rFrom.getMonth(), 1);
+      if (byMonth) {
+        const cursor = new Date(rFrom.getFullYear(), rFrom.getMonth(), 1);
+        while (cursor <= rTo) {
+          out.push({
+            key: `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`,
+            label:
+              gran === 'year'
+                ? String(cursor.getFullYear())
+                : cursor.toLocaleDateString('en-CA', { month: 'short', year: '2-digit' }),
+            value: 0,
+          });
+          cursor.setMonth(cursor.getMonth() + stepMonths);
+        }
+        return out;
+      }
+      const cursor = startOfDay(rFrom);
       while (cursor <= rTo) {
-        const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
         out.push({
-          key,
-          label: cursor.toLocaleDateString('en-CA', { month: 'short', year: '2-digit' }),
+          key: cursor.toISOString().slice(0, 10),
+          label: cursor.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }),
           value: 0,
         });
-        cursor.setMonth(cursor.getMonth() + 1);
+        cursor.setDate(cursor.getDate() + stepDays);
       }
       return out;
     };
     const fillBuckets = (rFrom: Date, rTo: Date) => {
       const buckets = buildBuckets(rFrom, rTo);
-      const idx = new Map(buckets.map((b, i) => [b.key, i]));
+      const base = startOfDay(rFrom).getTime();
       for (const inv of invoices) {
         const d = new Date(inv.issue_date || inv.created_at);
         if (d < rFrom || d > rTo) continue;
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        const i = idx.get(key);
-        if (i != null) buckets[i].value += Number(inv.total ?? 0);
+        const i = byMonth
+          ? Math.floor(
+              ((d.getFullYear() - rFrom.getFullYear()) * 12 + (d.getMonth() - rFrom.getMonth())) / stepMonths,
+            )
+          : Math.floor(Math.round((startOfDay(d).getTime() - base) / DAY_MS) / stepDays);
+        if (i >= 0 && i < buckets.length) buckets[i].value += Number(inv.total ?? 0);
       }
       return buckets;
     };
@@ -1006,7 +1039,14 @@ function PaymentMethodsDonut({
   const r = 36;
   const c = 2 * Math.PI * r;
   let consumed = 0;
-  const COLORS = ['var(--primary-green, #2a7a3a)', '#d97706', '#1d4ed8', '#9333ea', '#0891b2', '#475569'];
+  const COLORS = [
+    'var(--primary-green)',
+    'var(--insights-src-phone)',
+    'var(--insights-src-email)',
+    'var(--insights-src-referral)',
+    'var(--insights-src-cyan)',
+    'var(--insights-src-other)',
+  ];
 
   return (
     <div className="ins-conv-card">
@@ -1094,32 +1134,44 @@ function YoYBars({
   const innerW = W - padX * 2;
   const innerH = H - padY * 2;
   const groupW = innerW / len;
-  const barW = Math.max(3, (groupW - 6) / 2);
-  // Skip every-other label when there are too many buckets to fit cleanly.
-  const labelEvery = len > 8 ? 2 : 1;
+  // Cap the bar width so a one- or two-bucket range draws a readable pair of
+  // bars instead of a slab the width of the card, and centre the pair in its
+  // slot so the group still lines up with its label.
+  const barW = Math.max(3, Math.min(26, (groupW - 6) / 2));
+  const pairW = barW * 2 + 2;
+  // Thin the labels out so they never collide, however many buckets there are.
+  const labelEvery = Math.ceil(len / 10);
+
+  const empty = max <= 1;
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="ins-yoy-svg" role="img" aria-label="Revenue, current period vs prior">
       <line x1={padX} y1={padY + innerH} x2={W - padX} y2={padY + innerH} stroke="var(--border-color)" />
+      {empty && (
+        <text x={W / 2} y={padY + innerH / 2} textAnchor="middle" fontSize="12" fill="var(--text-muted)">
+          No invoiced revenue in either period
+        </text>
+      )}
       {current.map((c, i) => {
         const p = prev[i]?.value ?? 0;
-        const x = padX + i * groupW + 3;
+        const groupCx = padX + i * groupW + groupW / 2;
+        const x = groupCx - pairW / 2;
         const cH = (c.value / max) * innerH;
         const pH = (p / max) * innerH;
-        const showLabel = i % labelEvery === 0;
+        const showLabel = !empty && i % labelEvery === 0 && c.label;
         return (
           <g key={c.key || i}>
-            <rect x={x} y={padY + innerH - pH} width={barW} height={pH} fill="var(--insights-amber-soft, #fbe0a6)" rx="2" />
+            <rect x={x} y={padY + innerH - pH} width={barW} height={pH} fill="var(--insights-amber-soft)" rx="2" />
             <rect
               x={x + barW + 2}
               y={padY + innerH - cH}
               width={barW}
               height={cH}
-              fill="var(--primary-green, #2a7a3a)"
+              fill="var(--primary-green)"
               rx="2"
             />
             {showLabel && (
-              <text x={x + barW + 1} y={H - 8} textAnchor="middle" fontSize="10" fill="var(--text-muted)">
+              <text x={groupCx} y={H - 8} textAnchor="middle" fontSize="10" fill="var(--text-muted)">
                 {c.label}
               </text>
             )}
@@ -1138,21 +1190,33 @@ function SentVsApprovedBars({ weeks }: { weeks: { label: string; sent: number; a
   const padY = 24;
   const innerW = W - padX * 2;
   const innerH = H - padY * 2;
-  const groupW = innerW / weeks.length;
-  const barW = Math.max(4, (groupW - 6) / 2);
+  const groupW = innerW / Math.max(1, weeks.length);
+  // Same width cap as YoYBars — a short range yields few buckets, and
+  // uncapped bars render as slabs across the whole card.
+  const barW = Math.max(4, Math.min(26, (groupW - 6) / 2));
+  const pairW = barW * 2 + 2;
+  const empty = max <= 1;
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="ins-yoy-svg" role="img" aria-label="Quote value sent vs accepted, by week">
       <line x1={padX} y1={padY + innerH} x2={W - padX} y2={padY + innerH} stroke="var(--border-color)" />
+      {empty && (
+        <text x={W / 2} y={padY + innerH / 2} textAnchor="middle" fontSize="12" fill="var(--text-muted)">
+          No quotes sent in this range
+        </text>
+      )}
       {weeks.map((w, i) => {
-        const x = padX + i * groupW + 3;
+        const groupCx = padX + i * groupW + groupW / 2;
+        const x = groupCx - pairW / 2;
         const sH = (w.sent / max) * innerH;
         const aH = (w.approved / max) * innerH;
         return (
           <g key={i}>
-            <rect x={x} y={padY + innerH - sH} width={barW} height={sH} fill="var(--insights-amber-soft, #fbe0a6)" rx="2" />
-            <rect x={x + barW + 2} y={padY + innerH - aH} width={barW} height={aH} fill="var(--primary-green, #2a7a3a)" rx="2" />
-            <text x={x + barW + 1} y={H - 6} textAnchor="middle" fontSize="9" fill="var(--text-muted)">{w.label}</text>
+            <rect x={x} y={padY + innerH - sH} width={barW} height={sH} fill="var(--insights-amber-soft)" rx="2" />
+            <rect x={x + barW + 2} y={padY + innerH - aH} width={barW} height={aH} fill="var(--primary-green)" rx="2" />
+            {!empty && (
+              <text x={groupCx} y={H - 6} textAnchor="middle" fontSize="9" fill="var(--text-muted)">{w.label}</text>
+            )}
           </g>
         );
       })}
@@ -1172,7 +1236,7 @@ function ConversionDonut({ pct }: { pct: number }) {
         cy="50"
         r={r}
         fill="none"
-        stroke="var(--primary-green, #2a7a3a)"
+        stroke="var(--primary-green)"
         strokeWidth="10"
         strokeDasharray={`${dash} ${c - dash}`}
         strokeDashoffset={c / 4}
@@ -1191,13 +1255,13 @@ function RecurringDonut({ recurring, oneOff }: { recurring: number; oneOff: numb
   const recDash = (recPct / 100) * c;
   return (
     <svg viewBox="0 0 100 100" width="92" height="92" className="ins-donut">
-      <circle cx="50" cy="50" r={r} fill="none" stroke="var(--accent-soft, #d9e9dd)" strokeWidth="10" />
+      <circle cx="50" cy="50" r={r} fill="none" stroke="var(--accent-soft)" strokeWidth="10" />
       <circle
         cx="50"
         cy="50"
         r={r}
         fill="none"
-        stroke="var(--primary-green, #2a7a3a)"
+        stroke="var(--primary-green)"
         strokeWidth="10"
         strokeDasharray={`${recDash} ${c - recDash}`}
         strokeDashoffset={c / 4}
@@ -1217,9 +1281,35 @@ const INSIGHTS_CSS = `
   .ins-range-btn.is-active { background: var(--primary-green); color: #fff; }
   .ins-range-btn:hover:not(.is-active) { background: var(--surface-hover); color: var(--text-primary); }
 
-  /* Two-color accent. Green = current / good. Amber = prior / needs attention. */
-  .ins-section { --insights-amber: #d97706; --insights-amber-soft: rgba(217, 119, 6, 0.18); }
-  .ins-section-nav { --insights-amber: #d97706; }
+  /* Two-color accent. Brand = current / good. Amber = prior / needs attention.
+     Defined on :root (this stylesheet only mounts with the page) so the nav,
+     hero and sections all share one palette — and overridden for dark, where
+     a low-alpha amber over a near-black surface reads as muddy brown rather
+     than amber. Dark values are lifted and more opaque to hold their hue. */
+  :root {
+    --insights-amber: #d97706;
+    --insights-amber-soft: rgba(217, 119, 6, 0.22);
+    --insights-tint: var(--accent-soft);
+    --insights-src-website: var(--primary-green);
+    --insights-src-phone: #d97706;
+    --insights-src-email: #1d4ed8;
+    --insights-src-referral: #9333ea;
+    --insights-src-cyan: #0891b2;
+    --insights-src-other: #475569;
+    --insights-src-direct: #94a3b8;
+  }
+  html.theme-dark {
+    --insights-amber: #fbbf24;
+    /* Solid, not alpha — any translucent amber over the near-black surface
+       muddies into olive. This is the prior-period bar/swatch fill. */
+    --insights-amber-soft: #d9a441;
+    --insights-src-phone: #fbbf24;
+    --insights-src-email: #7aa2f7;
+    --insights-src-referral: #c08cf0;
+    --insights-src-cyan: #22d3ee;
+    --insights-src-other: #8a95a3;
+    --insights-src-direct: #5d6873;
+  }
 
   /* Sticky horizontal section nav. Sits below the page's header and above
      the hero strip. IntersectionObserver bumps the .is-active pill as the
@@ -1229,7 +1319,7 @@ const INSIGHTS_CSS = `
     display: flex; flex-wrap: wrap; gap: 4px;
     padding: 8px 4px;
     margin-bottom: 8px;
-    background: var(--bg-color, #fafafa);
+    background: var(--bg-color);
     border-bottom: 1px solid var(--border-color);
     backdrop-filter: blur(8px);
   }
@@ -1243,9 +1333,9 @@ const INSIGHTS_CSS = `
   }
   .ins-section-nav-pill:hover { color: var(--text-primary); background: var(--surface-hover); }
   .ins-section-nav-pill.is-active {
-    color: var(--primary-green, #2a7a3a);
-    background: rgba(42, 122, 58, 0.08);
-    border-color: rgba(42, 122, 58, 0.28);
+    color: var(--primary-green);
+    background: var(--accent-soft);
+    border-color: var(--accent-muted);
   }
 
   .ins-hero {
@@ -1254,7 +1344,7 @@ const INSIGHTS_CSS = `
     gap: 12px;
     padding: 14px;
     margin-bottom: 16px;
-    background: linear-gradient(180deg, var(--surface-color) 0%, var(--bg-secondary, #fafafa) 100%);
+    background: linear-gradient(180deg, var(--surface-color) 0%, var(--bg-secondary) 100%);
     border: 1px solid var(--border-color);
     border-radius: 12px;
     position: sticky;
@@ -1263,8 +1353,8 @@ const INSIGHTS_CSS = `
     backdrop-filter: blur(8px);
   }
   .ins-hero-tile { padding: 6px 10px; border-left: 3px solid var(--border-color); }
-  .ins-hero-tile--ok { border-left-color: var(--primary-green, #2a7a3a); }
-  .ins-hero-tile--warn { border-left-color: #d97706; }
+  .ins-hero-tile--ok { border-left-color: var(--primary-green); }
+  .ins-hero-tile--warn { border-left-color: var(--insights-amber); }
   .ins-hero-label { font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); }
   .ins-hero-value { font-size: 22px; font-weight: 700; color: var(--text-primary); margin-top: 2px; line-height: 1.2; }
 
@@ -1273,20 +1363,22 @@ const INSIGHTS_CSS = `
   .ins-section-title { font-size: 18px; font-weight: 600; margin: 0; }
   .ins-section-sub { font-size: 12px; color: var(--text-muted); }
   .ins-section-sub-head { display: flex; align-items: baseline; gap: 12px; margin: 20px 0 8px; font-size: 14px; font-weight: 600; }
-  .ins-section-drill { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--primary-green, #2a7a3a); text-decoration: none; padding: 4px 10px; border-radius: 6px; transition: background 0.12s; }
-  .ins-section-drill:hover { background: rgba(42, 122, 58, 0.08); }
+  .ins-section-drill { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--primary-green); text-decoration: none; padding: 4px 10px; border-radius: 6px; transition: background 0.12s; }
+  .ins-section-drill:hover { background: var(--accent-soft); }
 
   .ins-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
   .ins-kpi-grid--2 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
   .ins-kpi-grid--3 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 
-  .ins-kpi { padding: 14px 16px; background: var(--bg-secondary, #fafafa); border-radius: 8px; border: 1px solid var(--border-color); }
+  .ins-kpi { padding: 14px 16px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color); }
   .ins-kpi-label { font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; }
   .ins-kpi-value { font-size: 26px; font-weight: 600; line-height: 1.1; color: var(--text-primary); }
   .ins-kpi-meta { display: flex; gap: 8px; align-items: center; margin-top: 6px; min-height: 18px; flex-wrap: wrap; }
   .ins-kpi-change { font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 999px; }
-  .ins-kpi-change.is-up { background: rgba(42, 122, 58, 0.1); color: var(--primary-green); }
-  .ins-kpi-change.is-down { background: rgba(176, 51, 55, 0.1); color: #b03337; }
+  /* Up/down both used a red — the brand accent is red, so they were nearly
+     indistinguishable. Use the semantic tokens, which have dark variants. */
+  .ins-kpi-change.is-up { background: color-mix(in srgb, var(--color-success) 14%, transparent); color: var(--color-success); }
+  .ins-kpi-change.is-down { background: var(--color-danger-bg); color: var(--color-danger); }
   .ins-kpi-sub { font-size: 11px; color: var(--text-muted); }
 
   .ins-yoy-totals { display: flex; gap: 32px; margin-bottom: 12px; }
@@ -1294,9 +1386,9 @@ const INSIGHTS_CSS = `
   .ins-yoy-num--muted { color: var(--text-muted); }
   .ins-yoy-lbl { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); margin-top: 4px; letter-spacing: 0.5px; text-transform: uppercase; }
   .ins-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-  .ins-swatch--curr { background: var(--primary-green, #2a7a3a); }
-  .ins-swatch--prev { background: var(--accent-soft, #d9e9dd); }
-  .ins-swatch--amber { background: var(--insights-amber-soft, #fbe0a6); border: 1px solid var(--insights-amber, #d97706); }
+  .ins-swatch--curr { background: var(--primary-green); }
+  .ins-swatch--prev { background: var(--accent-soft); }
+  .ins-swatch--amber { background: var(--insights-amber-soft); border: 1px solid var(--insights-amber); }
   .ins-yoy-svg { width: 100%; height: auto; max-height: 240px; }
 
   .ins-lead-grid { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 16px; align-items: stretch; }
@@ -1305,31 +1397,31 @@ const INSIGHTS_CSS = `
 
   .ins-funnel-row { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 16px; align-items: stretch; }
   @media (max-width: 720px) { .ins-funnel-row { grid-template-columns: 1fr; } }
-  .ins-funnel-card { display: flex; align-items: center; gap: 16px; padding: 18px; background: var(--bg-secondary, #fafafa); border: 1px solid var(--border-color); border-radius: 8px; flex-wrap: wrap; }
+  .ins-funnel-card { display: flex; align-items: center; gap: 16px; padding: 18px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; flex-wrap: wrap; }
   .ins-funnel-step { flex: 1; min-width: 100px; text-align: center; }
   .ins-funnel-num { font-size: 32px; font-weight: 600; color: var(--text-primary); line-height: 1; }
   .ins-funnel-lbl { font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); margin-top: 6px; }
   .ins-funnel-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
   .ins-funnel-arrow { color: var(--text-muted); font-size: 20px; user-select: none; }
-  .ins-conv-card { padding: 18px; background: var(--bg-secondary, #fafafa); border: 1px solid var(--border-color); border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+  .ins-conv-card { padding: 18px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
   .ins-conv-num { font-size: 28px; font-weight: 600; color: var(--text-primary); }
   .ins-conv-lbl { font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); }
   .ins-donut { margin-top: 6px; }
   .ins-legend { font-size: 11px; color: var(--text-muted); margin-top: 8px; display: grid; gap: 4px; }
   .ins-legend > div { display: flex; align-items: center; gap: 6px; }
 
-  .ins-debtors { margin-top: 16px; padding: 12px 14px; background: var(--bg-secondary, #fafafa); border: 1px solid var(--border-color); border-radius: 8px; }
+  .ins-debtors { margin-top: 16px; padding: 12px 14px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; }
   .ins-debtors-head { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); padding-bottom: 8px; border-bottom: 1px solid var(--border-color); }
   .ins-debtor-row { display: flex; justify-content: space-between; padding: 10px 8px; font-size: 13px; border-bottom: 1px dashed var(--border-color); border-radius: 4px; }
   .ins-debtor-row:last-of-type { border-bottom: 0; }
   .ins-debtor-row--link { text-decoration: none; transition: background 0.12s; cursor: pointer; }
-  .ins-debtor-row--link:hover { background: rgba(42, 122, 58, 0.06); }
+  .ins-debtor-row--link:hover { background: var(--surface-hover); }
   .ins-debtor-row--link::after { content: '›'; color: var(--text-muted); margin-left: 8px; }
   .ins-debtor-name { color: var(--text-primary); }
-  .ins-debtor-bal { font-family: 'JetBrains Mono', ui-monospace, monospace; color: #b03337; font-weight: 600; }
+  .ins-debtor-bal { font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--color-danger); font-weight: 600; }
   .ins-debtor-footnote { padding-top: 10px; margin-top: 8px; border-top: 1px solid var(--border-color); font-size: 11px; color: var(--text-muted); font-style: italic; }
 
-  .ins-horizons { display: flex; flex-wrap: wrap; gap: 14px; align-items: baseline; padding: 10px 14px; margin-top: 12px; background: rgba(42, 122, 58, 0.04); border-left: 3px solid var(--primary-green, #2a7a3a); border-radius: 6px; font-size: 12px; }
+  .ins-horizons { display: flex; flex-wrap: wrap; gap: 14px; align-items: baseline; padding: 10px 14px; margin-top: 12px; background: var(--accent-soft); border-left: 3px solid var(--primary-green); border-radius: 6px; font-size: 12px; }
   .ins-horizons-label { font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); margin-right: 8px; }
   .ins-horizon { color: var(--text-primary); }
   .ins-horizon b { font-family: 'JetBrains Mono', ui-monospace, monospace; }
@@ -1345,7 +1437,7 @@ const INSIGHTS_CSS = `
   .ins-cashflow-tiles { align-content: start; }
 
   /* ── Stacked-by-source lead funnel ── */
-  .ins-source-funnel { display: flex; flex-direction: column; gap: 14px; padding: 18px; background: var(--bg-secondary, #fafafa); border: 1px solid var(--border-color); border-radius: 8px; }
+  .ins-source-funnel { display: flex; flex-direction: column; gap: 14px; padding: 18px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; }
   .ins-funnel-stage-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
   .ins-source-bar { display: flex; height: 22px; border-radius: 4px; overflow: hidden; background: var(--border-color); position: relative; }
   .ins-source-bar-seg { height: 100%; transition: width 0.2s; }
@@ -1354,14 +1446,14 @@ const INSIGHTS_CSS = `
   .ins-source-legend-item { display: inline-flex; align-items: center; gap: 5px; }
   .ins-source-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; }
   /* Source palette — distinct hues so stacked bars are readable. */
-  .ins-source-dot--website  { background: var(--primary-green, #2a7a3a); }
-  .ins-source-dot--phone    { background: #d97706; }
-  .ins-source-dot--email    { background: #1d4ed8; }
-  .ins-source-dot--referral { background: #9333ea; }
-  .ins-source-dot--other    { background: #475569; }
-  .ins-source-dot--direct   { background: #94a3b8; }
+  .ins-source-dot--website  { background: var(--insights-src-website); }
+  .ins-source-dot--phone    { background: var(--insights-src-phone); }
+  .ins-source-dot--email    { background: var(--insights-src-email); }
+  .ins-source-dot--referral { background: var(--insights-src-referral); }
+  .ins-source-dot--other    { background: var(--insights-src-other); }
+  .ins-source-dot--direct   { background: var(--insights-src-direct); }
 
-  .ins-source-conv { margin-top: 14px; padding: 12px 14px; background: var(--bg-secondary, #fafafa); border: 1px solid var(--border-color); border-radius: 8px; font-size: 13px; }
+  .ins-source-conv { margin-top: 14px; padding: 12px 14px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; font-size: 13px; }
   .ins-source-conv-head, .ins-source-conv-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 12px; padding: 8px 0; }
   .ins-source-conv-head { font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border-color); }
   .ins-source-conv-row { border-bottom: 1px dashed var(--border-color); }
