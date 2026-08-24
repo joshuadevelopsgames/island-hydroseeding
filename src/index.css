@@ -3140,6 +3140,41 @@ html.theme-dark .modal-overlay {
   outline-offset: 3px;
 }
 
+/* Stacked directly above the feedback fab (same right edge). */
+.scroll-top-fab {
+  position: fixed;
+  right: max(1rem, env(safe-area-inset-right, 0px));
+  bottom: calc(max(1rem, env(safe-area-inset-bottom, 0px)) + 4rem);
+  z-index: 380;
+  width: 3.25rem;
+  height: 3.25rem;
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: var(--surface-color);
+  box-shadow: var(--shadow-md);
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.scroll-top-fab:hover {
+  color: var(--text-primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lg);
+}
+
+.scroll-top-fab:focus-visible {
+  outline: 2px solid var(--lawn-green);
+  outline-offset: 3px;
+}
+
 .feedback-modal {
   max-width: min(440px, calc(100vw - 1.5rem));
 }

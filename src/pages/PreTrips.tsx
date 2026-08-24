@@ -24,6 +24,7 @@ import {
   type PretripType,
 } from '../lib/pretripsRemote';
 import { groupChecklist, failedItems } from '../lib/pretripChecklist';
+import { scrollMainToTop } from '../lib/mainScroll';
 import { downloadPretripPdf } from '../lib/pretripPdf';
 import ConfirmDialog from '../components/ConfirmDialog';
 
@@ -77,6 +78,12 @@ export default function PreTrips() {
       cancelled = true;
     };
   }, []);
+
+  // The form and the log list are two views of the same route — without a
+  // reset, closing the long form leaves the list scrolled to the bottom.
+  useEffect(() => {
+    scrollMainToTop();
+  }, [isFormOpen]);
 
   const openNewInspection = () => {
     setFormType('Truck');

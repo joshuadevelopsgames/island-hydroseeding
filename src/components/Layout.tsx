@@ -40,6 +40,7 @@ import FleetSyncBootstrap from './FleetSyncBootstrap';
 import OfflineApiQueueBootstrap from './OfflineApiQueueBootstrap';
 import OfflineBanner from './OfflineBanner';
 import PageConnectionStrip from './PageConnectionStrip';
+import ScrollToTopButton from './ScrollToTopButton';
 
 function sidebarUserInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -386,6 +387,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </main>
     </div>
+    <ScrollToTopButton />
     <FeedbackFab />
     </>
   );
