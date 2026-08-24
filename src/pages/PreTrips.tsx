@@ -663,7 +663,7 @@ export default function PreTrips() {
                       Action req
                     </span>
                   ) : (
-                    <span className="badge badge-green" style={{ flexShrink: 0 }}>
+                    <span className="badge badge-success" style={{ flexShrink: 0 }}>
                       Passed
                     </span>
                   )}
@@ -743,7 +743,7 @@ export default function PreTrips() {
                             Action req
                           </span>
                         ) : (
-                          <span className="badge badge-green">Passed</span>
+                          <span className="badge badge-success">Passed</span>
                         )}
                       </td>
                     </tr>
@@ -788,7 +788,7 @@ export default function PreTrips() {
                     Action req
                   </span>
                 ) : (
-                  <span className="badge badge-green">Passed</span>
+                  <span className="badge badge-success">Passed</span>
                 )}
                 <button type="button" className="btn-icon" onClick={() => setDetailLog(null)} aria-label="Close">
                   <X size={16} />

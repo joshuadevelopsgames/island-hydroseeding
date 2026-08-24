@@ -61,6 +61,7 @@
   --color-danger: #d70015;
   --color-danger-bg: rgba(215, 0, 21, 0.08);
   --color-success: #15803d;
+  --color-success-bg: rgba(21, 128, 61, 0.1);
   --color-warning: #b45309;
 }
 
@@ -96,6 +97,7 @@ html.theme-dark {
   --color-danger: #ff6b6b;
   --color-danger-bg: rgba(255, 107, 107, 0.12);
   --color-success: #4ade80;
+  --color-success-bg: rgba(74, 222, 128, 0.14);
   --color-warning: #fbbf24;
 }
 
@@ -1205,6 +1207,12 @@ html.theme-dark .theme-toggle-btn:hover {
 .badge-green {
   background-color: var(--light-green);
   color: var(--lawn-green);
+}
+
+/* Actual green — the "green" brand tokens above are Island Hydroseeding red. */
+.badge-success {
+  background-color: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .badge-gray {
